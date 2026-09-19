@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/StoryboardStudio.Api/StoryboardStudio.Api.csproj" />
+    <Project Path="src/StoryboardStudio.Core/StoryboardStudio.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/StoryboardStudio.Api.Tests/StoryboardStudio.Api.Tests.csproj" />
+  </Folder>
+</Solution>

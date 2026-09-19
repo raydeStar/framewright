@@ -1,0 +1,81 @@
+# .NET
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+test-results/
+
+# Front end
+**/node_modules/
+.voice-runtime/
+.qwen-voice-runtime/
+.yue2-runtime/
+src/StoryboardStudio.Api/wwwroot/
+src/storyboard-studio-web/playwright-report/
+src/storyboard-studio-web/test-results/
+.tmp-framewright-*.log
+.tmp/
+.framewright/
+.codex-log/
+# Unused binary left by the original Vite scaffold; intentionally excluded.
+src/storyboard-studio-web/src/assets/hero.png
+
+# Local Studio state
+**/App_Data/
+backups/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+**/auth.json
+**/*secret*
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Production and generated media never belong in this repository
+media/
+renders/
+outputs/
+output/
+**/__pycache__/
+*.py[cod]
+# Framewright owns a small, reviewed API-workflow library. Everything else in
+# this folder remains ignored so live ComfyUI exports cannot be swept in.
+workflows/*
+!workflows/README.md
+!workflows/library.json
+!workflows/text-draft.json
+!workflows/reference-draft.json
+!workflows/fast-draft.json
+!workflows/current-frame-edit.json
+!workflows/h3-video-i2v.json
+!workflows/h3-video-t2v.json
+models/
+checkpoints/
+loras/
+vae/
+*.safetensors
+*.ckpt
+*.gguf
+*.mp4
+*.mov
+*.wav
+*.flac
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.user
+*.suo

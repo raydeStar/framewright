@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <Deterministic>true</Deterministic>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <FramewrightVersion Condition="'$(FramewrightVersion)' == ''">development</FramewrightVersion>
+    <FramewrightCommit Condition="'$(FramewrightCommit)' == ''">unknown</FramewrightCommit>
+    <FramewrightBuiltAtUtc Condition="'$(FramewrightBuiltAtUtc)' == ''">unknown</FramewrightBuiltAtUtc>
+    <FramewrightChannel Condition="'$(FramewrightChannel)' == ''">development</FramewrightChannel>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="FramewrightVersion" Value="$(FramewrightVersion)" />
+    <AssemblyMetadata Include="FramewrightCommit" Value="$(FramewrightCommit)" />
+    <AssemblyMetadata Include="FramewrightBuiltAtUtc" Value="$(FramewrightBuiltAtUtc)" />
+    <AssemblyMetadata Include="FramewrightChannel" Value="$(FramewrightChannel)" />
+  </ItemGroup>
+</Project>

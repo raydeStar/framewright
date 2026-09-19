@@ -1,0 +1,203 @@
+{
+  "$comment": "Index of every workflow Storyboard Studio can dispatch. Adding a workflow means adding a file next to this one and an entry here. StudioWorkflowLibrary validates every entry at startup and in the test suite, so a malformed workflow fails the build instead of a live render. See README.md.",
+  "version": 1,
+  "workflows": [
+    {
+      "id": "text-draft",
+      "name": "ComfyUI Text Draft",
+      "file": "text-draft.json",
+      "kind": "Image",
+      "configKey": "Integrations:ComfyUi:ExternalTextWorkflowPath",
+      "summary": "Generates a storyboard frame directly from shot intent, authority references, camera guidance and locked constraints. No sketch is required. The installed fast workflow keeps the first pass quick.",
+      "requiredPlaceholders": ["{{PROMPT}}", "{{SEED}}"],
+      "optionalPlaceholders": ["{{NEGATIVE_PROMPT}}", "{{REFERENCE_IMAGE_1}}", "{{REFERENCE_IMAGE_2}}", "{{REFERENCE_IMAGE_3}}"],
+      "requiredNodeTypes": ["UNETLoader", "LoraLoaderModelOnly", "ModelSamplingAuraFlow", "CLIPLoader", "VAELoader", "TextEncodeQwenImageEditPlus", "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage"],
+      "requiredModels": {
+        "UNETLoader.unet_name": "qwen_image_2512_fp8_e4m3fn.safetensors",
+        "LoraLoaderModelOnly.lora_name": "Qwen\\Wuli-Qwen-Image-2512-Turbo-LoRA-4steps-V1.0-bf16_ComfyUi.safetensors",
+        "CLIPLoader.clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "VAELoader.vae_name": "qwen_image_vae.safetensors"
+      },
+      "outputs": "image",
+      "capabilities": ["text-to-image", "multi-reference", "project-canvas"],
+      "maxReferenceImages": 3
+    },
+    {
+      "id": "reference-draft",
+      "name": "ComfyUI Reference Compose",
+      "file": "reference-draft.json",
+      "kind": "Image",
+      "configKey": "Integrations:ComfyUi:ExternalReferenceWorkflowPath",
+      "summary": "Synthesizes a new frame from up to three approved visual authorities when no sketch or current frame is selected. The authority images condition the edit model directly instead of becoming a collage layout.",
+      "requiredPlaceholders": ["{{PROMPT}}", "{{SEED}}"],
+      "optionalPlaceholders": ["{{NEGATIVE_PROMPT}}", "{{REFERENCE_IMAGE_1}}", "{{REFERENCE_IMAGE_2}}", "{{REFERENCE_IMAGE_3}}"],
+      "requiredNodeTypes": ["UNETLoader", "LoraLoaderModelOnly", "ModelSamplingAuraFlow", "CLIPLoader", "VAELoader", "LoadImage", "TextEncodeQwenImageEditPlus", "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage"],
+      "requiredModels": {
+        "UNETLoader.unet_name": "qwen_image_edit_2511_fp8_e4m3fn.safetensors",
+        "LoraLoaderModelOnly.lora_name": "Qwen\\Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "CLIPLoader.clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "VAELoader.vae_name": "qwen_image_vae.safetensors"
+      },
+      "outputs": "image",
+      "capabilities": ["text-to-image", "multi-reference", "project-canvas"],
+      "maxReferenceImages": 3
+    },
+    {
+      "id": "current-frame-edit",
+      "name": "ComfyUI Current Frame Edit",
+      "file": "current-frame-edit.json",
+      "kind": "Image",
+      "configKey": "Integrations:ComfyUi:ExternalCurrentFrameWorkflowPath",
+      "summary": "Revises the selected generated frame with the installed Qwen edit quality baseline. The selected frame is the sole composition reference; only explicitly pinned authority images are added.",
+      "requiredPlaceholders": ["{{PROMPT}}", "{{INPUT_IMAGE}}", "{{SEED}}"],
+      "optionalPlaceholders": ["{{NEGATIVE_PROMPT}}", "{{REFERENCE_IMAGE_1}}", "{{REFERENCE_IMAGE_2}}"],
+      "requiredNodeTypes": ["UNETLoader", "ModelSamplingAuraFlow", "CFGNorm", "CLIPLoader", "VAELoader", "LoadImage", "FluxKontextImageScale", "TextEncodeQwenImageEditPlus", "FluxKontextMultiReferenceLatentMethod", "VAEEncode", "KSampler", "VAEDecode", "SaveImage"],
+      "requiredModels": {
+        "UNETLoader.unet_name": "qwen_image_edit_2511_fp8_e4m3fn.safetensors",
+        "CLIPLoader.clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "VAELoader.vae_name": "qwen_image_vae.safetensors"
+      },
+      "outputs": "image",
+      "capabilities": ["image-edit", "multi-reference", "project-canvas"],
+      "maxReferenceImages": 2
+    },
+    {
+      "id": "fast-draft",
+      "name": "ComfyUI Image Edit",
+      "file": "fast-draft.json",
+      "kind": "Image",
+      "configKey": "Integrations:ComfyUi:ExternalWorkflowPath",
+      "summary": "Turns a stick-figure composition sketch into a rendered frame while keeping the blocking, framing and camera. The installed fast edit workflow is tuned for inexpensive iteration.",
+      "requiredPlaceholders": [
+        "{{PROMPT}}",
+        "{{INPUT_IMAGE}}",
+        "{{SEED}}"
+      ],
+      "optionalPlaceholders": [
+        "{{NEGATIVE_PROMPT}}",
+        "{{REFERENCE_IMAGE_1}}",
+        "{{REFERENCE_IMAGE_2}}"
+      ],
+      "requiredNodeTypes": [
+        "UNETLoader",
+        "LoraLoaderModelOnly",
+        "ModelSamplingAuraFlow",
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "ImageScaleToTotalPixels",
+        "TextEncodeQwenImageEditPlus",
+        "FluxKontextMultiReferenceLatentMethod",
+        "VAEEncode",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage"
+      ],
+      "requiredModels": {
+        "UNETLoader.unet_name": "qwen_image_edit_2511_fp8_e4m3fn.safetensors",
+        "LoraLoaderModelOnly.lora_name": "Qwen\\Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "CLIPLoader.clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "VAELoader.vae_name": "qwen_image_vae.safetensors"
+      },
+      "outputs": "image",
+      "capabilities": ["sketch-to-image", "multi-reference", "project-canvas"],
+      "maxReferenceImages": 2
+    },
+    {
+      "id": "h3-video-i2v",
+      "name": "H3 video — image to video",
+      "file": "h3-video-i2v.json",
+      "kind": "Video",
+      "configKey": "Integrations:ComfyUi:ExternalVideoWorkflowPath",
+      "summary": "Animates a ratified still. A last frame is optional: attach one for two-anchor control, or leave it off and the last-frame node is pruned before dispatch. Silent by design — audio stays on its own editorial lanes.",
+      "requiredPlaceholders": [
+        "{{PROMPT}}",
+        "{{INPUT_IMAGE}}",
+        "{{SEED}}",
+        "{{VIDEO_WIDTH}}",
+        "{{VIDEO_HEIGHT}}",
+        "{{VIDEO_STEPS}}",
+        "{{VIDEO_OUTPUT_WIDTH}}",
+        "{{VIDEO_OUTPUT_HEIGHT}}",
+        "{{VIDEO_FPS}}",
+        "{{VIDEO_LENGTH}}",
+        "{{VIDEO_FILENAME_PREFIX}}"
+      ],
+      "optionalPlaceholders": [
+        "{{LAST_FRAME_IMAGE}}"
+      ],
+      "requiredNodeTypes": [
+        "UNETLoader",
+        "MiniMaxH3SigmaShift",
+        "CLIPLoader",
+        "VAELoader",
+        "MiniMaxH3ImageToVideo",
+        "BasicGuider",
+        "KSamplerSelect",
+        "BasicScheduler",
+        "RandomNoise",
+        "SamplerCustomAdvanced",
+        "VAEDecode",
+        "ImageFromBatch",
+        "ImageScale",
+        "CreateVideo",
+        "SaveVideo",
+        "LoadImage"
+      ],
+      "requiredModels": {
+        "UNETLoader.unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "CLIPLoader.clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "VAELoader.vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      },
+      "outputs": "video",
+      "capabilities": ["image-to-video", "first-frame", "last-frame-optional", "project-canvas", "silent-video"],
+      "maxReferenceImages": 0
+    },
+    {
+      "id": "h3-video-t2v",
+      "name": "H3 video — text to video",
+      "file": "h3-video-t2v.json",
+      "kind": "Video",
+      "configKey": "Integrations:ComfyUi:ExternalVideoWorkflowPath",
+      "summary": "Generates motion from the brief alone, with no frame anchor. Use when no ratified still exists yet, or for a plate the shot will cut to.",
+      "requiredPlaceholders": [
+        "{{PROMPT}}",
+        "{{SEED}}",
+        "{{VIDEO_WIDTH}}",
+        "{{VIDEO_HEIGHT}}",
+        "{{VIDEO_STEPS}}",
+        "{{VIDEO_OUTPUT_WIDTH}}",
+        "{{VIDEO_OUTPUT_HEIGHT}}",
+        "{{VIDEO_FPS}}",
+        "{{VIDEO_LENGTH}}",
+        "{{VIDEO_FILENAME_PREFIX}}"
+      ],
+      "optionalPlaceholders": [],
+      "requiredNodeTypes": [
+        "UNETLoader",
+        "MiniMaxH3SigmaShift",
+        "CLIPLoader",
+        "VAELoader",
+        "MiniMaxH3ImageToVideo",
+        "BasicGuider",
+        "KSamplerSelect",
+        "BasicScheduler",
+        "RandomNoise",
+        "SamplerCustomAdvanced",
+        "VAEDecode",
+        "ImageFromBatch",
+        "ImageScale",
+        "CreateVideo",
+        "SaveVideo"
+      ],
+      "requiredModels": {
+        "UNETLoader.unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "CLIPLoader.clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "VAELoader.vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      },
+      "outputs": "video",
+      "capabilities": ["text-to-video", "project-canvas", "silent-video"],
+      "maxReferenceImages": 0
+    }
+  ]
+}

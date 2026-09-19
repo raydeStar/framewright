@@ -1,0 +1,240 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and test
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      CI: "true"
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/storyboard-studio-web/package-lock.json
+
+      - name: Restore .NET dependencies
+        run: dotnet restore Framewright.slnx --locked-mode
+
+      - name: Audit public release contents
+        shell: powershell
+        run: .\scripts\public-release-audit.ps1
+
+      - name: Install web dependencies
+        working-directory: src/storyboard-studio-web
+        run: npm ci
+
+      - name: Audit web dependencies
+        working-directory: src/storyboard-studio-web
+        run: npm audit --audit-level=high
+
+      - name: Check web source
+        working-directory: src/storyboard-studio-web
+        run: npm run check
+
+      - name: Build web application
+        working-directory: src/storyboard-studio-web
+        run: npm run build
+
+      - name: Build API
+        run: dotnet build Framewright.slnx --configuration Release --no-restore --warnaserror
+
+      - name: Test local voice bootstrap contracts
+        run: python -m unittest discover -s tools/voice/tests -v
+
+      - name: Test exact backup restore and rollback
+        shell: powershell
+        run: .\scripts\tests\restore-backup.tests.ps1
+
+      - name: Test Docker-unavailable launcher fallback
+        shell: powershell
+        run: .\scripts\tests\start-launcher.tests.ps1
+
+      - name: Test Docker environment merge
+        shell: powershell
+        run: .\scripts\tests\docker-env.tests.ps1
+
+      - name: Test guided setup safety contracts
+        shell: powershell
+        run: .\scripts\tests\setup.tests.ps1
+
+      - name: Test voice worker PID ownership
+        shell: powershell
+        run: .\scripts\tests\voice-worker-pid.tests.ps1
+
+      - name: Test API
+        run: dotnet test Framewright.slnx --configuration Release --no-build --no-restore --collect:"XPlat Code Coverage" --results-directory artifacts/test-results
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: api-test-evidence
+          path: artifacts/test-results
+          if-no-files-found: ignore
+
+  browser:
+    name: Browser acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/storyboard-studio-web/package-lock.json
+
+      - name: Restore API
+        run: dotnet restore Framewright.slnx --locked-mode
+
+      - name: Install web dependencies
+        working-directory: src/storyboard-studio-web
+        run: npm ci
+
+      - name: Build the exact browser-test bundle
+        working-directory: src/storyboard-studio-web
+        run: npm run build
+
+      - name: Install isolated browsers
+        working-directory: src/storyboard-studio-web
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run artist-flow acceptance tests
+        working-directory: src/storyboard-studio-web
+        run: npm run test:e2e
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: browser-test-evidence
+          path: |
+            src/storyboard-studio-web/playwright-report
+            src/storyboard-studio-web/test-results
+          if-no-files-found: ignore
+
+  container:
+    name: Container runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Verify optional direct GPT Image environment injection
+        shell: bash
+        run: |
+          OPENAI_API_KEY=framewright-ci-placeholder \
+          FRAMEWRIGHT_VOICE_WORKER_TOKEN=framewright-ci-placeholder \
+          FRAMEWRIGHT_COMFYUI_STILLS_ENABLED=true \
+          docker compose config > compose.resolved.yml
+          grep -q 'OPENAI_API_KEY: framewright-ci-placeholder' compose.resolved.yml
+          grep -q 'Integrations__ComfyUi__SubmissionEnabled: "true"' compose.resolved.yml
+
+      - name: Build release container
+        shell: bash
+        run: |
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          docker build --tag framewright:${{ github.sha }} \
+            --build-arg FRAMEWRIGHT_VERSION=0.1.0-rc.1 \
+            --build-arg FRAMEWRIGHT_COMMIT=${{ github.sha }} \
+            --build-arg FRAMEWRIGHT_BUILT_AT_UTC="$built_at" \
+            --build-arg FRAMEWRIGHT_CHANNEL=release-candidate .
+
+      - name: Exercise health, writable storage, and restart persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/docker-data
+          docker run --detach --name framewright-ci \
+            --publish 127.0.0.1:5179:8080 \
+            --volume "$PWD/artifacts/docker-data:/data" \
+            --env Studio__Backups__Enabled=true \
+            --env QwenTts__Enabled=false \
+            --env Integrations__ComfyUi__SubmissionEnabled=false \
+            --env Integrations__ComfyUi__VideoSubmissionEnabled=false \
+            --env YuE2__Enabled=false \
+            --env Integrations__Codex__NonInteractiveImageEnabled=false \
+            framewright:${{ github.sha }}
+          for attempt in $(seq 1 80); do
+            if docker exec framewright-ci curl --fail --silent http://127.0.0.1:8080/health/live >/dev/null && \
+               docker exec framewright-ci curl --fail --silent http://127.0.0.1:8080/health/ready >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 80 ]; then
+              docker logs framewright-ci
+              exit 1
+            fi
+            sleep 1
+          done
+          health_commit="$(docker exec framewright-ci curl --fail --silent http://127.0.0.1:8080/health/live | python -c 'import json,sys; print(json.load(sys.stdin)["build"]["commit"])')"
+          image_commit="$(docker image inspect framewright:${{ github.sha }} --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+          test "$health_commit" = "${{ github.sha }}"
+          test "$image_commit" = "${{ github.sha }}"
+          app_uid="$(docker exec framewright-ci sh -lc "awk '/^Uid:/{print \$2}' /proc/1/status")"
+          test "$app_uid" != "0"
+          docker exec --user 1654:1654 framewright-ci sh -lc 'test -w /data -a -w /data/assets/.staging -a -w /data/backups && touch /data/ci-persistence-marker'
+          # The entrypoint deliberately transfers the bind mount to UID 1654.
+          # On Linux the host runner may therefore lose traversal permission;
+          # inspect the production boundary through the application identity.
+          docker exec --user 1654:1654 framewright-ci test -f /data/storyboard-studio.db
+          docker restart framewright-ci
+          for attempt in $(seq 1 80); do
+            if docker exec framewright-ci curl --fail --silent http://127.0.0.1:8080/health/live >/dev/null && \
+               docker exec framewright-ci curl --fail --silent http://127.0.0.1:8080/health/ready >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 80 ]; then
+              docker logs framewright-ci
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec framewright-ci test -f /data/ci-persistence-marker
+
+      - name: Capture container diagnostics
+        if: always()
+        run: docker logs framewright-ci || true
+
+      - name: Stop runtime smoke container
+        if: always()
+        run: docker rm --force framewright-ci || true

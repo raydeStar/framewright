@@ -1,0 +1,78 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "Qwen Image 2512" },
+    "inputs": { "unet_name": "qwen_image_2512_fp8_e4m3fn.safetensors", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "Qwen Image 2512 turbo · 4 steps" },
+    "inputs": { "model": ["1", 0], "lora_name": "Qwen\\Wuli-Qwen-Image-2512-Turbo-LoRA-4steps-V1.0-bf16_ComfyUi.safetensors", "strength_model": 1.0 }
+  },
+  "3": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": { "model": ["2", 0], "shift": 3.1 }
+  },
+  "4": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image", "device": "default" }
+  },
+  "5": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "qwen_image_vae.safetensors" }
+  },
+  "12": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Approved authority reference 1" },
+    "inputs": { "image": "{{REFERENCE_IMAGE_1}}" }
+  },
+  "13": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Approved authority reference 2" },
+    "inputs": { "image": "{{REFERENCE_IMAGE_2}}" }
+  },
+  "14": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Approved authority reference 3" },
+    "inputs": { "image": "{{REFERENCE_IMAGE_3}}" }
+  },
+  "6": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": { "title": "Positive · shot card and authorities" },
+    "inputs": { "clip": ["4", 0], "prompt": "{{PROMPT}}", "vae": ["5", 0], "image1": ["12", 0], "image2": ["13", 0], "image3": ["14", 0] }
+  },
+  "7": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": { "title": "Negative" },
+    "inputs": { "clip": ["4", 0], "prompt": "{{NEGATIVE_PROMPT}}", "vae": ["5", 0], "image1": ["12", 0], "image2": ["13", 0], "image3": ["14", 0] }
+  },
+  "8": {
+    "class_type": "EmptySD3LatentImage",
+    "_meta": { "title": "16:9 storyboard frame" },
+    "inputs": { "width": 1344, "height": 768, "batch_size": 1 }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "_meta": { "title": "Fast text draft · 4 steps" },
+    "inputs": {
+      "model": ["3", 0],
+      "seed": "{{SEED}}",
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["8", 0],
+      "denoise": 1.0
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["9", 0], "vae": ["5", 0] }
+  },
+  "11": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["10", 0], "filename_prefix": "framewright/text-draft" }
+  }
+}

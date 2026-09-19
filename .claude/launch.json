@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "framewright",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "src/StoryboardStudio.Api/StoryboardStudio.Api.csproj",
+        "--no-launch-profile"
+      ],
+      "port": 5179
+    }
+  ]
+}

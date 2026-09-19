@@ -1,0 +1,1050 @@
+using System.Text.Json.Serialization;
+
+namespace StoryboardStudio.Core;
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ShotStage
+{
+    Sketch,
+    Draft,
+    Final,
+    Video
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ApprovalState
+{
+    Working,
+    NeedsWork,
+    Ratified
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum IntegrationState
+{
+    Connected,
+    Ready,
+    NeedsSetup,
+    Offline,
+    Protected
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum JobState
+{
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Cancelled
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum GenerationRoute
+{
+    FastDraft,
+    PrecisionDraft
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum GenerationPurpose
+{
+    Draft,
+    Final,
+    Video
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum VideoQuality
+{
+    Low,
+    Medium,
+    High,
+    Max
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ManifestState
+{
+    Prepared,
+    Dispatched,
+    Completed,
+    Failed,
+    Cancelled
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum AssetKind
+{
+    Image,
+    Video,
+    Audio
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ContinuityCheckState
+{
+    Pass,
+    Info,
+    Review,
+    Block
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum VisualAuditSeverity
+{
+    Review,
+    Block
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum VisualCorrectionRoute
+{
+    RefineCurrent,
+    RebuildFromSketch
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum VisualReconciliationAction
+{
+    FixImage,
+    AdoptImage,
+    DecideLater
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TimelineTrackKind
+{
+    Dialogue,
+    Voice,
+    Music
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum VoiceProfileKind
+{
+    ProviderPreset,
+    ConsentedClone
+}
+
+public static class StudioDefaults
+{
+    public static readonly Guid ProjectId = Guid.Parse("2e883b13-6cc6-46e2-b9ed-f9c3aac6c5ec");
+
+    public const string VisualStyle = "Prestige stylized animation with painterly cel shading, hand-painted textures, graphic shape language, controlled linework, expressive faces, and cinematic lighting. Aim for the visual qualities of premium adult animated drama without imitating a specific copyrighted character or frame.";
+    public const string WorldCanon = "Skychasers is an arcane civic-fantasy world of monumental stone architecture, ceremonial technology, suspended structures, sculpted haze, oxidized metals, and restrained magical light. World features remain canon when they are outside the shot crop.";
+    public const string PromptDirectives = "Preserve approved character identity, wardrobe, props, architecture, and shot blocking. Treat face and wardrobe authorities as separate compatible layers. Preserve distinctive marks and asymmetric features on the subject's specified anatomical side. Render characters as designed animation models with intentional silhouettes and simplified, expressive anatomy. Keep materials painterly and shapes readable.";
+    public const string NegativeDirectives = "No photoreal live-action people, glossy game-engine rendering, waxy skin, generic cosplay photography, neon sci-fi bloom, literal stick figures, interface chrome, watermarks, or unintended text.";
+}
+
+public sealed record ProjectSummary(
+    Guid Id,
+    string Name,
+    string Production,
+    string SequenceCode,
+    string SequenceName,
+    int FramesPerSecond,
+    string AspectRatio,
+    int DeliveryWidth,
+    int DeliveryHeight,
+    string VisualStyle,
+    string WorldCanon,
+    string PromptDirectives,
+    string NegativeDirectives,
+    DateTimeOffset UpdatedAt = default,
+    string ColorSpace = "Rec.709",
+    int AudioSampleRate = 48000);
+
+public sealed record UpdateProjectRequest(
+    DateTimeOffset ExpectedUpdatedAt,
+    string Name,
+    string Production,
+    string SequenceCode,
+    string SequenceName,
+    int FramesPerSecond,
+    string AspectRatio,
+    int DeliveryWidth,
+    int DeliveryHeight,
+    string VisualStyle,
+    string WorldCanon,
+    string PromptDirectives,
+    string NegativeDirectives,
+    string ColorSpace = "Rec.709",
+    int AudioSampleRate = 48000);
+
+/// <summary>
+/// One row in the project switcher. Carries the counts the artist needs to tell
+/// two productions apart at a glance without opening either.
+/// </summary>
+public sealed record ProjectListItem(
+    Guid Id,
+    string Name,
+    string Production,
+    string SequenceCode,
+    string SequenceName,
+    int ShotCount,
+    int AuthorityCount,
+    bool IsActive,
+    DateTimeOffset UpdatedAt);
+
+/// <summary>
+/// Creates a project. World settings are deliberately optional: a new production
+/// starts from the studio defaults and the artist (or the Codex interview) refines
+/// them afterwards, rather than being made to write four essays up front.
+/// </summary>
+public sealed record CreateProjectRequest(
+    string Name,
+    string Production,
+    string SequenceCode,
+    string SequenceName,
+    int FramesPerSecond,
+    string AspectRatio,
+    int DeliveryWidth,
+    int DeliveryHeight,
+    string? VisualStyle = null,
+    string? WorldCanon = null,
+    string? PromptDirectives = null,
+    string? NegativeDirectives = null,
+    string ColorSpace = "Rec.709",
+    int AudioSampleRate = 48000);
+
+/// <summary>
+/// The artist's answers to the project interview. Four plain-language questions
+/// rather than a form: what this is, what it looks like, who is in it, and what is
+/// already locked.
+/// </summary>
+public sealed record ProjectInterviewRequest(
+    string Kind,
+    string Look,
+    string Cast,
+    string Locked);
+
+/// <summary>
+/// A proposed starter authority. Deliberately shaped like the fields
+/// <c>POST /api/references</c> accepts, so ratifying it is an ordinary create and
+/// not a special path that bypasses review.
+/// </summary>
+public sealed record ProposedAuthority(
+    string Name,
+    string Category,
+    string Description,
+    string LockedConstraint,
+    string Accent);
+
+/// <summary>
+/// What Codex proposes for a new project.
+///
+/// A proposal, never an application: nothing here is written until the artist
+/// ratifies it. Every other Codex integration in this codebase advises while the
+/// human ratifies, and a wizard that silently wrote world canon would be the one
+/// place that boundary broke.
+/// </summary>
+public sealed record ProjectInterviewProposal(
+    string Name,
+    string Production,
+    string SequenceCode,
+    string SequenceName,
+    int FramesPerSecond,
+    string AspectRatio,
+    int DeliveryWidth,
+    int DeliveryHeight,
+    string VisualStyle,
+    string WorldCanon,
+    string PromptDirectives,
+    string NegativeDirectives,
+    IReadOnlyList<ProposedAuthority> StarterAuthorities,
+    string Rationale,
+    bool Live,
+    string Detail);
+
+/// <summary>
+/// A library authority as the active project sees it.
+///
+/// The import fields describe this project's relationship to it, which is what makes
+/// the list actionable: not yet imported, imported at the current version, or
+/// imported at an older one and therefore pullable.
+/// </summary>
+public sealed record LibraryAuthoritySummary(
+    Guid Id,
+    string Slug,
+    string Name,
+    string Category,
+    int Version,
+    string Description,
+    string LockedConstraint,
+    string Accent,
+    int VisualVariant,
+    string? ImageUrl,
+    DateTimeOffset UpdatedAt,
+    string? ImportedAsReferenceId,
+    int? ImportedVersion,
+    bool UpdateAvailable);
+
+public sealed record LibraryAuthorityVersionSummary(
+    Guid Id,
+    Guid LibraryAuthorityId,
+    int Version,
+    string Description,
+    string LockedConstraint,
+    string? ImageUrl,
+    string ContentHash,
+    DateTimeOffset RatifiedAt,
+    Guid? OriginProjectId);
+
+/// <summary>
+/// An authority in the active project, plus where it came from. Provenance is what
+/// turns "port quickly" into an explicit act rather than a silent divergence.
+/// </summary>
+public sealed record ImportedAuthoritySummary(
+    ReferenceSummary Reference,
+    Guid? OriginLibraryId,
+    int? OriginVersion,
+    int? LibraryVersion,
+    bool UpdateAvailable);
+
+public sealed record ReorderShotsRequest(IReadOnlyList<Guid> ShotIds);
+
+public sealed record ShotSummary(
+    Guid Id,
+    string Code,
+    string Title,
+    string Description,
+    ShotStage Stage,
+    ApprovalState Approval,
+    int Version,
+    int DurationFrames,
+    int SortOrder,
+    int VisualVariant,
+    int OpenComments,
+    string ContinuityState,
+    string Camera,
+    string Action,
+    IReadOnlyList<string> ReferenceIds,
+    IReadOnlyList<string> Constraints,
+    DateTimeOffset UpdatedAt,
+    Guid? CurrentAssetId = null,
+    string? CurrentAssetUrl = null,
+    Guid? VideoFirstFrameCandidateId = null,
+    Guid? VideoLastFrameCandidateId = null,
+    Guid? ProductionVideoJobId = null,
+    Guid? ProductionVideoAssetId = null,
+    string? ProductionVideoAssetUrl = null);
+
+public sealed record UpdateVideoEndpointsRequest(
+    DateTimeOffset ExpectedUpdatedAt,
+    Guid? FirstFrameCandidateId = null,
+    Guid? LastFrameCandidateId = null);
+
+public sealed record ReferenceSummary(
+    string Id,
+    string Name,
+    string Category,
+    string Description,
+    int Version,
+    string Status,
+    string Accent,
+    string LockedConstraint,
+    int VisualVariant,
+    Guid? ImageAssetId = null,
+    string? ImageUrl = null);
+
+public sealed record CreateReferenceRequest(
+    string Name,
+    string Category,
+    string Description,
+    string LockedConstraint,
+    string Accent,
+    Guid? ImageAssetId = null);
+
+public sealed record CreateReferenceVersionRequest(
+    int ExpectedVersion,
+    string Description,
+    string LockedConstraint,
+    Guid? ImageAssetId = null);
+
+public sealed record ReferenceVersionSummary(
+    Guid Id,
+    string ReferenceId,
+    int Version,
+    string Description,
+    string LockedConstraint,
+    Guid? ImageAssetId,
+    string? ImageUrl,
+    string ContentHash,
+    DateTimeOffset RatifiedAt);
+
+public sealed record CreateShotRequest(
+    string Code,
+    string Title,
+    string Description,
+    int DurationFrames,
+    string Camera,
+    string Action,
+    IReadOnlyList<string> ReferenceIds,
+    IReadOnlyList<string> Constraints,
+    Guid? InitialImageAssetId = null);
+
+public sealed record SuggestShotIntentRequest(string Description);
+
+public sealed record ShotIntentSuggestion(
+    string Title,
+    string Description,
+    int DurationFrames,
+    string Camera,
+    string Action,
+    IReadOnlyList<string> ReferenceIds,
+    IReadOnlyList<string> Constraints,
+    bool Live,
+    string Detail);
+
+public sealed record UpdateShotRequest(
+    DateTimeOffset ExpectedUpdatedAt,
+    string Title,
+    string Description,
+    int DurationFrames,
+    string Camera,
+    string Action,
+    IReadOnlyList<string> ReferenceIds,
+    IReadOnlyList<string> Constraints);
+
+public sealed record CommentSummary(
+    Guid Id,
+    Guid ShotId,
+    int Version,
+    double X,
+    double Y,
+    string Body,
+    string State,
+    DateTimeOffset CreatedAt,
+    string? ReferenceId = null,
+    int? ReferenceVersion = null);
+
+/// <summary>
+/// A spatial review instruction bound to one immutable image asset. The same
+/// note is visible from an authority revision and the standalone image studio.
+/// </summary>
+public sealed record AssetReviewNoteSummary(
+    Guid Id,
+    Guid AssetId,
+    double X,
+    double Y,
+    string Body,
+    string State,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreateAssetReviewNoteRequest(double X, double Y, string Body);
+
+public sealed record MoveCommentRequest(double X, double Y);
+
+public sealed record PromoteCandidateRequest(int ExpectedCurrentVersion);
+
+public sealed record ShotVersionSummary(
+    Guid Id,
+    Guid ShotId,
+    int Version,
+    ShotStage Stage,
+    ApprovalState Approval,
+    int VisualVariant,
+    string ManifestHash,
+    DateTimeOffset RatifiedAt,
+    Guid? AssetId = null,
+    string? AssetUrl = null,
+    Guid? ProductionVideoJobId = null,
+    Guid? ProductionVideoAssetId = null,
+    string? ProductionVideoAssetUrl = null,
+    string Code = "",
+    string Title = "",
+    string Description = "",
+    int DurationFrames = 1,
+    string Camera = "",
+    string Action = "",
+    Guid? VideoFirstFrameCandidateId = null,
+    Guid? VideoLastFrameCandidateId = null);
+
+public sealed record CandidateVersionSummary(
+    Guid Id,
+    Guid ShotId,
+    int Version,
+    ShotStage Stage,
+    ApprovalState Approval,
+    bool IsCurrent,
+    Guid? AssetId,
+    string? AssetUrl,
+    Guid? SourceManifestId,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? SupersededAt,
+    int? Width = null,
+    int? Height = null);
+
+public sealed record ContinuityCheckSummary(
+    string Id,
+    Guid ShotId,
+    ContinuityCheckState State,
+    string Category,
+    string Title,
+    string Detail,
+    string Evidence,
+    bool RequiresVisualReview = false);
+
+public sealed record ShotContinuityReport(
+    Guid ShotId,
+    string ShotCode,
+    int Version,
+    string GateState,
+    IReadOnlyList<ContinuityCheckSummary> Checks,
+    DateTimeOffset EvaluatedAt,
+    string ScopeNote);
+
+public sealed record VisualAuditFindingSummary(
+    string Id,
+    string Category,
+    VisualAuditSeverity Severity,
+    string Title,
+    string ContractExpectation,
+    string ObservedImage,
+    double Confidence,
+    VisualCorrectionRoute SuggestedRoute,
+    string FixInstruction);
+
+public sealed record ShotContractProposal(
+    string Description,
+    string Action,
+    IReadOnlyList<string> Constraints,
+    IReadOnlyList<string> ReferenceIds,
+    string Rationale);
+
+public sealed record VisualAuditDecisionSummary(
+    string FindingId,
+    VisualReconciliationAction Action,
+    string MoreDetails);
+
+public sealed record ShotVisualAuditSummary(
+    Guid Id,
+    Guid ShotId,
+    int ShotVersion,
+    Guid AssetId,
+    string AssetHash,
+    string ContractHash,
+    string State,
+    string GateState,
+    string Summary,
+    IReadOnlyList<VisualAuditFindingSummary> Findings,
+    IReadOnlyList<VisualAuditDecisionSummary> Decisions,
+    ShotContractProposal? AdoptedShotProposal,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt,
+    string ScopeNote);
+
+public sealed record RunVisualAuditRequest(bool Force = false);
+
+public sealed record VisualAuditDecisionRequest(
+    string FindingId,
+    VisualReconciliationAction Action,
+    string MoreDetails = "");
+
+public sealed record ReconcileVisualAuditRequest(
+    IReadOnlyList<VisualAuditDecisionRequest> Decisions,
+    bool ApplyContract = false);
+
+public sealed record VisualReconciliationPlan(
+    ShotVisualAuditSummary Audit,
+    bool ContractApplied,
+    bool RequiresImageGeneration,
+    VisualCorrectionRoute? ImageRoute,
+    string GenerationDirection,
+    ShotSummary? UpdatedShot,
+    string Detail);
+
+public sealed record TimelineClipSummary(
+    Guid Id,
+    TimelineTrackKind Track,
+    string Label,
+    int StartFrame,
+    int DurationFrames,
+    double TrimStartSeconds,
+    double Volume,
+    Guid? AssetId,
+    string? AssetUrl,
+    Guid? VoiceProfileId,
+    string Text,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record SaveTimelineClipRequest(
+    TimelineTrackKind Track,
+    string Label,
+    int StartFrame,
+    int DurationFrames,
+    double TrimStartSeconds,
+    double Volume,
+    Guid? AssetId,
+    Guid? VoiceProfileId,
+    string Text,
+    DateTimeOffset? ExpectedUpdatedAt = null);
+
+public sealed record VoiceProfileSummary(
+    Guid Id,
+    string Name,
+    VoiceProfileKind Kind,
+    string Provider,
+    string ProviderVoiceId,
+    string CharacterName,
+    string ConsentAttestation,
+    DateTimeOffset? ConsentedAt,
+    DateTimeOffset CreatedAt,
+    string? CharacterReferenceId = null,
+    Guid? SampleAssetId = null,
+    string? SampleAssetUrl = null);
+
+public sealed record CreateVoiceProfileRequest(
+    string Name,
+    VoiceProfileKind Kind,
+    string Provider,
+    string ProviderVoiceId,
+    string CharacterName,
+    bool ConsentConfirmed,
+    string ConsentAttestation,
+    string? CharacterReferenceId = null,
+    Guid? SampleAssetId = null);
+
+public sealed record VoiceSynthesisStatus(
+    bool Enabled,
+    bool CredentialConfigured,
+    bool CanSynthesize,
+    string Model,
+    string Detail,
+    bool LocalCanSynthesize = false,
+    string? LocalModel = null,
+    string? LocalDetail = null);
+
+public sealed record DesignVoiceAuditionsRequest(
+    string Direction,
+    string CalibrationText,
+    int Count = 3);
+
+public sealed record VoiceAuditionSummary(
+    Guid AssetId,
+    string AssetUrl,
+    string ProviderVoiceId,
+    int Seed,
+    string CalibrationText,
+    string Direction,
+    string Model);
+
+public sealed record SynthesizeVoiceRequest(DateTimeOffset ExpectedUpdatedAt);
+
+public sealed record VoiceSynthesisResult(
+    TimelineClipSummary Clip,
+    string Model,
+    string? ProviderRequestId,
+    bool ProviderCallMade);
+
+public sealed record AudioMasteringStatus(
+    bool ToolAvailable,
+    int ClipsWithMedia,
+    int GuideClips,
+    bool CanMix,
+    string Detail);
+
+public sealed record PairingClaimRequest(string Code);
+
+public sealed record PairingStatusSummary(
+    bool LanEnabled,
+    bool IsLoopback,
+    bool IsPaired,
+    string Workstation,
+    string? PairingCode,
+    DateTimeOffset? CodeExpiresAt,
+    string SecurityNote);
+
+public sealed record JobSummary(
+    Guid Id,
+    Guid ShotId,
+    string ShotCode,
+    string Kind,
+    JobState State,
+    int Progress,
+    string Phase,
+    string Backend,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt,
+    string? Error,
+    Guid? ManifestId = null,
+    string? AdapterId = null,
+    Guid? OutputAssetId = null,
+    string? OutputAssetUrl = null,
+    string? ProviderRequestId = null,
+    int Attempt = 1,
+    Guid? RetryOfJobId = null,
+    DateTimeOffset? LastHeartbeatAt = null,
+    string WorkType = "Shot");
+
+public sealed record GenerationAdapterSummary(
+    string Id,
+    string Name,
+    string Kind,
+    string State,
+    string Detail,
+    bool CanDispatch,
+    IReadOnlyList<GenerationRoute> Routes,
+    IReadOnlyList<GenerationPurpose> Purposes);
+
+/// <summary>The concrete graph selected behind the artist-facing draft action.</summary>
+public sealed record DraftWorkflowSummary(
+    string Id,
+    string Name,
+    string Mode,
+    string Summary,
+    bool UsesComposition,
+    IReadOnlyList<string>? Capabilities = null,
+    int MaxReferenceImages = 0);
+
+public sealed record GenerationPreflightReference(
+    string Id,
+    string Name,
+    string Category,
+    int Version,
+    bool HasApprovedImage,
+    bool WillBindVisually,
+    string Detail);
+
+public sealed record GenerationPreflightCheck(string State, string Title, string Detail);
+
+public sealed record GenerationPreflightSummary(
+    Guid ManifestId,
+    string ManifestHash,
+    string AdapterId,
+    string AdapterName,
+    string Route,
+    string Purpose,
+    string WorkflowId,
+    string WorkflowName,
+    IReadOnlyList<string> WorkflowCapabilities,
+    int MaxReferenceImages,
+    bool HasComposition,
+    IReadOnlyList<GenerationPreflightReference> References,
+    IReadOnlyList<string> Constraints,
+    int DeliveryWidth,
+    int DeliveryHeight,
+    int FramesPerSecond,
+    string ColorSpace,
+    int AudioSampleRate,
+    IReadOnlyList<GenerationPreflightCheck> Checks,
+    bool Ready);
+
+public sealed record DispatchManifestRequest(
+    string ExpectedManifestHash,
+    string AdapterId);
+
+public sealed record IntegrationSummary(
+    string Id,
+    string Name,
+    IntegrationState State,
+    string Headline,
+    string Detail,
+    string? Endpoint,
+    bool CanInspect,
+    bool CanSubmit,
+    DateTimeOffset CheckedAt);
+
+public sealed record StudioSnapshot(
+    ProjectSummary Project,
+    IReadOnlyList<ShotSummary> Shots,
+    IReadOnlyList<ReferenceSummary> References,
+    IReadOnlyList<CommentSummary> Comments,
+    IReadOnlyList<JobSummary> Jobs,
+    DateTimeOffset ServerTime,
+    bool DemoMode);
+
+public sealed record SketchPoint(double X, double Y, double Pressure);
+
+public sealed record SketchStroke(
+    string Id,
+    IReadOnlyList<SketchPoint> Points,
+    string Color,
+    double Width);
+
+public sealed record SketchLabel(
+    string Id,
+    double X,
+    double Y,
+    string Text);
+
+public sealed record SketchJoint(
+    string Name,
+    double X,
+    double Y);
+
+public sealed record PosePresetSummary(
+    Guid Id,
+    string Name,
+    IReadOnlyList<SketchJoint> Joints,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreatePosePresetRequest(
+    string Name,
+    IReadOnlyList<SketchJoint> Joints);
+
+public sealed record SketchObject(
+    string Id,
+    string Kind,
+    double X,
+    double Y,
+    double Width,
+    double Height,
+    double Rotation,
+    string Color,
+    string Label,
+    string Pose,
+    string Facing,
+    string Build,
+    string IdentityMode,
+    bool FullBody,
+    string? CharacterReferenceId,
+    string? WardrobeReferenceId,
+    IReadOnlyList<SketchJoint> Joints);
+
+public sealed record SketchContent(
+    IReadOnlyList<SketchStroke> Strokes,
+    IReadOnlyList<SketchLabel> Labels,
+    IReadOnlyList<SketchObject>? Objects = null);
+
+public sealed record SaveSketchRequest(
+    int ExpectedRevision,
+    string CreativeBrief,
+    SketchContent Content,
+    Guid? UnderlayAssetId = null,
+    Guid? CompositionAssetId = null);
+
+public sealed record SketchDocumentSummary(
+    Guid Id,
+    Guid ShotId,
+    int Revision,
+    string CreativeBrief,
+    SketchContent Content,
+    Guid? UnderlayAssetId,
+    Guid? CompositionAssetId,
+    string ContentHash,
+    DateTimeOffset UpdatedAt);
+
+public sealed record SaveFrameMarkupRequest(
+    int ExpectedRevision,
+    IReadOnlyList<SketchStroke> Strokes);
+
+public sealed record FrameMarkupSummary(
+    Guid Id,
+    Guid ShotId,
+    int Version,
+    int Revision,
+    IReadOnlyList<SketchStroke> Strokes,
+    string ContentHash,
+    DateTimeOffset UpdatedAt);
+
+public sealed record AuthorityBinding(
+    string Id,
+    string Name,
+    string Category,
+    int Version,
+    bool IsPinned = false,
+    IReadOnlyList<AuthorityPlacementBinding>? Placements = null,
+    int SourceOrder = 0);
+
+/// <summary>
+/// A frozen semantic placement for one authority. This travels separately from
+/// the prose prompt so provider routing never has to guess whether a reference
+/// was pinned by searching for a particular sentence fragment.
+/// </summary>
+public sealed record AuthorityPlacementBinding(
+    double X,
+    double Y,
+    string Body,
+    string Instruction);
+
+public sealed record PrepareGenerationManifestRequest(
+    int ExpectedShotVersion,
+    int ExpectedSketchRevision,
+    GenerationRoute Route,
+    GenerationPurpose Purpose = GenerationPurpose.Draft,
+    Guid? CompositionAssetId = null,
+    string? CreativeBriefOverride = null,
+    int? MarkupRevision = null,
+    bool AllowSketchCompositionFallback = true,
+    string? VideoEndpointRole = null,
+    Guid? VideoEndpointSourceCandidateId = null);
+
+/// <summary>
+/// Starts the ordinary draft path from the shot card. The service resolves the
+/// current authority packet and automatically chooses text-to-image when no
+/// composition exists, or sketch-to-image when one does.
+/// </summary>
+public sealed record GenerateDraftRequest(
+    int ExpectedShotVersion,
+    string? AdapterId = null,
+    Guid? CompositionAssetId = null,
+    string? CreativeBriefOverride = null,
+    int? MarkupRevision = null,
+    bool AllowSketchCompositionFallback = true);
+
+public sealed record PrepareVideoManifestRequest(
+    int ExpectedShotVersion,
+    string MotionBrief,
+    bool ConfirmEndpointCompatibility = false,
+    Guid? FirstFrameCandidateId = null,
+    Guid? LastFrameCandidateId = null,
+    VideoQuality Quality = VideoQuality.Low,
+    string? TakeId = null);
+
+public sealed record PromoteVideoTakeRequest(
+    int ExpectedShotVersion,
+    string AdapterId = "comfyui-h3-video");
+
+public sealed record GenerationManifestSummary(
+    Guid Id,
+    Guid ShotId,
+    string ShotCode,
+    int ShotVersion,
+    Guid SketchId,
+    int SketchRevision,
+    GenerationRoute Route,
+    GenerationPurpose Purpose,
+    ManifestState State,
+    string CreativeBrief,
+    IReadOnlyList<AuthorityBinding> Authorities,
+    IReadOnlyList<string> Constraints,
+    string ManifestHash,
+    bool ProviderCallMade,
+    Guid? CompositionAssetId,
+    string? CompositionAssetHash,
+    DateTimeOffset CreatedAt,
+    Guid? LastFrameAssetId = null,
+    string? LastFrameAssetHash = null,
+    VideoQuality? VideoQuality = null,
+    long? VideoSeed = null,
+    string? VideoTakeId = null,
+    Guid? PromotedFromJobId = null);
+
+public sealed record AssetSummary(
+    Guid Id,
+    Guid ProjectId,
+    AssetKind Kind,
+    string OriginalFileName,
+    string MimeType,
+    long Bytes,
+    int? Width,
+    int? Height,
+    double? DurationSeconds,
+    string ContentHash,
+    string ContentUrl,
+    DateTimeOffset CreatedAt,
+    string DisplayName = "",
+    Guid? CollectionId = null,
+    IReadOnlyList<string>? Tags = null,
+    string Notes = "",
+    string Source = "Imported",
+    bool IsArchived = false,
+    DateTimeOffset UpdatedAt = default,
+    Guid? RevisionFamilyId = null,
+    int? RevisionNumber = null,
+    bool IsCurrentRevision = false,
+    Guid? ParentAssetId = null,
+    string RevisionPrompt = "",
+    string RevisionEngine = "");
+
+public sealed record AssetCollectionSummary(
+    Guid Id,
+    Guid ProjectId,
+    string Name,
+    string Color,
+    int SortOrder,
+    int AssetCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateAssetCollectionRequest(string Name, string Color = "#73b7cf");
+public sealed record UpdateAssetCollectionRequest(string Name, string Color);
+public sealed record UpdateAssetRequest(string DisplayName, Guid? CollectionId, IReadOnlyList<string> Tags, string Notes);
+
+/// <summary>
+/// Generates a library image without manufacturing a fake shot. The same
+/// adapters and composition contract serve both subjects; only the promotion
+/// target differs (asset library instead of a shot candidate stack).
+/// </summary>
+public sealed record GenerateAssetImageRequest(
+    string Name,
+    string CreativeBrief,
+    GenerationRoute Route,
+    string AdapterId,
+    Guid? CompositionAssetId = null,
+    IReadOnlyList<Guid>? ReferenceAssetIds = null,
+    Guid? RevisionFamilyId = null,
+    Guid? ParentAssetId = null,
+    bool UseCurrentFrame = false,
+    AuthorityGenerationTarget? AuthorityTarget = null,
+    IReadOnlyList<AssetGenerationReference>? ReferenceBindings = null);
+
+/// <summary>
+/// A deliberately selected asset reference and the visual role it controls.
+/// Legacy callers may continue to send <c>ReferenceAssetIds</c>; those become
+/// explicit General references rather than silently disappearing during edits.
+/// </summary>
+public sealed record AssetGenerationReference(
+    Guid AssetId,
+    string Role = "General");
+
+/// <summary>
+/// Optional durable promotion target for an asset generation. Keeping this in
+/// the frozen job packet means an authority render can finish after the artist
+/// navigates away without relying on a browser callback to append the version.
+/// </summary>
+public sealed record AuthorityGenerationTarget(
+    string ReferenceId,
+    int ExpectedVersion,
+    string Description,
+    string LockedConstraint);
+public sealed record AddAssetRevisionRequest(Guid AssetId, string Prompt = "Imported revision", string Engine = "Imported");
+public sealed record CreateAssetPlacementRequest(Guid ShotId, string Role);
+public sealed record AssetPlacementSummary(Guid Id, Guid AssetId, Guid ShotId, string ShotCode, string ShotTitle, string Role, DateTimeOffset CreatedAt);
+
+public sealed record CreateCommentRequest(double X, double Y, string Body, string? ReferenceId = null);
+
+public sealed record RatifyRequest(int ExpectedVersion, string Reason);
+
+public sealed record CodexAssistRequest(string Mode, string Message, Guid? ShotId);
+
+public sealed record CodexAssistResponse(
+    string Mode,
+    string Headline,
+    string Message,
+    IReadOnlyList<string> Findings,
+    IReadOnlyList<string> SuggestedActions,
+    bool Live,
+    DateTimeOffset CompletedAt);
+
+public sealed record ImproveGenerationDirectionRequest(
+    string Direction,
+    string Purpose);
+
+public sealed record ImprovedGenerationDirection(
+    string OriginalText,
+    string ImprovedText,
+    string Summary,
+    bool Live);
+
+/// <summary>A one-line "do this differently" note that re-renders the shot.</summary>
+public sealed record RedirectShotRequest(
+    string Direction,
+    string? AdapterId = null,
+    Guid? GuidanceAssetId = null,
+    int? MarkupRevision = null);
+
+/// <summary>What deleting a shot slot destroyed, so the UI can say it plainly.</summary>
+public sealed record ShotDeletionSummary(string Code, int Candidates, int RatifiedVersions, int Comments, int Jobs);
+
+/// <summary>
+/// What deleting a project destroyed. AssetRecords counts rows, not stored files:
+/// the asset store is content-addressed and shared, so the bytes stay put.
+/// </summary>
+public sealed record ProjectDeletionSummary(string Name, int Shots, int Authorities, int RatifiedVersions, int AssetRecords);
+
+/// <summary>Identity metadata only. Versioned content still needs a new version.</summary>
+public sealed record UpdateReferenceRequest(string Name, string Category, string Accent);

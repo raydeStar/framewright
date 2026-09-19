@@ -1,0 +1,11 @@
+# Installed into %LOCALAPPDATA%/FramewrightVoice/packages with --no-deps. ComfyUI's
+# embedded Python supplies CUDA PyTorch, NumPy, SoundFile, and the remaining
+# common runtime dependencies; these are the voice-specific packages whose
+# exact versions Framewright has verified together. Setup replaces the target
+# package directory, then records versions and SHA-256 integrity evidence for
+# the bounded execution surface that passed the offline synthesis canary.
+qwen-tts==0.1.1
+accelerate==1.12.0
+onnxruntime==1.28.0
+sox==1.5.0
+transformers==4.57.3

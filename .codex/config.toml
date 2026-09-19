@@ -1,0 +1,4 @@
+[mcp_servers.framewright]
+url = "http://127.0.0.1:5179/mcp"
+required = false
+default_tools_approval_mode = "writes"

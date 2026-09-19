@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "key": "design",
+      "repository": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+      "revision": "5ecdb67327fd37bb2e042aab12ff7391903235d3",
+      "directory": "models/voice-design-5ecdb67327fd37bb2e042aab12ff7391903235d3"
+    },
+    {
+      "key": "base",
+      "repository": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+      "revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+      "directory": "models/base-fd4b254389122332181a7c3db7f27e918eec64e3"
+    }
+  ],
+  "canary": {
+    "seed": 811616,
+    "text": "Framewright voice is ready.",
+    "direction": "A calm, neutral adult synthetic voice with clear diction."
+  }
+}
