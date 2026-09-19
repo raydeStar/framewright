@@ -1,0 +1,19 @@
+{
+  "1": { "class_type": "UNETLoader", "_meta": { "title": "Qwen Image Edit 2511 - current frame revision" }, "inputs": { "unet_name": "qwen_image_edit_2511_fp8_e4m3fn.safetensors", "weight_dtype": "default" } },
+  "2": { "class_type": "ModelSamplingAuraFlow", "inputs": { "model": ["1", 0], "shift": 3.1 } },
+  "3": { "class_type": "CFGNorm", "_meta": { "title": "Official Qwen edit guidance normalization" }, "inputs": { "model": ["2", 0], "strength": 1.0 } },
+  "4": { "class_type": "CLIPLoader", "inputs": { "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image", "device": "default" } },
+  "5": { "class_type": "VAELoader", "inputs": { "vae_name": "qwen_image_vae.safetensors" } },
+  "6": { "class_type": "LoadImage", "_meta": { "title": "Selected current frame - sole composition base" }, "inputs": { "image": "{{INPUT_IMAGE}}" } },
+  "7": { "class_type": "FluxKontextImageScale", "_meta": { "title": "Qwen edit-native image scale" }, "inputs": { "image": ["6", 0] } },
+  "14": { "class_type": "LoadImage", "_meta": { "title": "Explicitly pinned authority 1" }, "inputs": { "image": "{{REFERENCE_IMAGE_1}}" } },
+  "15": { "class_type": "LoadImage", "_meta": { "title": "Explicitly pinned authority 2" }, "inputs": { "image": "{{REFERENCE_IMAGE_2}}" } },
+  "8": { "class_type": "TextEncodeQwenImageEditPlus", "_meta": { "title": "Positive - controlled current-frame edit" }, "inputs": { "clip": ["4", 0], "prompt": "{{PROMPT}}", "vae": ["5", 0], "image1": ["7", 0], "image2": ["14", 0], "image3": ["15", 0] } },
+  "9": { "class_type": "TextEncodeQwenImageEditPlus", "_meta": { "title": "Negative" }, "inputs": { "clip": ["4", 0], "prompt": "{{NEGATIVE_PROMPT}}", "vae": ["5", 0], "image1": ["7", 0], "image2": ["14", 0], "image3": ["15", 0] } },
+  "16": { "class_type": "VAEEncode", "_meta": { "title": "Selected-frame appearance and geometry latent" }, "inputs": { "pixels": ["7", 0], "vae": ["5", 0] } },
+  "17": { "class_type": "FluxKontextMultiReferenceLatentMethod", "_meta": { "title": "Positive multi-reference fusion" }, "inputs": { "conditioning": ["8", 0], "reference_latents_method": "index_timestep_zero" } },
+  "18": { "class_type": "FluxKontextMultiReferenceLatentMethod", "_meta": { "title": "Negative multi-reference fusion" }, "inputs": { "conditioning": ["9", 0], "reference_latents_method": "index_timestep_zero" } },
+  "10": { "class_type": "KSampler", "_meta": { "title": "Controlled current-frame revision - official quality baseline" }, "inputs": { "model": ["3", 0], "seed": "{{SEED}}", "steps": 20, "cfg": 4.0, "sampler_name": "euler", "scheduler": "simple", "positive": ["17", 0], "negative": ["18", 0], "latent_image": ["16", 0], "denoise": 1.0 } },
+  "11": { "class_type": "VAEDecode", "inputs": { "samples": ["10", 0], "vae": ["5", 0] } },
+  "12": { "class_type": "SaveImage", "inputs": { "images": ["11", 0], "filename_prefix": "framewright/current-frame-edit" } }
+}

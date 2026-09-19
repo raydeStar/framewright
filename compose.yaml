@@ -1,0 +1,61 @@
+name: framewright
+
+services:
+  framewright:
+    container_name: framewright
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        FRAMEWRIGHT_VERSION: ${FRAMEWRIGHT_VERSION:-development}
+        FRAMEWRIGHT_COMMIT: ${FRAMEWRIGHT_COMMIT:-unknown}
+        FRAMEWRIGHT_BUILT_AT_UTC: ${FRAMEWRIGHT_BUILT_AT_UTC:-unknown}
+        FRAMEWRIGHT_CHANNEL: ${FRAMEWRIGHT_CHANNEL:-development}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    ports:
+      - "127.0.0.1:5179:8080"
+    environment:
+      Studio__DataRoot: /data
+      Studio__WorkflowRoot: /app/workflows
+      Studio__TrustedProxyAddresses__0: 172.29.0.1
+      Studio__Backups__Enabled: "true"
+      Studio__Backups__IntervalHours: "24"
+      Studio__Backups__RetentionCount: "7"
+      Integrations__ComfyUi__Endpoint: ${FRAMEWRIGHT_COMFYUI_ENDPOINT:-http://host.docker.internal:8188}
+      Integrations__ComfyUi__AllowRemote: ${FRAMEWRIGHT_COMFYUI_ALLOW_REMOTE:-false}
+      Integrations__ComfyUi__SubmissionEnabled: ${FRAMEWRIGHT_COMFYUI_STILLS_ENABLED:-false}
+      Integrations__ComfyUi__VideoSubmissionEnabled: ${FRAMEWRIGHT_COMFYUI_VIDEO_ENABLED:-false}
+      YuE2__Enabled: ${FRAMEWRIGHT_YUE2_ENABLED:-false}
+      YuE2__Endpoint: ${FRAMEWRIGHT_YUE2_ENDPOINT:-http://host.docker.internal:5182}
+      YuE2__WorkerToken: ${FRAMEWRIGHT_YUE2_WORKER_TOKEN:-}
+      YuE2__Model: ${FRAMEWRIGHT_YUE2_MODEL:-m-a-p/YuE2-3B}
+      YuE2__Vae: ${FRAMEWRIGHT_YUE2_VAE:-m-a-p/YuE2-Vae}
+      YuE2__Device: ${FRAMEWRIGHT_YUE2_DEVICE:-cuda}
+      Integrations__Codex__NonInteractiveImageEnabled: ${FRAMEWRIGHT_CODEX_IMAGEGEN_ENABLED:-false}
+      # Optional direct GPT Image lane. Keep this only in ignored .env; Codex
+      # ImageGen continues to use the workstation ChatGPT login independently.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Framewright's unprivileged container is the outer sandbox. Debian's
+      # kernel blocks the nested namespace used by Codex workspace-write.
+      Integrations__Codex__Sandbox: danger-full-access
+      QwenTts__Enabled: ${FRAMEWRIGHT_LOCAL_VOICE_ENABLED:-false}
+      QwenTts__WorkerEndpoint: http://host.docker.internal:5181
+      QwenTts__WorkerToken: ${FRAMEWRIGHT_VOICE_WORKER_TOKEN:-}
+    volumes:
+      - type: bind
+        source: ./src/StoryboardStudio.Api/App_Data
+        target: /data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      framewright_local:
+        ipv4_address: 172.29.0.2
+
+networks:
+  framewright_local:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+          gateway: 172.29.0.1

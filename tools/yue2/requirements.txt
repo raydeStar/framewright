@@ -1,0 +1,5 @@
+# Install the official YuE2 package from its repository or wheel into a dedicated
+# Python 3.12 environment. Framewright intentionally does not pin third-party GPU
+# wheels here because CUDA/PyTorch builds are workstation-specific.
+#
+#   python -m pip install git+https://github.com/multimodal-art-projection/YuE.git
