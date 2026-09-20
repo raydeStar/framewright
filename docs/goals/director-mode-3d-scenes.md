@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M15. M00, M01, M04, M05, M06 and M13 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED.  
+**Active milestone:** none. The open runway is finished: M00, M01, M04, M05, M06, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M07, M08, M09, M12, M14, M16, M17 and M18 are blocked or deferred on work outside this repository.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -433,10 +433,10 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** M15 (compatible clips and rigid-part motion).
-- **Last verified milestone:** M13. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
+- **Active milestone:** none. Every milestone this repository can reach on its own is closed.
+- **Last verified milestone:** M15. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
 - **External acceptance blockers:** (1) No Reference Asset Compiler checkout - blocks M09/M14. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
-- **Next action:** Implement M15 on `feature/director-mode`: play only clips a rig actually supports, and move rigid parts without a skeleton. M07 and M08 stay deferred until the user's generation pipeline is connected; M09 and M14 remain blocked by the absent compiler, and M12/M16/M17 depend on those, so M15 is the last open milestone on this runway.
+- **Next action:** Nothing is dependency-ready. M07 and M08 wait on the user's existing generation pipeline; M09 and M14 wait on a Reference Asset Compiler checkout, and M12, M16, M17 and M18 depend on those. The four CONTRACT_VERIFIED milestones wait on an actual WebMCP-capable host, and M11 additionally on recorded human composition acceptance.
 
 ### Milestone status
 
@@ -457,7 +457,7 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M12 | NOT_STARTED | None |
 | M13 | VERIFIED | M13 acceptance record below |
 | M14 | NOT_STARTED | None |
-| M15 | IN_PROGRESS | Active; depends on M13 |
+| M15 | VERIFIED | M15 acceptance record below |
 | M16 | NOT_STARTED | None |
 | M17 | NOT_STARTED | None |
 | M18 | NOT_STARTED | None |
@@ -1204,6 +1204,93 @@ One defect the browser journeys found, fixed: the asset library's refreshes coul
   was before it, which reads as a file that silently failed to arrive.
 Checkpoint: see the M13 commits on feature/director-mode.
 Next dependency-ready milestone: M15.
+```
+
+### M15 acceptance record
+
+```text
+Milestone / status / date: M15 / VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M15 commits
+Outcome and supported constraints: Clips are reusable library material read from a model file's own
+  animations: its channels, keyframes, target bones, and whether this build can sample it exactly.
+  Only clips it can sample are ever bindable. A binding lives on the scene object rather than on the
+  clip, so two characters share one clip and still hold their own trim, speed, loop, playback
+  position, and root-motion policy. Every binding is checked before anything plays: the clip must
+  exist in that file and be supported, the object's rig must be animation-ready and must have every
+  bone the clip moves, and the trim, speed, and playback position must lie inside the clip.
+  Scrubbing to a known time has one right answer, calculated from the stored files, and a browser
+  journey holds what the view has on screen against what the service says is true at the same time.
+  Root motion has one stated policy and reaches the scene exactly once: Hold drops the root's travel
+  from the pose and leaves the object where the artist put it; Offset takes that same travel out of
+  the pose and reports it once as an offset to the object. Neither applies it twice, and neither
+  writes the object's saved transform. A rigid part turns about a pivot declared in its own local
+  space with no skeleton anywhere near it, and that pivot is the one point the motion leaves exactly
+  where it is; a static prop declares no motion and does not move.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/GlbClipInspector.cs: clips, their keyframes, and what this
+    build refuses to sample.
+  - src/StoryboardStudio.Api/Services/ClipSampler.cs and RigidMotionSampler.cs: the pure sampling.
+  - src/StoryboardStudio.Api/Services/SceneMotionService.cs and one sample route.
+  - src/StoryboardStudio.Api/Services/SceneService.cs validates every binding before writing.
+  - src/StoryboardStudio.Api/Persistence: per-instance clip bindings and rigid motion, behind
+    migration 20260919-scene-motion-v14.
+  - fixtures/glb/build_rigged_figure.py now also emits clip-arm-raise.glb and
+    clip-wrong-skeleton.glb.
+  - src/storyboard-studio-web: a transport and motion panel in the scene inspector, and per-object
+    animation in the viewport with its own skeleton and its own mixer.
+  - Reused unchanged: the M04 import route, the M13 rig reading, the M06 scene save as the only
+    write path, and the existing model profile surface.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check (exit code checked directly)
+  - npx playwright test scenes.spec.ts (desktop and tablet)
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 195 backend tests passed, 0 failed (191 before this milestone plus four motion tests). Frontend
+     typecheck, lint, and format checks clean.
+  A: 120 browser journeys passed, 0 failed, 6 intentionally skipped (126 discovered) against the
+     real service and real persistence in a disposable temp data root. The new journeys give two
+     characters one clip with different trims and speeds, scrub to a known time, hold the hands on
+     screen against the service's own sample for each object, swing a door about its declared pivot,
+     confirm the two characters hold two skeletons rather than one, confirm playing and pausing
+     leave the saved scene untouched, reopen the studio and find the bindings and timing intact, and
+     confirm a character clip bound to a crate is refused before anything plays.
+  H: NOT RUN. No agent host is involved in this milestone; M15 asks for D and A only.
+  L: NOT RUN. No provider is involved; nothing here generates motion.
+  V: NOT RUN as human acceptance; M15 does not ask for it.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: The application was closed and reopened on the same data root: both
+  bindings, their trims, speeds, loops, and root-motion policies, and the sampled poses all came
+  back identical. A clip whose bones the skeleton does not have, a clip name that is not in the
+  file, a trim beyond the clip, a trim that ends where it starts, a speed outside 0.1 to 4, a
+  playback position outside the trim, an unknown root-motion policy, and a clip bound to a model
+  with no skeleton are each refused, and none of them write anything. A sample time past a
+  non-looping clip's own runtime is refused; the same time on a looping object is an ordinary
+  answer. A rigid part with an axis that is not an axis, a swing that ends where it began, or a
+  duration of zero is refused, and a time beyond its duration is refused.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the M06 scene journeys, the M10 direction journeys, the M11 blockout journeys, and the
+  M13 rig journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually).
+Human approvals actually recorded, where required: None required by this milestone.
+Known defects and dependency impact: None found. Clip blending, retargeting between skeletons,
+  procedural motion, and animation editing beyond trim, speed, loop, and root-motion policy stay out
+  of scope, as the milestone permits.
+Permitted deferrals: Clip blending, arbitrary retargeting, procedural motion generation, and
+  advanced animation editing, all explicitly deferred by M15.
+Bug-detection check: Two sabotages, each reverted. With the root motion applied to the object while
+  it was also left in the pose, the root-motion test failed as intended. With two skinned objects
+  sharing one skeleton, the first attempt did not fail, because the browser check was reading bone
+  positions rather than the skin binding; the check was strengthened to count distinct skeletons,
+  the sabotage then failed as intended, and it passed again once reverted.
+Three defects the browser journeys found, all fixed: trimming a clip could leave its playback
+  position outside the trim, which the service refused and the artist could not see the cause of;
+  the scene workspace could still be edited while another scene was being opened or created, and
+  those edits were then silently discarded when the new scene arrived; and a slower scene load could
+  land after a newer one and put the artist back in a scene they had already left.
+Checkpoint: see the M15 commits on feature/director-mode.
+Next dependency-ready milestone: none. See the runway note above.
 ```
 
 ### Acceptance record template

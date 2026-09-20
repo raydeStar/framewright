@@ -58,6 +58,7 @@ builder.Services.AddScoped<WebMcpStoryboardService>();
 builder.Services.AddScoped<SceneService>();
 builder.Services.AddScoped<SceneDirectionService>();
 builder.Services.AddScoped<SceneBlockoutService>();
+builder.Services.AddScoped<SceneMotionService>();
 builder.Services.AddScoped<VisualConsistencyService>();
 builder.Services.AddScoped<TimelineService>();
 builder.Services.AddScoped<QwenVoiceService>();
@@ -474,6 +475,9 @@ app.MapPost("/api/scene-blockouts/{planId:guid}/reject", async Task<IResult> (Gu
     => ToHttpResult(await blockouts.RejectAsync(planId, cancellationToken)));
 app.MapPost("/api/scene-blockouts/{planId:guid}/apply", async Task<IResult> (Guid planId, ApplySceneBlockoutRequest? request, SceneBlockoutService blockouts, SceneService scenes, CancellationToken cancellationToken)
     => ToHttpResult(await blockouts.ApplyAsync(planId, request ?? new ApplySceneBlockoutRequest(null), scenes, cancellationToken)));
+app.MapGet("/api/scenes/{sceneId:guid}/instances/{instanceId:guid}/motion-sample", async Task<IResult> (
+    Guid sceneId, Guid instanceId, double? time, SceneMotionService motion, CancellationToken cancellationToken)
+    => ToHttpResult(await motion.SampleAsync(sceneId, instanceId, time ?? 0, cancellationToken)));
 app.MapGet("/api/scenes/{sceneId:guid}/blockout", async Task<IResult> (Guid sceneId, SceneBlockoutService blockouts, CancellationToken cancellationToken)
     => ToHttpResult(await blockouts.ForSceneAsync(sceneId, cancellationToken)));
 app.MapGet("/api/webmcp/director/context", async (Guid shotId, int? displayedVersion, bool? archivedPreview, bool? directorMode, string? tool, WebMcpStoryboardService service, CancellationToken cancellationToken)

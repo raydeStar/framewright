@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { AmbientLight, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, Mesh, MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type BufferGeometry, type Object3D } from 'three'
+import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, LoopOnce, LoopRepeat, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SkinnedMesh, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type BufferGeometry, type Object3D } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+// A skinned mesh cannot be cloned with Object3D.clone: the copies would share
+// one skeleton and pose identically, which is the opposite of two instances.
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { SceneCameraSummary, SceneEnvironmentSummary, SceneInstanceSummary, ScenePlaceholderSummary } from '../types'
 
 /**
@@ -27,6 +30,10 @@ export interface SceneViewportProps {
   selectedId?: string
   /** When placing a note, a click reports the point in the object's own local space. */
   noteMode?: boolean
+  /** Wall-clock seconds into playback. Every object reads its own clip at its own settings from this. */
+  playhead?: number
+  /** Whether playback is running. Scrubbing works either way. */
+  playing?: boolean
   onSelect: (instanceId: string | undefined) => void
   onCameraChange: (camera: SceneCameraSummary) => void
   onPlaceNote?: (instanceId: string, localAnchor: [number, number, number]) => void
@@ -37,12 +44,13 @@ type ViewportState = 'loading' | 'ready' | 'unsupported'
 /** Identifies one stand-in's geometry, so a resized placeholder is rebuilt. */
 const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}`
 
-export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, onSelect, onCameraChange, onPlaceNote }: SceneViewportProps) {
+export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote }: SceneViewportProps) {
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewportState>('loading')
   const surface = useRef<{
     place: () => void
     sync: (instances: SceneInstanceSummary[], selectedId?: string) => void
+    animate: (instances: SceneInstanceSummary[], playhead: number) => void
     light: (environment: SceneEnvironmentSummary) => void
     pick: (clientX: number, clientY: number) => void
     frame: () => void
@@ -71,6 +79,10 @@ export default function SceneViewport({ instances, camera, environment, selected
     const perspective = new PerspectiveCamera(camera.fieldOfView, 1, 0.01, 2000)
     const placed = new Map<string, Object3D>()
     const loaded = new Map<string, Object3D>()
+    // One load per clip file, and one mixer per object, so two objects playing
+    // the same clip keep their own time, speed, and loop.
+    const clipFiles = new Map<string, AnimationClip[]>()
+    const players = new Map<string, { mixer: AnimationMixer; action: AnimationAction; key: string }>()
 
     renderer.outputColorSpace = SRGBColorSpace
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
@@ -197,7 +209,8 @@ export default function SceneViewport({ instances, camera, environment, selected
 
         const template = loaded.get(instance.assetId ?? '')
         if (template) {
-          const copy = template.clone(true)
+          const skinned = (() => { let found = false; template.traverse(node => { if (node instanceof SkinnedMesh) found = true }); return found })()
+          const copy = skinned ? cloneSkinned(template) : template.clone(true)
           copy.userData.instanceId = instance.id
           copy.userData.assetId = instance.assetId
           applyTransform(copy, instance)
@@ -233,10 +246,145 @@ export default function SceneViewport({ instances, camera, environment, selected
           }
         })
       }
+      // Two skinned objects must hold two skeletons. Sharing one would pose them
+      // identically however independent their settings are, so the count is
+      // published rather than assumed.
+      const skeletons = new Set<object>()
+      let skinnedObjects = 0
+      for (const [, object] of placed) {
+        let found = false
+        object.traverse(node => {
+          if (!(node instanceof SkinnedMesh)) return
+          found = true
+          skeletons.add(node.skeleton)
+        })
+        if (found) skinnedObjects += 1
+      }
+      container.dataset.skinned = String(skinnedObjects)
+      container.dataset.skeletons = String(skeletons.size)
+
+      loadClips(next)
+      for (const [id, player] of players) {
+        if (next.some(instance => instance.id === id && (instance.clip || instance.motion))) continue
+        player.mixer.stopAllAction()
+        players.delete(id)
+      }
       container.dataset.objects = String(placed.size)
       container.dataset.blockouts = String([...placed.values()].filter(object => object.userData.blockout).length)
       setState('ready')
       draw()
+    }
+
+    // The same arithmetic the service uses, so what the artist sees at a given
+    // playhead is what the service says is true at that time.
+    const clipTime = (instance: SceneInstanceSummary, playhead: number) => {
+      const binding = instance.clip!
+      const span = binding.end > binding.start ? binding.end - binding.start : 0
+      if (span <= 0) return binding.start
+      const elapsed = playhead * (binding.speed > 0 ? binding.speed : 1)
+      return binding.start + (binding.loop ? elapsed % span : Math.min(elapsed, span))
+    }
+
+    const rigidTransform = (instance: SceneInstanceSummary, playhead: number) => {
+      const motion = instance.motion!
+      const ratio = motion.seconds > 0 ? Math.min(playhead, motion.seconds) / motion.seconds : 0
+      const eased = motion.pingPong ? (ratio <= 0.5 ? ratio * 2 : (1 - ratio) * 2) : ratio
+      const angle = motion.fromRadians + (motion.toRadians - motion.fromRadians) * eased
+      const axis = motion.axis === 'X' ? new Vector3(1, 0, 0) : motion.axis === 'Y' ? new Vector3(0, 1, 0) : new Vector3(0, 0, 1)
+      const turn = new Matrix4().makeRotationAxis(axis, angle)
+      const pivot = new Vector3(motion.pivot[0], motion.pivot[1], motion.pivot[2])
+      // Turning about a pivot is a turn about the origin plus the offset that
+      // puts the pivot back where it was.
+      const correction = pivot.clone().sub(pivot.clone().applyMatrix4(turn))
+      return { angle, correction }
+    }
+
+    /** The far end of what a clip moves: the bone a test can watch. */
+    const watched = (root: Object3D, bone: string) => {
+      let start: Object3D | undefined
+      root.traverse(node => { if (!start && node.name === bone) start = node })
+      if (!start) return undefined
+      let deepest: Object3D = start
+      let depth = -1
+      start.traverse(node => {
+        let steps = 0
+        let walk: Object3D | null = node
+        while (walk && walk !== start) { steps++; walk = walk.parent }
+        if (steps > depth) { depth = steps; deepest = node }
+      })
+      return deepest
+    }
+
+    const animate = (next: SceneInstanceSummary[], playhead: number) => {
+      const watchable: Record<string, number[]> = {}
+      for (const instance of next) {
+        const object = placed.get(instance.id)
+        if (!object) continue
+
+        if (instance.motion) {
+          const { angle, correction } = rigidTransform(instance, playhead)
+          object.position.set(
+            instance.position[0] + correction.x,
+            instance.position[1] + correction.y,
+            instance.position[2] + correction.z)
+          object.rotation.set(
+            instance.rotation[0] + (instance.motion.axis === 'X' ? angle : 0),
+            instance.rotation[1] + (instance.motion.axis === 'Y' ? angle : 0),
+            instance.rotation[2] + (instance.motion.axis === 'Z' ? angle : 0))
+          watchable[instance.id] = [object.position.x, object.position.y, object.position.z].map(value => Number(value.toFixed(4)))
+          continue
+        }
+
+        if (!instance.clip) continue
+        const clips = clipFiles.get(instance.clip.clipAssetId)
+        if (!clips) continue
+        const clip = clips.find(candidate => candidate.name === instance.clip!.clipName)
+        if (!clip) continue
+
+        const key = `${instance.clip.clipAssetId}:${instance.clip.clipName}`
+        let player = players.get(instance.id)
+        if (!player || player.key !== key) {
+          player?.mixer.stopAllAction()
+          const mixer = new AnimationMixer(object)
+          const action = mixer.clipAction(clip)
+          action.play()
+          action.paused = true
+          player = { mixer, action, key }
+          players.set(instance.id, player)
+        }
+        player.action.setLoop(instance.clip.loop ? LoopRepeat : LoopOnce, Infinity)
+        player.action.clampWhenFinished = true
+        // Time is set outright rather than advanced, so scrubbing to a time is
+        // the same as playing to it.
+        player.action.time = clipTime(instance, playhead)
+        player.mixer.update(0)
+
+        const bone = watched(object, instance.clip.clipName && clip.tracks.length > 0
+          ? clip.tracks[0].name.split('.')[0]
+          : '')
+        if (bone) {
+          const position = bone.getWorldPosition(new Vector3())
+          watchable[instance.id] = [position.x, position.y, position.z].map(value => Number(value.toFixed(4)))
+        }
+      }
+      // What the view actually has on screen, so a journey can hold it against
+      // what the service says is true at the same time.
+      container.dataset.posed = JSON.stringify(watchable)
+      draw()
+    }
+
+    const loadClips = (next: SceneInstanceSummary[]) => {
+      for (const instance of next) {
+        const binding = instance.clip
+        if (!binding || clipFiles.has(binding.clipAssetId)) continue
+        clipFiles.set(binding.clipAssetId, [])
+        new GLTFLoader().load(`/api/assets/${binding.clipAssetId}/content`, gltf => {
+          if (disposed) return
+          clipFiles.set(binding.clipAssetId, gltf.animations)
+          release(gltf.scene)
+          animate(next, latestPlayhead.current)
+        }, undefined, () => { if (!disposed) clipFiles.delete(binding.clipAssetId) })
+      }
     }
 
     // Pull every placed object into view. Without this an object parked away
@@ -304,7 +452,7 @@ export default function SceneViewport({ instances, camera, environment, selected
       if (!placing.current) select.current(undefined)
     }
 
-    surface.current = { place, sync, light, pick, frame }
+    surface.current = { place, sync, light, pick, frame, animate }
     resize()
     place()
     light(environment)
@@ -314,6 +462,9 @@ export default function SceneViewport({ instances, camera, environment, selected
       surface.current = undefined
       observer.disconnect()
       renderer.domElement.removeEventListener('wheel', wheel)
+      for (const [, player] of players) player.mixer.stopAllAction()
+      players.clear()
+      clipFiles.clear()
       for (const [, object] of placed) { scene.remove(object); if (object.userData.placeholder) release(object) }
       placed.clear()
       for (const [, template] of loaded) release(template)
@@ -326,9 +477,25 @@ export default function SceneViewport({ instances, camera, environment, selected
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const latestPlayhead = useRef(playhead ?? 0)
+  latestPlayhead.current = playhead ?? 0
+
   useEffect(() => { surface.current?.sync(instances, selectedId) }, [instances, selectedId])
+  // Scrubbing and playing are the same thing: a playhead, read by every object
+  // through its own settings.
+  useEffect(() => { surface.current?.animate(instances, playhead ?? 0) }, [instances, playhead])
   useEffect(() => { surface.current?.light(environment) }, [environment])
   useEffect(() => { view.current = { ...camera }; surface.current?.place() }, [camera])
+
+  // A running clock is the artist's play button; nothing here advances on its
+  // own, so a paused scene draws nothing it was not asked to.
+  useEffect(() => {
+    if (!playing) return
+    let frame = 0
+    const step = () => { surface.current?.animate(instances, latestPlayhead.current); frame = requestAnimationFrame(step) }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [playing, instances])
 
   const orbit = (yaw: number, pitch: number) => {
     view.current = {

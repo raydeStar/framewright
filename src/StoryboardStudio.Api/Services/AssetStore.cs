@@ -241,7 +241,24 @@ public sealed class AssetStore
             profile.BoundsMin, profile.BoundsMax, profile.Dimensions,
             new ModelSupportLimits(limits.MaxBytes, limits.MaxVertices, limits.MaxTriangles, limits.MaxEmbeddedTextureBytes,
                 limits.MaxNodes, limits.MaxMaterials, limits.MaxImages, limits.SupportedRequiredExtensions),
-            Describe(profile.Rig)));
+            Describe(profile.Rig),
+            [.. profile.Clips.Select(Describe)]));
+    }
+
+    /// <summary>One clip as the artist reads it, without its keyframes.</summary>
+    internal static ModelClipSummary Describe(GlbClipSummary clip) => new(
+        clip.Name, clip.Duration, clip.ChannelCount, clip.TargetBones, clip.Paths,
+        clip.MovesRoot, clip.Supported, clip.Findings);
+
+    /// <summary>The stored model's rig and clips, read from its own bytes.</summary>
+    public async Task<(GlbRigProfile Rig, GlbClipSummary[] Clips)?> RigAndClipsAsync(Guid assetId, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == assetId, cancellationToken);
+        if (asset is null || asset.Kind != nameof(AssetKind.Model)) return null;
+        var path = Path.Combine(root, asset.StoragePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(path)) return null;
+        var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
+        return inspection.Ok ? (inspection.Profile!.Rig, inspection.Profile!.Clips) : null;
     }
 
     /// <summary>

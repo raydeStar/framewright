@@ -22,6 +22,7 @@ public static class StudioDatabaseInitializer
     private const string ModelSceneMigration = "20260919-model-scenes-v11";
     private const string SceneDirectionMigration = "20260919-scene-direction-v12";
     private const string SceneBlockoutMigration = "20260919-scene-blockout-v13";
+    private const string SceneMotionMigration = "20260919-scene-motion-v14";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -190,6 +191,17 @@ public static class StudioDatabaseInitializer
                 () => EnsureSceneBlockoutSchemaAsync(db, cancellationToken), cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, SceneMotionMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, SceneMotionMigration, cancellationToken);
+            }
+
+            await RunMigrationAsync(db, SceneMotionMigration,
+                () => EnsureSceneMotionColumnsAsync(db, cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -317,6 +329,7 @@ public static class StudioDatabaseInitializer
             ModelSceneMigration => "project-scoped-editable-scenes-with-versioned-camera-lighting-and-model-revision-instances",
             SceneDirectionMigration => "revision-bound-scene-annotations-and-single-instance-human-gated-proposals",
             SceneBlockoutMigration => "reference-bound-blockout-plans-and-placeholder-scene-objects",
+            SceneMotionMigration => "per-instance-clip-bindings-and-rigid-part-pivot-motion",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
@@ -1255,6 +1268,31 @@ public static class StudioDatabaseInitializer
             CREATE INDEX IF NOT EXISTS "IX_SceneBlockoutItems_PlanId_SortOrder"
                 ON "SceneBlockoutItems" ("PlanId", "SortOrder");
             """, cancellationToken);
+    }
+
+    /// <summary>
+    /// V14 gives every scene object its own playback settings and its own rigid
+    /// motion. They live on the instance rather than on the clip, which is what
+    /// lets two objects share one clip and still be trimmed and scrubbed apart.
+    /// </summary>
+    private static async Task EnsureSceneMotionColumnsAsync(StudioDbContext db, CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(db, "SceneInstances", "ClipAssetId", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "ClipName", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "ClipStart", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "ClipEnd", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "ClipSpeed", "REAL NOT NULL DEFAULT 1", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "ClipTime", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "ClipLoop", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "ClipRootMotion", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "MotionAxis", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "MotionPivotX", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "MotionPivotY", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "MotionPivotZ", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "MotionFrom", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "MotionTo", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "MotionSeconds", "REAL NOT NULL DEFAULT 0", cancellationToken);
+        await EnsureColumnAsync(db, "SceneInstances", "MotionPingPong", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
     }
 
     private static async Task EnsureYuE2CompositionTablesAsync(StudioDbContext db, CancellationToken cancellationToken)

@@ -56,7 +56,8 @@ public sealed record GlbModelProfile(
     double[] BoundsMin,
     double[] BoundsMax,
     double[] Dimensions,
-    GlbRigProfile Rig);
+    GlbRigProfile Rig,
+    GlbClipSummary[] Clips);
 
 public sealed record GlbInspectionResult(bool Ok, string? Error, GlbModelProfile? Profile);
 
@@ -238,7 +239,8 @@ public static class GlbModelInspector
             BoundsMin: [Round(min.X), Round(min.Y), Round(min.Z)],
             BoundsMax: [Round(max.X), Round(max.Y), Round(max.Z)],
             Dimensions: [Round(max.X - min.X), Round(max.Y - min.Y), Round(max.Z - min.Z)],
-            Rig: GlbRigInspector.Inspect(root, binary)));
+            Rig: GlbRigInspector.Inspect(root, binary),
+            Clips: GlbClipInspector.Inspect(root, binary)));
     }
 
     /// <summary>

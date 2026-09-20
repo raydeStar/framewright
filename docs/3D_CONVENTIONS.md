@@ -157,6 +157,45 @@ calculation stores nothing and draws nothing, so the same rig and the same pose
 give the same numbers every time, and a rig that is not animation-ready is not
 posed at all.
 
+## Clips and rigid-part motion
+
+A clip is read from an ordinary model file's own animations: its channels, its
+keyframes, the bones it moves, and whether this build can sample it exactly.
+LINEAR and STEP interpolation are supported; CUBICSPLINE and morph-target
+channels are not, and a clip that uses them is reported with the reason rather
+than played as an approximation of itself. A clip runs for more than zero and no
+more than 600 seconds, with at most 4,096 keyframes on a channel.
+
+A binding lives on the scene object, never on the clip. Two objects can share
+one clip and still be trimmed, sped, looped, and scrubbed apart, because the
+trim, speed, loop, playback position, and root-motion policy all belong to the
+object. A binding is checked before anything plays: the clip must exist in that
+file and be supported, the object's rig must be animation-ready and must have
+every bone the clip moves, and the trim, speed, and playback position must lie
+inside the clip.
+
+**Root motion policy.** A clip's movement of the root bone reaches the scene
+exactly once, under the object's own stated policy:
+
+- **Hold** (the default) keeps the character where the artist put it. The
+  root's travel is dropped from the pose and the object does not move.
+- **Offset** takes that same travel out of the pose and reports it once, as an
+  offset to the object's own position.
+
+Neither applies the movement twice, and no policy writes the object's saved
+transform: playback draws, and only a save writes.
+
+A rigid part needs no skeleton. It declares a pivot in its own local space, an
+axis, a swing between two angles, and a duration, optionally swinging back
+again. The pivot is the one point the motion leaves exactly where it is. A
+static prop declares no motion and sits where it was put at every time anyone
+asks about.
+
+Sampling is pure arithmetic over the stored files: it stores nothing, draws
+nothing, and gives the same numbers every time, so scrubbing to a known time has
+one right answer. A browser journey holds what the view has on screen against
+what the service says is true at the same time.
+
 ## Browser renderer
 
 The viewer uses **three.js 0.186.0** with its `GLTFLoader`, pinned to the exact
@@ -179,5 +218,7 @@ unavailable rather than showing an empty rectangle.
 Other containers (`.gltf` + external resources, FBX, OBJ, USD), Draco and
 Meshopt compression, texture transcoding, automatic repair, axis or unit
 conversion on import, any export of 3D data, and, for rigs, further body
-classes, hand and facial rigs, and retargeting between skeletons. None of these are supported,
+classes, hand and facial rigs, and retargeting between skeletons. For motion:
+clip blending, procedural motion generation, and animation editing beyond trim,
+speed, loop, and root-motion policy. None of these are supported,
 and none are implied by the presence of a model in the library.

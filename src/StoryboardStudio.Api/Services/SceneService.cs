@@ -111,6 +111,15 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         if (models.Length != assetIds.Length)
             return RepositoryResult<SceneSummary>.Invalid("Every modelled scene instance must reference a model in this project.");
 
+        // A clip binding is checked against the clip's own file and against the
+        // rig it would drive, before any of it is written. A mismatched skeleton
+        // or an out-of-range trim is refused here rather than at playback.
+        foreach (var instance in instances.Where(instance => instance.Clip is not null))
+        {
+            if (await ValidateClipAsync(instance, cancellationToken) is { } clipError)
+                return RepositoryResult<SceneSummary>.Invalid(clipError);
+        }
+
         var now = timeProvider.GetUtcNow();
         var existing = await db.SceneInstances.Where(x => x.SceneId == scene.Id).ToListAsync(cancellationToken);
         var kept = new HashSet<Guid>();
@@ -139,6 +148,24 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             record.PositionX = instance.Position[0]; record.PositionY = instance.Position[1]; record.PositionZ = instance.Position[2];
             record.RotationX = instance.Rotation[0]; record.RotationY = instance.Rotation[1]; record.RotationZ = instance.Rotation[2];
             record.ScaleX = instance.Scale[0]; record.ScaleY = instance.Scale[1]; record.ScaleZ = instance.Scale[2];
+            // Playback settings live on the object, which is what lets two
+            // objects share one clip and still be trimmed and scrubbed apart.
+            record.ClipAssetId = instance.Clip?.ClipAssetId;
+            record.ClipName = instance.Clip?.ClipName;
+            record.ClipStart = instance.Clip?.Start ?? 0;
+            record.ClipEnd = instance.Clip?.End ?? 0;
+            record.ClipSpeed = instance.Clip?.Speed ?? 1;
+            record.ClipTime = instance.Clip?.Time ?? 0;
+            record.ClipLoop = instance.Clip?.Loop ?? false;
+            record.ClipRootMotion = instance.Clip?.RootMotion;
+            record.MotionAxis = instance.Motion?.Axis;
+            record.MotionPivotX = instance.Motion?.Pivot[0] ?? 0;
+            record.MotionPivotY = instance.Motion?.Pivot[1] ?? 0;
+            record.MotionPivotZ = instance.Motion?.Pivot[2] ?? 0;
+            record.MotionFrom = instance.Motion?.FromRadians ?? 0;
+            record.MotionTo = instance.Motion?.ToRadians ?? 0;
+            record.MotionSeconds = instance.Motion?.Seconds ?? 0;
+            record.MotionPingPong = instance.Motion?.PingPong ?? false;
             record.UpdatedAt = now;
             kept.Add(record.Id);
         }
@@ -174,6 +201,10 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             .Where(x => x.SceneId == scene.Id).OrderBy(x => x.SortOrder).Take(MaxInstances).ToArrayAsync(cancellationToken);
         var assetIds = rows.Where(x => x.AssetId is not null).Select(x => x.AssetId!.Value).Distinct().ToArray();
         var models = await db.Assets.AsNoTracking().Where(x => assetIds.Contains(x.Id)).ToArrayAsync(cancellationToken);
+        var clipAssetIds = rows.Where(x => x.ClipAssetId is not null).Select(x => x.ClipAssetId!.Value).Distinct().ToArray();
+        var clipNames = (await db.Assets.AsNoTracking()
+            .Where(x => clipAssetIds.Contains(x.Id)).Select(x => new { x.Id, x.DisplayName }).ToArrayAsync(cancellationToken))
+            .ToDictionary(x => x.Id, x => x.DisplayName);
 
         var instances = new List<SceneInstanceSummary>(rows.Length);
         foreach (var row in rows)
@@ -189,7 +220,8 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
                     [row.RotationX, row.RotationY, row.RotationZ],
                     [row.ScaleX, row.ScaleY, row.ScaleZ],
                     "Placeholder", 1, null, true, false, size,
-                    new ScenePlaceholderSummary(shape, size), row.Role, row.SourcePlanId));
+                    new ScenePlaceholderSummary(shape, size), row.Role, row.SourcePlanId,
+                    null, DescribeMotion(row)));
                 continue;
             }
 
@@ -207,7 +239,8 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
                 asset?.RevisionNumber ?? 1,
                 available ? $"/api/assets/{row.AssetId}/content" : null,
                 available, asset?.IsArchived ?? false, dimensions,
-                null, row.Role, row.SourcePlanId));
+                null, row.Role, row.SourcePlanId,
+                DescribeClip(row, clipNames), DescribeMotion(row)));
         }
 
         return new SceneSummary(
@@ -216,6 +249,66 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
                 [scene.CameraTargetX, scene.CameraTargetY, scene.CameraTargetZ], scene.CameraFieldOfView),
             new SceneEnvironmentSummary(scene.KeyLightIntensity, scene.KeyLightYaw, scene.KeyLightPitch, scene.AmbientLightIntensity),
             [.. instances], scene.UpdatedAt);
+    }
+
+    private static SceneClipBindingSummary? DescribeClip(SceneInstanceRecord row, IReadOnlyDictionary<Guid, string> clipNames)
+    {
+        if (row.ClipAssetId is not { } clipAssetId || row.ClipName is not { } clipName) return null;
+        return new SceneClipBindingSummary(
+            clipAssetId, clipName, clipNames.GetValueOrDefault(clipAssetId),
+            row.ClipStart, row.ClipEnd, row.ClipSpeed, row.ClipTime, row.ClipLoop,
+            row.ClipRootMotion ?? nameof(ClipRootMotion.Hold));
+    }
+
+    private static SceneRigidMotionSummary? DescribeMotion(SceneInstanceRecord row) =>
+        row.MotionAxis is { } axis
+            ? new SceneRigidMotionSummary(
+                [row.MotionPivotX, row.MotionPivotY, row.MotionPivotZ],
+                axis, row.MotionFrom, row.MotionTo, row.MotionSeconds, row.MotionPingPong)
+            : null;
+
+    /// <summary>
+    /// A clip may only be bound to an object whose rig it actually fits. The
+    /// clip's own file is read for this, so a binding can never outlive the
+    /// skeleton it was checked against.
+    /// </summary>
+    private async Task<string?> ValidateClipAsync(SaveSceneInstanceRequest instance, CancellationToken cancellationToken)
+    {
+        var binding = instance.Clip!;
+        if (instance.AssetId is not { } assetId)
+            return "A clip needs a model to drive. A placeholder has no skeleton to animate.";
+        if (instance.Motion is not null)
+            return "An object plays a clip or turns about a pivot, not both at once.";
+
+        var clipSource = await assets.RigAndClipsAsync(binding.ClipAssetId, cancellationToken);
+        if (clipSource is null) return "That clip is not a model this project holds.";
+        var clip = clipSource.Value.Clips.FirstOrDefault(candidate => candidate.Name == binding.ClipName);
+        if (clip is null) return $"That clip has no animation called {binding.ClipName}.";
+        if (!clip.Supported) return "That clip is not supported, so it cannot be bound. Read its findings first.";
+
+        var target = await assets.RigAndClipsAsync(assetId, cancellationToken);
+        if (target is null) return "That object's model could not be read.";
+        var rig = target.Value.Rig;
+        if (!rig.HasSkeleton) return "That object has no skeleton, so it cannot play a clip.";
+        if (!rig.AnimationReady) return "That object's rig is not animation-ready, so it cannot play a clip.";
+
+        // Every bone the clip moves has to exist on the rig it would drive.
+        var bones = rig.Bones.Select(bone => bone.Name).ToHashSet(StringComparer.Ordinal);
+        var unmatched = clip.TargetBones.Where(bone => !bones.Contains(bone)).ToArray();
+        if (unmatched.Length > 0)
+            return $"That clip moves bones this object's skeleton does not have, starting with {unmatched[0]}.";
+
+        if (!double.IsFinite(binding.Start) || !double.IsFinite(binding.End) || binding.Start < 0 || binding.End > clip.Duration)
+            return $"A clip trim must lie between 0 and {clip.Duration} seconds.";
+        if (binding.End <= binding.Start)
+            return "A clip trim must end after it starts.";
+        if (!double.IsFinite(binding.Speed) || binding.Speed is < 0.1 or > 4)
+            return "Clip speed must be between 0.1 and 4.";
+        if (!double.IsFinite(binding.Time) || binding.Time < binding.Start || binding.Time > binding.End)
+            return "The playback position must lie inside the trimmed clip.";
+        if (binding.RootMotion is not (nameof(ClipRootMotion.Hold) or nameof(ClipRootMotion.Offset)))
+            return "Root motion must be Hold or Offset.";
+        return null;
     }
 
     private async Task<double[]> DimensionsAsync(Guid assetId, CancellationToken cancellationToken)
@@ -259,6 +352,13 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
     private static string? Validate(SaveSceneInstanceRequest instance)
     {
         if (ValidatePlaceholder(instance.AssetId, instance.Placeholder) is { } placeholderError) return placeholderError;
+        if (instance.Motion is { } motion)
+        {
+            if (instance.Clip is not null) return "An object plays a clip or turns about a pivot, not both at once.";
+            if (RigidMotionSampler.Validate(new RigidMotionSampler.Motion(
+                motion.Pivot, motion.Axis ?? "", motion.FromRadians, motion.ToRadians, motion.Seconds, motion.PingPong)) is { } motionError)
+                return motionError;
+        }
         if (instance.Position is not { Length: 3 } || instance.Rotation is not { Length: 3 } || instance.Scale is not { Length: 3 })
             return "Each instance needs a three-axis position, rotation, and scale.";
         if (instance.Position.Any(value => !double.IsFinite(value) || Math.Abs(value) > MaxDistanceFromOrigin))

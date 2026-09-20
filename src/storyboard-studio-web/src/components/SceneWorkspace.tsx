@@ -1,7 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { Box, Check, Copy, Image, LoaderCircle, MessageCirclePlus, Plus, Save, Trash2, X } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Box, Check, Copy, Image, LoaderCircle, MessageCirclePlus, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
-import type { AssetSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneSummary } from '../types'
+import type { AssetSummary, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneSummary } from '../types'
 
 // three.js loads only when a scene is actually opened.
 const SceneViewport = lazy(() => import('./SceneViewport'))
@@ -44,6 +44,15 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
   const [plans, setPlans] = useState<SceneBlockoutPlanSummary[]>([])
   /** The plan this scene was built from, when it was built from one. */
   const [builtFrom, setBuiltFrom] = useState<SceneBlockoutPlanSummary>()
+  /** Playback is one clock the whole scene reads; every object reads it through its own settings. */
+  const [playhead, setPlayhead] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [clipSourceId, setClipSourceId] = useState<string>()
+  const [sourceClips, setSourceClips] = useState<ModelClipSummary[]>([])
+  // Opening a scene is asynchronous, and the artist can create or open another
+  // one while the first is still arriving. Without a ticket the slower answer
+  // lands second and puts them back in a scene they have already left.
+  const openSequence = useRef(0)
 
   const loadDirection = useCallback(async (sceneId: string) => {
     try {
@@ -66,12 +75,26 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
     try { setBuiltFrom(await studioApi.sceneBlockoutForScene(opened.id)) } catch { setBuiltFrom(undefined) }
   }, [])
 
+  // A clip source is an ordinary library model; its clips are read from its own
+  // file rather than declared here.
+  useEffect(() => {
+    if (!clipSourceId) { setSourceClips([]); return }
+    let live = true
+    studioApi.modelProfile(clipSourceId)
+      .then(profile => { if (live) setSourceClips(profile.clips ?? []) })
+      .catch(() => { if (live) setSourceClips([]) })
+    return () => { live = false }
+  }, [clipSourceId])
+
   const refreshList = useCallback(async () => {
     try { setList(await studioApi.scenes()) } catch { setList([]) }
   }, [])
 
   useEffect(() => {
     let live = true
+    // The ticket is taken before anything is awaited, so a scene the artist
+    // creates or opens while this is still loading always wins.
+    const ticket = ++openSequence.current
     void (async () => {
       try {
         const [scenes, assets] = await Promise.all([studioApi.scenes(), studioApi.assets()])
@@ -79,9 +102,11 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
         setList(scenes)
         setModels(assets.filter(asset => asset.kind === 'Model' && !asset.isArchived))
         setReferences(assets.filter(asset => asset.kind === 'Image' && !asset.isArchived))
-        if (scenes.length > 0) {
+        if (scenes.length > 0 && ticket === openSequence.current) {
           const opened = await studioApi.scene(scenes[0].id)
-          if (live) { setScene(opened); setDirty(false); await loadDirection(opened.id); await loadProvenance(opened) }
+          if (live && ticket === openSequence.current) {
+            setScene(opened); setDirty(false); await loadDirection(opened.id); await loadProvenance(opened)
+          }
         }
       } catch (reason) {
         if (live) setError(reason instanceof Error ? reason.message : 'The scene list could not be opened.')
@@ -92,8 +117,10 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
 
   const open = async (sceneId: string) => {
     setError(undefined)
+    const ticket = ++openSequence.current
     try {
       const opened = await studioApi.scene(sceneId)
+      if (ticket !== openSequence.current) return
       setScene(opened); setSelectedId(undefined); setDirty(false)
       await loadDirection(sceneId)
       await loadProvenance(opened)
@@ -102,8 +129,10 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
 
   const create = async () => {
     setBusy(true); setError(undefined)
+    const ticket = ++openSequence.current
     try {
       const created = await studioApi.createScene(`Scene ${list.length + 1}`)
+      if (ticket !== openSequence.current) return
       setScene(created); setSelectedId(undefined); setDirty(false)
       // A new scene starts with no notes, proposals, or provenance; keeping the
       // previous scene's would show one scene's direction against another's
@@ -163,6 +192,8 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
           // A stand-in is saved as itself; dropping this would leave an object
           // with a transform and nothing under it.
           placeholder: instance.placeholder ?? null,
+          clip: instance.clip ?? null,
+          motion: instance.motion ?? null,
         })),
       })
       setScene(saved); setDirty(false)
@@ -181,6 +212,34 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
 
   useEffect(() => { void loadPlans(referenceId) }, [referenceId, loadPlans])
 
+  // How long this scene's motion runs: the longest any one object plays for at
+  // its own speed, so the transport covers everything in it.
+  const runtime = useMemo(() => Math.max(2, ...(scene?.instances ?? []).map(instance => {
+    if (instance.motion) return instance.motion.seconds
+    if (!instance.clip) return 0
+    const span = instance.clip.end > instance.clip.start ? instance.clip.end - instance.clip.start : 0
+    return span / (instance.clip.speed > 0 ? instance.clip.speed : 1)
+  })), [scene])
+
+  // One clock, advanced only while the artist is playing. Scrubbing sets it
+  // directly, which is the same thing at a different time.
+  useEffect(() => {
+    if (!playing) return
+    let frame = 0
+    let last = performance.now()
+    const step = (now: number) => {
+      const elapsed = (now - last) / 1000
+      last = now
+      setPlayhead(current => {
+        const next = current + elapsed
+        return next > runtime ? next % runtime : next
+      })
+      frame = requestAnimationFrame(step)
+    }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [playing, runtime])
+
   useEffect(() => {
     if (!blockoutSignal) return
     void loadPlans(referenceId)
@@ -196,6 +255,44 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
   const selectedNotes = useMemo(
     () => annotations.filter(note => note.instanceId === selectedId && note.state === 'Open'),
     [annotations, selectedId])
+
+  const bindClip = (clipName: string) => {
+    if (!selected || !clipSourceId) return
+    const clip = sourceClips.find(candidate => candidate.name === clipName)
+    if (!clip) return
+    editInstance(selected.id, instance => ({
+      ...instance,
+      motion: null,
+      clip: {
+        clipAssetId: clipSourceId, clipName: clip.name, clipAssetName: null,
+        start: 0, end: clip.duration, speed: 1, time: 0, loop: false, rootMotion: 'Hold',
+      },
+    }))
+  }
+
+  const editClip = (change: Partial<NonNullable<SceneInstanceSummary['clip']>>) => {
+    if (!selected?.clip) return
+    editInstance(selected.id, instance => {
+      const clip = { ...instance.clip!, ...change }
+      // Trimming a clip cannot leave the playback position outside it, which
+      // would be a binding the service is right to refuse.
+      return { ...instance, clip: { ...clip, time: Math.min(Math.max(clip.time, clip.start), clip.end) } }
+    })
+  }
+
+  const bindMotion = () => {
+    if (!selected) return
+    editInstance(selected.id, instance => ({
+      ...instance,
+      clip: null,
+      motion: { pivot: [0, 0, 0], axis: 'Y', fromRadians: 0, toRadians: 1.5708, seconds: 2, pingPong: false },
+    }))
+  }
+
+  const editMotion = (change: Partial<NonNullable<SceneInstanceSummary['motion']>>) => {
+    if (!selected?.motion) return
+    editInstance(selected.id, instance => ({ ...instance, motion: { ...instance.motion!, ...change } }))
+  }
 
   // A note is placed on the object under the pointer and anchored in that
   // object's own space, so it keeps meaning the same spot when the object moves.
@@ -258,7 +355,9 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
   const buildBlockout = async (plan: SceneBlockoutPlanSummary) => {
     setBusy(true); setError(undefined)
     try {
+      const ticket = ++openSequence.current
       const built = await studioApi.applySceneBlockout(plan.id, plan.title)
+      if (ticket !== openSequence.current) return
       setScene(built); setSelectedId(undefined); setDirty(false)
       await loadDirection(built.id)
       await loadProvenance(built)
@@ -296,7 +395,7 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
           : <h1>No scene yet</h1>}
       </div>
       <div className="scene-header-actions">
-        {list.length > 1 && <select aria-label="Open scene" value={scene?.id ?? ''} onChange={event => void open(event.target.value)}>
+        {list.length > 1 && <select aria-label="Open scene" value={scene?.id ?? ''} disabled={busy} onChange={event => void open(event.target.value)}>
           {list.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>}
         <button className="secondary" disabled={busy} onClick={() => void create()}><Plus size={16} />New scene</button>
@@ -319,6 +418,8 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
                 environment={scene.environment}
                 selectedId={selectedId}
                 noteMode={noteMode}
+                playhead={playhead}
+                playing={playing}
                 onSelect={setSelectedId}
                 onPlaceNote={placeNote}
                 onCameraChange={(camera: SceneCameraSummary) => edit(current => ({ ...current, camera }))}
@@ -337,13 +438,16 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
                     <strong>{instance.name}</strong>
                     <small>{instance.placeholder
                       ? `${instance.placeholder.shape} stand-in`
-                      : `${instance.assetName} · v${instance.revisionNumber}${instance.available ? '' : ' · unavailable'}`}</small>
+                      : `${instance.assetName} · v${instance.revisionNumber}${instance.available ? '' : ' · unavailable'}`}
+                      {instance.clip ? ` · ${instance.clip.clipName}` : instance.motion ? ' · turns on a pivot' : ''}</small>
                   </button>
                 </li>)}
               </ul>
               {scene.instances.length === 0 && <p className="model-note">No objects yet. Add a model below.</p>}
               <div className="scene-add">
-                <label>Add model<select aria-label="Add model to scene" value="" disabled={models.length === 0}
+                {/* Editing the scene on screen while another is being opened or
+                    created would be editing one that is about to be replaced. */}
+                <label>Add model<select aria-label="Add model to scene" value="" disabled={busy || models.length === 0}
                   onChange={event => { const model = models.find(item => item.id === event.target.value); if (model) addInstance(model) }}>
                   <option value="">{models.length === 0 ? 'No models in the library yet' : 'Choose a model…'}</option>
                   {models.map(model => <option key={model.id} value={model.id}>{model.displayName}</option>)}
@@ -386,6 +490,96 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
               </div>
               <p className="model-note">Removing an object takes it out of this scene only. The model stays in the library.</p>
             </section>}
+
+            <section data-testid="scene-motion">
+              <h2>Motion</h2>
+              <div className="scene-transport">
+                <button type="button" data-testid="scene-play" onClick={() => setPlaying(value => !value)}>
+                  {playing ? <Pause size={15} /> : <Play size={15} />}{playing ? 'Pause' : 'Play'}
+                </button>
+                <label>Time <small data-testid="scene-playhead">{playhead.toFixed(2)} s</small>
+                  <input type="range" min={0} max={runtime} step={0.05} aria-label="Playback time" value={Math.min(playhead, runtime)}
+                    onChange={event => { setPlaying(false); setPlayhead(Number(event.target.value)) }} /></label>
+              </div>
+              <p className="model-note">Playback draws only. Nothing here changes an object until you save it.</p>
+
+              {!selected && <p className="model-note">Select an object to give it a clip or a pivot.</p>}
+              {selected && !selected.placeholder && <>
+                <label>Clip source<select aria-label="Clip source" value={clipSourceId ?? ''}
+                  onChange={event => setClipSourceId(event.target.value || undefined)}>
+                  <option value="">Choose a model that carries clips…</option>
+                  {models.map(model => <option key={model.id} value={model.id}>{model.displayName}</option>)}
+                </select></label>
+                {clipSourceId && <label>Clip<select aria-label="Clip" value={selected.clip?.clipName ?? ''}
+                  onChange={event => bindClip(event.target.value)}>
+                  <option value="">{sourceClips.length === 0 ? 'This model carries no clips' : 'Choose a clip…'}</option>
+                  {sourceClips.filter(clip => clip.supported).map(clip => <option key={clip.name} value={clip.name}>
+                    {clip.name} · {clip.duration.toFixed(2)} s
+                  </option>)}
+                </select></label>}
+                {sourceClips.some(clip => !clip.supported) && <p className="model-note">
+                  {sourceClips.filter(clip => !clip.supported).length} clip(s) in that file are not supported and are not offered.
+                </p>}
+
+                {selected.clip && <div className="scene-clip" data-testid="scene-clip">
+                  <p className="model-note">{selected.clip.clipName}{selected.clip.clipAssetName ? ` · from ${selected.clip.clipAssetName}` : ''}</p>
+                  <div className="scene-vector">
+                    <span>Trim (seconds)</span>
+                    <div>
+                      <label>From<input type="number" step={0.1} min={0} aria-label="Clip start" value={selected.clip.start}
+                        onChange={event => editClip({ start: Number(event.target.value) })} /></label>
+                      <label>To<input type="number" step={0.1} min={0} aria-label="Clip end" value={selected.clip.end}
+                        onChange={event => editClip({ end: Number(event.target.value) })} /></label>
+                      <label>Speed<input type="number" step={0.1} min={0.1} max={4} aria-label="Clip speed" value={selected.clip.speed}
+                        onChange={event => editClip({ speed: Number(event.target.value) })} /></label>
+                    </div>
+                  </div>
+                  <label className="scene-check"><input type="checkbox" checked={selected.clip.loop}
+                    onChange={event => editClip({ loop: event.target.checked })} />Loop</label>
+                  <label>Root motion<select aria-label="Root motion" value={selected.clip.rootMotion}
+                    onChange={event => editClip({ rootMotion: event.target.value as 'Hold' | 'Offset' })}>
+                    <option value="Hold">Hold · the character stays where you put it</option>
+                    <option value="Offset">Offset · the clip moves the object once</option>
+                  </select></label>
+                  <button type="button" onClick={() => editInstance(selected.id, instance => ({ ...instance, clip: null }))}>Clear clip</button>
+                </div>}
+              </>}
+
+              {selected && !selected.clip && <div className="scene-rigid">
+                {!selected.motion
+                  ? <button type="button" data-testid="scene-add-motion" onClick={bindMotion}>Turn about a pivot</button>
+                  : <div data-testid="scene-motion-track">
+                      <div className="scene-vector">
+                        <span>Pivot (metres, in this object's own space)</span>
+                        <div>
+                          {axes.map((axis, index) => <label key={axis}>{axis}
+                            <input type="number" step={0.1} aria-label={`pivot ${axis}`} value={selected.motion!.pivot[index]}
+                              onChange={event => editMotion({ pivot: selected.motion!.pivot.map((value, position) => position === index ? Number(event.target.value) : value) })} />
+                          </label>)}
+                        </div>
+                      </div>
+                      <div className="scene-vector">
+                        <span>Swing</span>
+                        <div>
+                          <label>Axis<select aria-label="Motion axis" value={selected.motion!.axis}
+                            onChange={event => editMotion({ axis: event.target.value as 'X' | 'Y' | 'Z' })}>
+                            {axes.map(axis => <option key={axis} value={axis}>{axis}</option>)}
+                          </select></label>
+                          <label>From<input type="number" step={0.05} aria-label="Motion from" value={selected.motion!.fromRadians}
+                            onChange={event => editMotion({ fromRadians: Number(event.target.value) })} /></label>
+                          <label>To<input type="number" step={0.05} aria-label="Motion to" value={selected.motion!.toRadians}
+                            onChange={event => editMotion({ toRadians: Number(event.target.value) })} /></label>
+                          <label>Seconds<input type="number" step={0.1} min={0.1} aria-label="Motion seconds" value={selected.motion!.seconds}
+                            onChange={event => editMotion({ seconds: Number(event.target.value) })} /></label>
+                        </div>
+                      </div>
+                      <label className="scene-check"><input type="checkbox" checked={selected.motion!.pingPong}
+                        onChange={event => editMotion({ pingPong: event.target.checked })} />Swing back again</label>
+                      <button type="button" onClick={() => editInstance(selected.id, instance => ({ ...instance, motion: null }))}>Clear motion</button>
+                    </div>}
+                <p className="model-note">A rigid part needs no skeleton. The pivot is the one point the swing leaves where it is.</p>
+              </div>}
+            </section>
 
             <section data-testid="scene-reference">
               <h2>Reference</h2>

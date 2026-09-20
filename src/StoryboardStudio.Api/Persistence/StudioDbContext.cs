@@ -704,6 +704,25 @@ public sealed class SceneInstanceRecord
     public string? Role { get; set; }
     /// <summary>The construction plan this object came from, so its reasoning stays inspectable.</summary>
     public Guid? SourcePlanId { get; set; }
+    /// <summary>The clip bound to this one object, with its own playback settings.</summary>
+    public Guid? ClipAssetId { get; set; }
+    public string? ClipName { get; set; }
+    public double ClipStart { get; set; }
+    public double ClipEnd { get; set; }
+    public double ClipSpeed { get; set; } = 1;
+    public double ClipTime { get; set; }
+    public bool ClipLoop { get; set; }
+    /// <summary>How this object's clip moves its root: Hold or Offset, never both.</summary>
+    public string? ClipRootMotion { get; set; }
+    /// <summary>A rigid part's declared pivot and swing, for an object with no skeleton.</summary>
+    public string? MotionAxis { get; set; }
+    public double MotionPivotX { get; set; }
+    public double MotionPivotY { get; set; }
+    public double MotionPivotZ { get; set; }
+    public double MotionFrom { get; set; }
+    public double MotionTo { get; set; }
+    public double MotionSeconds { get; set; }
+    public bool MotionPingPong { get; set; }
     public required string Name { get; set; }
     public int SortOrder { get; set; }
     public double PositionX { get; set; }

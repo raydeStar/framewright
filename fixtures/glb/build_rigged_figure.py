@@ -15,6 +15,14 @@ good one in exactly the way their name says and in nothing else:
                               can claim is animation-ready
     rigged-broken-skin.glb    the same skeleton, with one vertex whose weights
                               are all zero, so it belongs to no bone at all
+    clip-arm-raise.glb        the same figure carrying two reusable clips:
+                              "Arm raise", which turns the character's left
+                              upper arm a quarter turn over two seconds, and
+                              "Step forward", which translates the hips 0.6 m
+                              along +Z over two seconds so root motion has
+                              something to be a policy about
+    clip-wrong-skeleton.glb   a clip for the generically named skeleton, which
+                              no humanoid character can accept
 
 The figure is deliberately asymmetric: the character's left arm is longer than
 its right, so a mirrored import lands somewhere a test can see. The convention
@@ -78,12 +86,28 @@ def box_at(centre, size):
     return corners, faces
 
 
+# name, bone, path, keyframe times, keyframe values. Rotations are quaternions.
+CLIPS = [
+    ("Arm raise", "LeftUpperArm", "rotation", [0.0, 1.0, 2.0], [
+        (0.0, 0.0, 0.0, 1.0),
+        (0.0, 0.0, 0.38268343, 0.92387953),   # 45 degrees about Z
+        (0.0, 0.0, 0.70710678, 0.70710678),   # 90 degrees about Z
+    ]),
+    ("Step forward", "Hips", "translation", [0.0, 1.0, 2.0], [
+        (0.0, 0.95, 0.0),
+        (0.0, 0.95, 0.3),
+        (0.0, 0.95, 0.6),
+    ]),
+]
+
+
 def pad(data: bytes, filler: bytes) -> bytes:
     remainder = len(data) % 4
     return data if remainder == 0 else data + filler * (4 - remainder)
 
 
-def build(output: pathlib.Path, scene_name: str, *, generic_names: bool = False, break_skin: bool = False) -> None:
+def build(output: pathlib.Path, scene_name: str, *, generic_names: bool = False, break_skin: bool = False,
+          with_clips: bool = False) -> None:
     index, world = world_positions()
 
     positions, indices, joints, weights = [], [], [], []
@@ -113,7 +137,16 @@ def build(output: pathlib.Path, scene_name: str, *, generic_names: bool = False,
         struct.pack("<16f", 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -world[name][0], -world[name][1], -world[name][2], 1)
         for name, *_rest in SKELETON)
 
-    chunks = [position_bytes, index_bytes, joint_bytes, weight_bytes, bind_bytes]
+    # Clip keyframes live in the same binary chunk as everything else, so a clip
+    # is an ordinary self-contained GLB rather than a second kind of file.
+    clip_chunks = []
+    if with_clips:
+        for _name, _bone, path, times, values in CLIPS:
+            clip_chunks.append(b"".join(struct.pack("<f", time) for time in times))
+            stride = 4 if path == "rotation" else 3
+            clip_chunks.append(b"".join(struct.pack(f"<{stride}f", *value) for value in values))
+
+    chunks = [position_bytes, index_bytes, joint_bytes, weight_bytes, bind_bytes, *clip_chunks]
     binary = b""
     offsets = []
     for chunk in chunks:
@@ -180,6 +213,32 @@ def build(output: pathlib.Path, scene_name: str, *, generic_names: bool = False,
         "buffers": [{"byteLength": len(binary)}],
     }
 
+    if with_clips:
+        index_of = {name: position for position, (name, *_rest) in enumerate(SKELETON)}
+        animations = []
+        for clip_index, (name, bone, path, times, values) in enumerate(CLIPS):
+            time_accessor = len(document["accessors"])
+            value_accessor = time_accessor + 1
+            view = len(document["bufferViews"])
+            time_bytes = clip_chunks[clip_index * 2]
+            value_bytes = clip_chunks[clip_index * 2 + 1]
+            document["bufferViews"].append(
+                {"buffer": 0, "byteOffset": offsets[5 + clip_index * 2], "byteLength": len(time_bytes)})
+            document["bufferViews"].append(
+                {"buffer": 0, "byteOffset": offsets[6 + clip_index * 2], "byteLength": len(value_bytes)})
+            document["accessors"].append(
+                {"bufferView": view, "componentType": 5126, "count": len(times), "type": "SCALAR",
+                 "min": [min(times)], "max": [max(times)]})
+            document["accessors"].append(
+                {"bufferView": view + 1, "componentType": 5126, "count": len(values),
+                 "type": "VEC4" if path == "rotation" else "VEC3"})
+            animations.append({
+                "name": name,
+                "samplers": [{"input": time_accessor, "interpolation": "LINEAR", "output": value_accessor}],
+                "channels": [{"sampler": 0, "target": {"node": index_of[bone] + 1, "path": path}}],
+            })
+        document["animations"] = animations
+
     json_chunk = pad(json.dumps(document, separators=(",", ":")).encode("utf-8"), b" ")
     total = 12 + 8 + len(json_chunk) + 8 + len(binary)
     glb = struct.pack("<III", 0x46546C67, 2, total)
@@ -195,6 +254,8 @@ def main() -> None:
     build(HERE / "rigged-figure.glb", "Rigged figure")
     build(HERE / "rigged-wrong-profile.glb", "Rigged figure wrong profile", generic_names=True)
     build(HERE / "rigged-broken-skin.glb", "Rigged figure broken skin", break_skin=True)
+    build(HERE / "clip-arm-raise.glb", "Clip arm raise", with_clips=True)
+    build(HERE / "clip-wrong-skeleton.glb", "Clip wrong skeleton", generic_names=True, with_clips=True)
 
 
 if __name__ == "__main__":

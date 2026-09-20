@@ -129,6 +129,9 @@ export interface SceneInstanceSummary {
   placeholder?: ScenePlaceholderSummary | null
   /** What this object is for, and the plan that put it here. Both server-owned. */
   role?: string | null; planId?: string | null
+  /** This object's own clip and playback settings, or its own rigid motion. Never both. */
+  clip?: SceneClipBindingSummary | null
+  motion?: SceneRigidMotionSummary | null
 }
 /** One object in a construction plan read off a reference. */
 export interface SceneBlockoutItemSummary {
@@ -190,6 +193,31 @@ export interface RigPoseSummary {
   assetId: string; contentHash: string; profileId: string
   joints: { bone: string; parent: string | null; position: number[]; restPosition: number[] }[]
 }
+/** One reusable clip a model carries, as its file declares it. */
+export interface ModelClipSummary {
+  name: string; duration: number; channelCount: number
+  targetBones: string[]; paths: string[]; movesRoot: boolean
+  supported: boolean; findings: string[]
+}
+/** A clip bound to one object, with that object's own playback settings. */
+export interface SceneClipBindingSummary {
+  clipAssetId: string; clipName: string; clipAssetName: string | null
+  start: number; end: number; speed: number; time: number; loop: boolean
+  rootMotion: 'Hold' | 'Offset'
+}
+/** A rigid part turning about a pivot declared in its own space. No skeleton. */
+export interface SceneRigidMotionSummary {
+  pivot: number[]; axis: 'X' | 'Y' | 'Z'
+  fromRadians: number; toRadians: number; seconds: number; pingPong: boolean
+}
+/** Where one object sits at one exact time, calculated by the service. */
+export interface SceneMotionSampleSummary {
+  sceneId: string; instanceId: string; instanceName: string; time: number
+  kind: 'Character' | 'RigidPart' | 'Static'
+  joints: { bone: string; parent: string | null; position: number[]; restPosition: number[] }[]
+  rootOffset: number[]; rootMotion: 'Hold' | 'Offset'
+  position: number[]; rotation: number[]; angle: number
+}
 /** What the artist reads about a stored model, measured from the stored bytes. */
 export interface ModelProfileSummary {
   assetId: string; displayName: string; contentHash: string; bytes: number; contentUrl: string
@@ -201,5 +229,6 @@ export interface ModelProfileSummary {
   boundsMin: number[]; boundsMax: number[]; dimensions: number[]
   limits: ModelSupportLimits
   rig?: ModelRigSummary | null
+  clips?: ModelClipSummary[] | null
 }
 export interface AgentActivityEntry { id: number; tool: string; state: 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'; message: string; at: string }

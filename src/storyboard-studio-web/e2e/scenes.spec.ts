@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const block = fileURLToPath(new URL('../../../fixtures/glb/asymmetric-block.glb', import.meta.url))
+const figure = fileURLToPath(new URL('../../../fixtures/glb/rigged-figure.glb', import.meta.url))
+const clip = fileURLToPath(new URL('../../../fixtures/glb/clip-arm-raise.glb', import.meta.url))
 
 function failOnConsoleErrors(page: Page, allowed: RegExp[] = []) {
   const errors: string[] = []
@@ -437,6 +439,154 @@ test('a blockout plan the artist rejects builds nothing at all', async ({ page }
   const scenesAfter = await (await page.request.get('/api/scenes')).json()
   expect(scenesAfter.length).toBe(scenesBefore.length)
   await expect(page.getByTestId('scene-object-count')).toContainText('0 objects')
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  verifyConsole()
+})
+
+test('two characters share one clip with their own settings, and a door swings on its pivot', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  const characterName = `motion-figure-${label}`
+  const clipName = `motion-clip-${label}`
+  const propName = `motion-door-${label}`
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: `${characterName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(figure, `motion-figure-${label}`) },
+    { name: `${clipName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(clip, `motion-clip-${label}`) },
+    { name: `${propName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, `motion-door-${label}`) },
+  ])
+  await expect(page.getByText('3 assets imported into the library.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+
+  // Two characters of the same model, and a door.
+  const objects = page.getByTestId('scene-objects')
+  const placement = page.getByTestId('scene-placement')
+  const motion = page.getByTestId('scene-motion')
+
+  await objects.getByLabel('Add model to scene').selectOption({ label: characterName })
+  await expect(objects.getByRole('button', { name: /Lead|motion-figure/ }).first()).toBeVisible()
+  await placement.getByLabel('Object name').fill('Lead')
+  await placement.getByLabel('position X').fill('-2')
+  await motion.getByLabel('Clip source').selectOption({ label: clipName })
+  await motion.getByLabel('Clip', { exact: true }).selectOption('Arm raise')
+  await expect(page.getByTestId('scene-clip')).toContainText('Arm raise')
+
+  await objects.getByLabel('Add model to scene').selectOption({ label: characterName })
+  await placement.getByLabel('Object name').fill('Double')
+  await placement.getByLabel('position X').fill('2')
+  await motion.getByLabel('Clip source').selectOption({ label: clipName })
+  await motion.getByLabel('Clip', { exact: true }).selectOption('Arm raise')
+  // The double is trimmed and sped: the same clip, its own settings.
+  await motion.getByLabel('Clip start').fill('0.5')
+  await motion.getByLabel('Clip end').fill('1.5')
+  await motion.getByLabel('Clip speed').fill('2')
+  await motion.getByLabel('Loop').check()
+
+  await objects.getByLabel('Add model to scene').selectOption({ label: propName })
+  await placement.getByLabel('Object name').fill('Door')
+  await placement.getByLabel('position X').fill('5')
+  await motion.getByTestId('scene-add-motion').click()
+  await motion.getByLabel('pivot X').fill('-1')
+  await motion.getByLabel('Motion to').fill('1.5708')
+  await motion.getByLabel('Motion seconds').fill('2')
+
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+
+  // Scrub to a known time. What the view has on screen is held against what the
+  // service says is true at that time, object by object.
+  await motion.getByLabel('Playback time').fill('1')
+  await expect(page.getByTestId('scene-playhead')).toContainText('1.00 s')
+
+  const scenes = await (await page.request.get('/api/scenes')).json()
+  const scene = await (await page.request.get(`/api/scenes/${scenes[0].id}`)).json()
+  const lead = scene.instances.find((instance: { name: string }) => instance.name === 'Lead')
+  const stunt = scene.instances.find((instance: { name: string }) => instance.name === 'Double')
+  const door = scene.instances.find((instance: { name: string }) => instance.name === 'Door')
+
+  const sample = async (instanceId: string, time: number) =>
+    (await (await page.request.get(`/api/scenes/${scene.id}/instances/${instanceId}/motion-sample?time=${time}`)).json())
+
+  const leadSample = await sample(lead.id, 1)
+  const doubleSample = await sample(stunt.id, 1)
+  const leadHand = leadSample.joints.find((joint: { bone: string }) => joint.bone === 'LeftHand').position
+  const doubleHand = doubleSample.joints.find((joint: { bone: string }) => joint.bone === 'LeftHand').position
+  // One clip, two objects, two different places in it.
+  expect(leadHand).not.toEqual(doubleHand)
+
+  const stage = page.getByTestId('scene-stage')
+  // Two skinned objects, two skeletons. One shared skeleton would pose them
+  // identically however separate their settings are.
+  await expect.poll(async () => stage.evaluate(node => node.dataset.skinned)).toBe('2')
+  await expect(stage).toHaveAttribute('data-skeletons', '2')
+  const posed = async () => JSON.parse((await stage.evaluate(node => node.dataset.posed)) ?? '{}')
+  await expect.poll(async () => Object.keys(await posed()).length).toBeGreaterThanOrEqual(3)
+  const onScreen = await posed()
+
+  // The character's hand on screen is where the service says it is. Positions
+  // are in the model's own space in the sample and in scene space on screen,
+  // so the object's placement is what relates them.
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.05
+  expect(near(onScreen[lead.id][0], leadHand[0] + lead.position[0])).toBeTruthy()
+  expect(near(onScreen[lead.id][1], leadHand[1])).toBeTruthy()
+  expect(near(onScreen[stunt.id][0], doubleHand[0] + stunt.position[0])).toBeTruthy()
+
+  // The door swings about the pivot it declared, and the pivot is the one point
+  // that does not move.
+  const doorSample = await sample(door.id, 2)
+  expect(doorSample.kind).toBe('RigidPart')
+  expect(doorSample.rotation[1]).toBeCloseTo(1.5708, 3)
+  expect(doorSample.position[0] - Math.cos(doorSample.rotation[1])).toBeCloseTo(4, 3)
+
+  // Playing and pausing changes what is drawn and nothing else: the scene is
+  // still saved, at the version it was saved at.
+  await motion.getByTestId('scene-play').click()
+  await expect(page.getByTestId('scene-play')).toContainText('Pause')
+  await motion.getByTestId('scene-play').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+  await expect(page.getByTestId('scene-save')).toBeDisabled()
+
+  // Bindings and timing reopen exactly as they were saved.
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByTestId('scene-objects').getByRole('button', { name: /Double/ }).click()
+  await expect(page.getByTestId('scene-clip')).toContainText('Arm raise')
+  await expect(page.getByTestId('scene-motion').getByLabel('Clip speed')).toHaveValue('2')
+  await expect(page.getByTestId('scene-motion').getByLabel('Loop')).toBeChecked()
+  verifyConsole()
+})
+
+test('a clip for another skeleton is refused before anything plays', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/, /400 \(Bad Request\)/])
+  const label = testInfo.project.name
+  const propName = `mismatch-prop-${label}`
+  const clipName = `mismatch-clip-${label}`
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: `${propName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, `mismatch-prop-${label}`) },
+    { name: `${clipName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(clip, `mismatch-clip-${label}`) },
+  ])
+  await expect(page.getByText('2 assets imported into the library.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await page.getByTestId('scene-objects').getByLabel('Add model to scene').selectOption({ label: propName })
+  await page.getByTestId('scene-placement').getByLabel('Object name').fill('Crate')
+
+  // A crate has no skeleton, so a character clip is refused by the save rather
+  // than played against nothing.
+  const motion = page.getByTestId('scene-motion')
+  await motion.getByLabel('Clip source').selectOption({ label: clipName })
+  await motion.getByLabel('Clip', { exact: true }).selectOption('Arm raise')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-error')).toContainText('skeleton')
   await expect(page.getByTestId('scene-version')).toContainText('Version 1')
   verifyConsole()
 })

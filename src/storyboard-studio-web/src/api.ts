@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorShotView, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, ScenePlaceholderSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorShotView, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -127,8 +127,10 @@ export const studioApi = {
   scenes: () => request<SceneListItem[]>('/api/scenes'),
   scene: (sceneId: string) => request<SceneSummary>(`/api/scenes/${sceneId}`),
   createScene: (name: string) => request<SceneSummary>('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) }),
-  saveScene: (sceneId: string, body: { expectedVersion: number; name: string; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: { id: string; assetId: string | null; name: string; position: number[]; rotation: number[]; scale: number[]; placeholder?: ScenePlaceholderSummary | null }[] }) =>
+  saveScene: (sceneId: string, body: { expectedVersion: number; name: string; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: { id: string; assetId: string | null; name: string; position: number[]; rotation: number[]; scale: number[]; placeholder?: ScenePlaceholderSummary | null; clip?: SceneClipBindingSummary | null; motion?: SceneRigidMotionSummary | null }[] }) =>
     request<SceneSummary>(`/api/scenes/${sceneId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  sceneMotionSample: (sceneId: string, instanceId: string, time: number) =>
+    request<SceneMotionSampleSummary>(`/api/scenes/${sceneId}/instances/${instanceId}/motion-sample?time=${time}`),
   sceneAnnotations: (sceneId: string) => request<SceneAnnotationSummary[]>(`/api/scenes/${sceneId}/annotations`),
   addSceneAnnotation: (sceneId: string, body: { instanceId: string; anchor: number[]; camera: SceneCameraSummary; body: string }) =>
     request<SceneAnnotationSummary>(`/api/scenes/${sceneId}/annotations`, { method: 'POST', body: JSON.stringify(body) }),

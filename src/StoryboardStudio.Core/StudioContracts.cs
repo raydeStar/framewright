@@ -121,7 +121,8 @@ public sealed record SceneInstanceSummary(
     double[] Position, double[] Rotation, double[] Scale,
     string AssetName, int RevisionNumber, string? ContentUrl,
     bool Available, bool Archived, double[] Dimensions,
-    ScenePlaceholderSummary? Placeholder = null, string? Role = null, Guid? PlanId = null);
+    ScenePlaceholderSummary? Placeholder = null, string? Role = null, Guid? PlanId = null,
+    SceneClipBindingSummary? Clip = null, SceneRigidMotionSummary? Motion = null);
 
 public sealed record SceneSummary(
     Guid Id, string Name, int Version,
@@ -134,7 +135,9 @@ public sealed record CreateSceneRequest(string Name);
 
 public sealed record SaveSceneInstanceRequest(
     Guid Id, Guid? AssetId, string Name, double[] Position, double[] Rotation, double[] Scale,
-    ScenePlaceholderSummary? Placeholder = null);
+    ScenePlaceholderSummary? Placeholder = null,
+    SceneClipBindingSummary? Clip = null,
+    SceneRigidMotionSummary? Motion = null);
 
 public sealed record SaveSceneRequest(
     int ExpectedVersion, string Name,
@@ -223,6 +226,35 @@ public sealed record RigJointPlacementSummary(string Bone, string? Parent, doubl
 public sealed record RigPoseSummary(
     Guid AssetId, string ContentHash, string ProfileId, RigJointPlacementSummary[] Joints);
 
+/// <summary>One reusable clip a model carries, as the file declares it.</summary>
+public sealed record ModelClipSummary(
+    string Name, double Duration, int ChannelCount,
+    string[] TargetBones, string[] Paths, bool MovesRoot,
+    bool Supported, string[] Findings);
+
+/// <summary>
+/// A clip bound to one scene object, with that object's own playback settings.
+/// Two objects can share one clip and still be trimmed, looped, sped, and
+/// scrubbed independently, because every one of these values lives here.
+/// </summary>
+public sealed record SceneClipBindingSummary(
+    Guid ClipAssetId, string ClipName, string? ClipAssetName,
+    double Start, double End, double Speed, double Time, bool Loop, string RootMotion);
+
+/// <summary>
+/// A rigid part turning about a declared pivot, with no skeleton involved. The
+/// pivot is a point in the object's own space, and it is the one point the
+/// motion leaves exactly where it is.
+/// </summary>
+public sealed record SceneRigidMotionSummary(
+    double[] Pivot, string Axis, double FromRadians, double ToRadians, double Seconds, bool PingPong);
+
+/// <summary>Where one object sits at one exact time. Calculated, never stored.</summary>
+public sealed record SceneMotionSampleSummary(
+    Guid SceneId, Guid InstanceId, string InstanceName, double Time, string Kind,
+    RigJointPlacementSummary[] Joints, double[] RootOffset, string RootMotion,
+    double[] Position, double[] Rotation, double Angle);
+
 public sealed record ModelProfileSummary(
     Guid AssetId, string DisplayName, string ContentHash, long Bytes, string ContentUrl,
     string Container, string SpecificationVersion, string Generator,
@@ -232,7 +264,8 @@ public sealed record ModelProfileSummary(
     ModelMaterialSummary[] Materials,
     double[] BoundsMin, double[] BoundsMax, double[] Dimensions,
     ModelSupportLimits Limits,
-    ModelRigSummary? Rig = null);
+    ModelRigSummary? Rig = null,
+    ModelClipSummary[]? Clips = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AssetKind
