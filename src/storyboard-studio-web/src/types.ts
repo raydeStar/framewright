@@ -193,6 +193,15 @@ export interface RigPoseSummary {
   assetId: string; contentHash: string; profileId: string
   joints: { bone: string; parent: string | null; position: number[]; restPosition: number[] }[]
 }
+/**
+ * Whether model generation can run here, and whether it is allowed to.
+ * Capability and permission are separate answers.
+ */
+export interface ModelGenerationReadiness {
+  installed: boolean; commissioned: boolean; canRun: boolean
+  compilerVersion: string | null; checkout: string | null; blender: string | null
+  missing: string[]; detail: string
+}
 /** One reusable clip a model carries, as its file declares it. */
 export interface ModelClipSummary {
   name: string; duration: number; channelCount: number

@@ -222,6 +222,43 @@ public sealed class ModelGenerationApiTests
     }
 
     [Fact]
+    public async Task HalfAnAnswerIsRunAgainOutLoudRatherThanQuietly()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "half-answer-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Half an answer" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var jobId = job.RootElement.GetProperty("id").GetGuid();
+
+        // A stage that died between writing its payload and writing its receipt
+        // leaves exactly this behind.
+        var workspace = Path.Combine(factory.DataRoot, "generated-models", jobId.ToString("N"));
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllBytesAsync(Path.Combine(workspace, "payload.glb"), "half written"u8.ToArray());
+
+        var finished = await RunAsync(factory, jobId);
+
+        // It is run again, because half an answer is not an answer, and the
+        // rerun is on the record rather than hidden inside a phase that passed.
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.Equal(1, compiler.Runs);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.True(result.RootElement.GetProperty("rerunAfterIncompleteAnswer").GetBoolean());
+
+        // And the delivered model is the compiler's, not the half-written file.
+        using var profile = await client.GetFromJsonAsync<JsonDocument>(
+            $"/api/assets/{finished.OutputAssetId}/model-profile") ?? throw new InvalidOperationException();
+        Assert.Equal(17, profile.RootElement.GetProperty("rig").GetProperty("boneCount").GetInt32());
+    }
+
+    [Fact]
     public async Task AStaleSourceLeavesTheOutputAsAnOlderSourceCandidate()
     {
         var compiler = new ControlledCompiler();

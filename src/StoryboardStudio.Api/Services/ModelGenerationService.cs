@@ -181,7 +181,10 @@ public sealed class ModelGenerationService(
         await ProgressAsync(job, JobState.Running, 10, "Reading the frozen reference", cancellationToken);
 
         CompilerStageRun run;
-        if (File.Exists(payloadPath) && File.Exists(receiptPath))
+        var hasPayload = File.Exists(payloadPath);
+        var hasReceipt = File.Exists(receiptPath);
+        var rerunAfterPartial = false;
+        if (hasPayload && hasReceipt)
         {
             // The ambiguous window: this job was interrupted after the stage
             // wrote its answer but before the answer was recorded. Adopt what
@@ -192,7 +195,22 @@ public sealed class ModelGenerationService(
         }
         else
         {
-            await ProgressAsync(job, JobState.Running, 40, "Compiling the model", cancellationToken);
+            // Half an answer is not an answer, and running the stage again is a
+            // decision rather than a detail: it is announced, the remains of the
+            // interrupted attempt are cleared so they cannot be adopted later as
+            // if they were whole, and the rerun is recorded on the delivery.
+            rerunAfterPartial = hasPayload || hasReceipt;
+            if (rerunAfterPartial)
+            {
+                foreach (var leftover in (string[])[payloadPath, receiptPath])
+                    if (File.Exists(leftover)) File.Delete(leftover);
+            }
+
+            await ProgressAsync(job, JobState.Running, 40,
+                rerunAfterPartial
+                    ? "Running again: the previous attempt left an incomplete answer"
+                    : "Compiling the model",
+                cancellationToken);
             run = await compiler.RunStageAsync(packet.Stage, sourcePath, payloadPath, receiptPath, cancellationToken);
             if (!run.Ok)
                 return await FailAsync(job, run.Error ?? "The compiler stage did not produce a model.", cancellationToken);
@@ -229,6 +247,7 @@ public sealed class ModelGenerationService(
             staleSource = stale,
             compilerVersion = packet.CompilerVersion,
             stage = packet.Stage,
+            rerunAfterIncompleteAnswer = rerunAfterPartial,
             receiptSha256 = run.ReceiptJson is null ? null : Sha256(run.ReceiptJson),
             payloadAssetId = imported.Value.Id,
             payloadContentHash = imported.Value.ContentHash,

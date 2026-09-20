@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorShotView, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorShotView, ModelGenerationReadiness, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -121,6 +121,9 @@ export const studioApi = {
     if (!response.ok) { const text = await response.text(); let problem: { error?: string; title?: string } | undefined; try { problem = JSON.parse(text) } catch { /* keep text */ } throw new Error(problem?.error || problem?.title || text || `${response.status} ${response.statusText}`) }
     return response.json() as Promise<AssetSummary>
   },
+  modelGenerationReadiness: () => request<ModelGenerationReadiness>('/api/models/generation/readiness'),
+  generateModel: (sourceAssetId: string, name: string) =>
+    request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name }) }),
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
   rigPose: (assetId: string, pose: { bone: string; rotation: number[] }[]) =>
     request<RigPoseSummary>(`/api/assets/${assetId}/rig-pose`, { method: 'POST', body: JSON.stringify({ pose }) }),

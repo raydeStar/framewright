@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** none yet; M07 is next. M00, M01, M04, M05, M06, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M07, M08, M09 and M14 became dependency-ready on 2026-09-20 when the Reference Asset Compiler was checked out, and M12, M16, M17 and M18 follow them.  
+**Active milestone:** M08. M00, M01, M04, M05, M06, M07, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M08, M09 and M14 are dependency-ready, and M12, M16, M17 and M18 follow them.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -433,10 +433,10 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** none yet. Every milestone this repository could reach without the compiler is closed; M07 is the next one to open.
-- **Last verified milestone:** M15. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
+- **Active milestone:** M08 (commission one live image-to-model route).
+- **Last verified milestone:** M07. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
 - **External acceptance blockers:** (1) Resolved 2026-09-20: the Reference Asset Compiler is checked out, so M09/M14 are unblocked. Neither is runnable until Framewright can locate a pinned compiler and the browser payload export exists; both are engineering work, not an external blocker. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
-- **Next action:** The generation pipeline M07 and M08 were deferred for is the Reference Asset Compiler, and it is checked out, so M07, M08, M09 and M14 are all dependency-ready and M12, M16 and M17 follow them. The agreed order is: the browser payload export on the compiler side, then M07 (the adapter, capability preflight and durable owned-job progress, provable with controlled outputs and no GPU), then M08 (one live compiler-backed run, which needs hardware and human acceptance), then profiles and the skeleton fingerprint, then M09 and M14. The four CONTRACT_VERIFIED milestones wait on an actual WebMCP-capable host, and M11 additionally on recorded human composition acceptance. Rigging routes and clip synthesis, including for non-humanoid creatures, are the compiler's work rather than this repository's; M15 consumes what they produce.
+- **Next action:** M08 is next: one live compiler-backed run, which needs two things this repository cannot supply. First, the `rac` on this workstation's PATH predates `run-stage`, so it must be reinstalled from the checkout with `pip install -e .` or Framewright pointed at a venv that has it. Second, the artist must authorize the run and record visual acceptance of the result. After M08 come M09 and M14, then M12, M16 and M17. The four CONTRACT_VERIFIED milestones wait on an actual WebMCP-capable host, and M11 additionally on recorded human composition acceptance. Rigging routes and clip synthesis, including for non-humanoid creatures, are the compiler's work rather than this repository's; M15 consumes what they produce.
 
 ### Milestone status
 
@@ -449,8 +449,8 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M04 | VERIFIED | M04 acceptance record below |
 | M05 | VERIFIED | M05 acceptance record below |
 | M06 | VERIFIED | M06 acceptance record below |
-| M07 | NOT_STARTED | Dependency-ready 2026-09-20: the user's pipeline is the Reference Asset Compiler |
-| M08 | NOT_STARTED | Depends on M07; the compiler-backed route M08 already names is now available |
+| M07 | VERIFIED | M07 acceptance record below |
+| M08 | IN_PROGRESS | Active; needs an up-to-date compiler on PATH and the artist's authorization |
 | M09 | NOT_STARTED | Dependency-ready; compiler checked out 2026-09-20 |
 | M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
 | M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
@@ -1291,6 +1291,86 @@ Three defects the browser journeys found, all fixed: trimming a clip could leave
   land after a newer one and put the artist back in a scene they had already left.
 Checkpoint: see the M15 commits on feature/director-mode.
 Next dependency-ready milestone: none. See the runway note above.
+```
+
+### M07 acceptance record
+
+```text
+Milestone / status / date: M07 / VERIFIED / 2026-09-20
+Tested code revision or worktree identity: feature/director-mode, working tree at the M07 commits
+Outcome and supported constraints: An artist selects a reference image and the studio freezes exactly
+  which bytes of it were chosen into a model-generation request, queues durable owned work, and hands
+  the artist back to what they were doing. The Reference Asset Compiler does the work through one
+  typed gateway that names a stage and reads the receipt; this studio never re-derives a verdict the
+  compiler already reached. A capability that is missing blocks at enqueue, before anything is
+  submitted, and an uncommissioned route is a different answer from an absent compiler: both refuse,
+  and each says which it is. A generated model enters the library through exactly the gate an
+  imported one does, so a worker cannot place anything an artist could not have imported by hand. The
+  route is labelled uncommissioned by default, as M07 requires, and no provider or GPU request was
+  made at any point in this milestone.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/CompilerGateway.cs: the one door to the compiler, with four
+    distinct answers to the capability question.
+  - src/StoryboardStudio.Api/Services/ModelGenerationService.cs: the frozen request, the owned job,
+    reconciliation, staleness, lineage and delivery.
+  - src/StoryboardStudio.Api/Services/AssetStore.cs: a generated model imports through the existing
+    validated model gate.
+  - src/storyboard-studio-web: the "Make a 3D model" affordance on a reference, and the dock opened
+    into a work queue.
+  - scripts/e2e-compiler-stub.ps1 and .cmd: the controlled worker the browser journeys run against.
+  - Reused unchanged: the job record, the lease service, the queue worker's claim loop, the model
+    inspector, and the M13 rig reading that makes a delivered model inspectable.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check (exit code checked directly)
+  - npx playwright test model-generation.spec.ts (desktop and tablet)
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 218 backend tests passed, 0 failed (209 before this milestone plus nine model-generation tests).
+     Frontend typecheck, lint, and format checks clean.
+  A: 124 browser journeys passed, 0 failed, 6 intentionally skipped (130 discovered) against the real
+     service and real persistence in a disposable temp data root. The new journeys import a
+     reference, read the studio's capability answer on screen, queue the work, leave the workspace
+     entirely, and find a delivered model that inspects as a real rig and names the reference it came
+     from; and confirm the queue holds the work across a full page reload.
+  H: NOT RUN. No agent host is involved in this milestone.
+  L: NOT RUN, deliberately and as the milestone requires. No provider or GPU request was made. The
+     compiler is a controlled stand-in that answers the same JSON and writes the same receipt shape
+     as the real one, which is what M07 asks for and what M08 exists to go beyond.
+  V: NOT RUN as human acceptance; M07 does not ask for it.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: A missing compiler and an uncommissioned route each refuse at
+  enqueue and leave no job behind. Output that is not a valid GLB fails the job and leaves the
+  library empty. A job interrupted after its stage wrote both payload and receipt is reconciled
+  rather than run again. A job interrupted with only half an answer is run again out loud: the
+  remains are cleared so they cannot later be adopted as whole, the phase says so, and the delivery
+  records that it happened. A restart on the same data root recovers the same job identity and
+  completes it. A reference that changed after the request was frozen leaves the output as an
+  older-source candidate, labelled in the job and in the asset, not rejected. A duplicate delivery
+  produces no second model and no second lineage record.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the M04/M05 model journeys, the M06/M10/M11/M15 scene journeys, and the existing
+  generation dock journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps passed
+  individually). A live compiler run, which is M08.
+Human approvals actually recorded, where required: None required by this milestone.
+Known defects and dependency impact: The `rac` installed on this workstation's PATH predates
+  run-stage, so the real route cannot run until it is reinstalled from the checkout. This does not
+  affect M07, whose evidence is deliberately controlled, and it is the first thing M08 needs.
+Permitted deferrals: Provider comparisons and additional models. The route is labelled uncommissioned
+  until M08, which is enforced rather than merely written down: submission defaults to false.
+Bug-detection check: Two sabotages. Removing the capability gate failed two tests as intended.
+  Removing the duplicate-delivery guard failed nothing, because content addressing and the reconcile
+  path already prevent a second asset; the guard was belt-and-braces and the test could not tell. The
+  test now asserts the lineage is recorded exactly once, which the guard is load-bearing for, and it
+  fails without it. That correction is the honest outcome of the check rather than a pass.
+Three defects the tests found, all fixed: an interrupted run that left only half an answer was rerun
+  silently, which the milestone forbids; the tests that count compiler invocations were racing the
+  queue worker, which was already delivering the same jobs, so the counts were about timing rather
+  than behaviour; and the first browser journey assumed a delivered model would carry a per-run name,
+  which content addressing correctly refuses, since the same bytes are the same asset.
+Checkpoint: see the M07 commits on feature/director-mode.
+Next dependency-ready milestone: M08.
 ```
 
 ### Acceptance record template

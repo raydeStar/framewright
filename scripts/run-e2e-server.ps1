@@ -30,6 +30,10 @@ $env:Integrations__ComfyUi__SubmissionEnabled = 'false'
 $env:Integrations__ComfyUi__VideoSubmissionEnabled = 'false'
 $env:YuE2__Enabled = 'false'
 $env:Integrations__OpenAI__SubmissionEnabled = 'false'
+# Model generation is proved against a controlled worker rather than a GPU: the
+# real gateway, the real process boundary and the real import, with a known GLB.
+$env:Integrations__ReferenceAssetCompiler__Executable = (Join-Path $PSScriptRoot 'e2e-compiler-stub.cmd')
+$env:Integrations__ReferenceAssetCompiler__SubmissionEnabled = 'true'
 
 $stopFile = $env:STUDIO_E2E_STOP_FILE
 if ([string]::IsNullOrWhiteSpace($stopFile)) {
