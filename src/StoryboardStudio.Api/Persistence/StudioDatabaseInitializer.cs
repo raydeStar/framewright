@@ -18,6 +18,7 @@ public static class StudioDatabaseInitializer
     private const string WebMcpProposalMigration = "20260903-webmcp-shot-proposals-v7";
     private const string YuE2CompositionMigration = "20260918-yue2-compositions-v8";
     private const string YuE2ArtifactManifestMigration = "20260918-yue2-artifact-manifests-v9";
+    private const string DirectorProposalApplyMigration = "20260919-director-proposal-apply-v10";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -140,6 +141,17 @@ public static class StudioDatabaseInitializer
 
             await RunMigrationAsync(db, YuE2ArtifactManifestMigration,
                 () => EnsureYuE2ArtifactManifestColumnAsync(db, cancellationToken), cancellationToken);
+        }
+
+        if (!await HasMigrationAsync(db, DirectorProposalApplyMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, DirectorProposalApplyMigration, cancellationToken);
+            }
+
+            await RunMigrationAsync(db, DirectorProposalApplyMigration,
+                () => EnsureDirectorProposalApplyColumnsAsync(db, cancellationToken), cancellationToken);
         }
 
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
@@ -265,6 +277,7 @@ public static class StudioDatabaseInitializer
             RatifiedShotIntentMigration => "ratified-shot-code-title-description-duration-camera-action-and-video-endpoints",
             VisualConsistencyAuditMigration => "versioned-asset-and-contract-bound-vision-audit-with-reconciliation-decisions",
             WebMcpProposalMigration => "durable-project-scoped-human-gated-shot-revision-proposals-with-sort-key",
+            DirectorProposalApplyMigration => "proposal-observed-context-token-preserved-constraints-and-single-apply-record",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
@@ -958,13 +971,29 @@ public static class StudioDatabaseInitializer
                 "CreatedAt" TEXT NOT NULL,
                 "CreatedAtUnixMs" INTEGER NOT NULL,
                 "UpdatedAt" TEXT NOT NULL,
-                "DecidedAt" TEXT NULL
+                "DecidedAt" TEXT NULL,
+                "AppliedAt" TEXT NULL,
+                "ObservedStateToken" TEXT NULL,
+                "PreservedConstraintsJson" TEXT NOT NULL DEFAULT '[]'
             );
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ShotRevisionProposals_ProjectId_IdempotencyKey"
                 ON "ShotRevisionProposals" ("ProjectId", "IdempotencyKey");
             CREATE INDEX IF NOT EXISTS "IX_ShotRevisionProposals_ShotId_State_CreatedAtUnixMs"
                 ON "ShotRevisionProposals" ("ShotId", "State", "CreatedAtUnixMs");
             """, cancellationToken);
+    }
+
+    /// <summary>
+    /// V10 records what a browser-agent proposal promised to preserve, which
+    /// view it was reading, and the single moment the artist applied it. The
+    /// columns are additive so an existing workstation keeps every proposal it
+    /// already staged.
+    /// </summary>
+    private static async Task EnsureDirectorProposalApplyColumnsAsync(StudioDbContext db, CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(db, "ShotRevisionProposals", "AppliedAt", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(db, "ShotRevisionProposals", "ObservedStateToken", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(db, "ShotRevisionProposals", "PreservedConstraintsJson", "TEXT NOT NULL DEFAULT '[]'", cancellationToken);
     }
 
     private static async Task EnsureYuE2CompositionTablesAsync(StudioDbContext db, CancellationToken cancellationToken)

@@ -15,9 +15,11 @@ public sealed class AssetStore
 {
     public const long MaxImageBytes = 25 * 1024 * 1024;
     public const long MaxMediaBytes = 500 * 1024 * 1024;
+    public static readonly long MaxModelBytes = GlbSupportProfile.Default.MaxBytes;
     public const long MultipartOverheadBytes = 1024 * 1024;
     public const long MaxImageRequestBytes = MaxImageBytes + MultipartOverheadBytes;
     public const long MaxMediaRequestBytes = MaxMediaBytes + MultipartOverheadBytes;
+    public static readonly long MaxModelRequestBytes = MaxModelBytes + MultipartOverheadBytes;
     private const int MaxImageDimension = 32_768;
     private static readonly Regex HexColor = new("^#[0-9a-fA-F]{6}$", RegexOptions.Compiled);
     private readonly StudioDbContext db;
@@ -122,6 +124,115 @@ public sealed class AssetStore
             return RepositoryResult<AssetSummary>.Ok(Map(record));
         }
         finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+    }
+
+    /// <summary>
+    /// Imports one self-contained GLB. The bytes are staged, hashed, and fully
+    /// validated before any record exists, so a refused model leaves nothing
+    /// behind that looks importable.
+    /// </summary>
+    public async Task<RepositoryResult<AssetSummary>> ImportModelAsync(IFormFile file, CancellationToken cancellationToken, string source = "Imported")
+    {
+        if (file.Length <= 0 || file.Length > MaxModelBytes)
+            return RepositoryResult<AssetSummary>.Invalid($"Model files must be between 1 byte and {MaxModelBytes / (1024 * 1024)} MB.");
+        if (!TryPrepareStorage(out var storageError)) return RepositoryResult<AssetSummary>.Unavailable(storageError);
+
+        var temporaryPath = Path.Combine(root, ".staging", $"{Guid.NewGuid():N}.model");
+        try
+        {
+            string contentHash;
+            long bytes = 0;
+            using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
+            await using (var input = file.OpenReadStream())
+            await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81_920, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var buffer = ArrayPool<byte>.Shared.Rent(81_920);
+                try
+                {
+                    int read;
+                    while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+                    {
+                        bytes += read;
+                        if (bytes > MaxModelBytes) return RepositoryResult<AssetSummary>.Invalid($"Model files cannot exceed {MaxModelBytes / (1024 * 1024)} MB.");
+                        hash.AppendData(buffer, 0, read);
+                        await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    }
+                    await output.FlushAsync(cancellationToken);
+                    contentHash = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+                }
+                finally { ArrayPool<byte>.Shared.Return(buffer); }
+            }
+
+            var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(temporaryPath, cancellationToken));
+            if (!inspection.Ok) return RepositoryResult<AssetSummary>.Invalid(inspection.Error!);
+
+            var existing = await db.Assets.AsNoTracking().SingleOrDefaultAsync(asset => asset.ContentHash == contentHash, cancellationToken);
+            if (existing is not null)
+            {
+                if (existing.Kind != nameof(AssetKind.Model)) return RepositoryResult<AssetSummary>.Conflict("The same bytes already exist under a different media kind.");
+                return RepositoryResult<AssetSummary>.Ok(Map(existing));
+            }
+
+            var directory = Path.Combine(root, contentHash[..2]);
+            Directory.CreateDirectory(directory);
+            var storedPath = Path.Combine(directory, $"{contentHash}.glb");
+            if (!File.Exists(storedPath)) File.Move(temporaryPath, storedPath);
+
+            var originalName = NormalizeFileName(file.FileName);
+            var now = timeProvider.GetUtcNow();
+            var record = new AssetRecord
+            {
+                Id = Guid.NewGuid(), ProjectId = projectScope.ProjectId, Kind = nameof(AssetKind.Model),
+                OriginalFileName = originalName, MimeType = "model/gltf-binary", Bytes = bytes,
+                ContentHash = contentHash, StoragePath = Path.GetRelativePath(root, storedPath).Replace(Path.DirectorySeparatorChar, '/'),
+                CreatedAt = now, DisplayName = Path.GetFileNameWithoutExtension(originalName), TagsJson = "[]", Notes = "",
+                Source = NormalizeSource(source), IsArchived = false, UpdatedAt = now
+            };
+            db.Assets.Add(record);
+            db.AuditEvents.Add(new AuditEventRecord
+            {
+                Id = Guid.NewGuid(), Type = "ModelAssetImported", TargetType = "Asset", TargetId = record.Id.ToString(),
+                PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    record.ContentHash, record.Bytes, inspection.Profile!.VertexCount, inspection.Profile.TriangleCount,
+                    inspection.Profile.Dimensions
+                }),
+                CreatedAt = record.CreatedAt
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            return RepositoryResult<AssetSummary>.Ok(Map(record));
+        }
+        finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+    }
+
+    /// <summary>
+    /// Re-reads the stored bytes so the profile can never drift from the model
+    /// the viewer is about to show. Only the JSON chunk is parsed, so this stays
+    /// cheap no matter how large the geometry payload is.
+    /// </summary>
+    public async Task<RepositoryResult<ModelProfileSummary>> ModelProfileAsync(Guid assetId, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == assetId, cancellationToken);
+        if (asset is null) return RepositoryResult<ModelProfileSummary>.NotFound();
+        if (asset.Kind != nameof(AssetKind.Model)) return RepositoryResult<ModelProfileSummary>.Invalid("Only model assets have a geometry profile.");
+
+        var path = Path.Combine(root, asset.StoragePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(path)) return RepositoryResult<ModelProfileSummary>.Unavailable("The stored model file is missing from the asset root.");
+
+        var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
+        if (!inspection.Ok) return RepositoryResult<ModelProfileSummary>.Invalid(inspection.Error!);
+        var profile = inspection.Profile!;
+        var limits = GlbSupportProfile.Default;
+        return RepositoryResult<ModelProfileSummary>.Ok(new ModelProfileSummary(
+            asset.Id, asset.DisplayName, asset.ContentHash, asset.Bytes, $"/api/assets/{asset.Id}/content",
+            profile.Container, profile.SpecificationVersion, profile.Generator,
+            profile.NodeCount, profile.MeshCount, profile.PrimitiveCount, profile.VertexCount, profile.TriangleCount,
+            profile.ImageCount, profile.EmbeddedTextureBytes, profile.BinaryChunkBytes,
+            profile.DeclaredExtensions, profile.RequiredExtensions,
+            [.. profile.Materials.Select(material => new ModelMaterialSummary(material.Name, material.Textured, material.AlphaMode, material.DoubleSided))],
+            profile.BoundsMin, profile.BoundsMax, profile.Dimensions,
+            new ModelSupportLimits(limits.MaxBytes, limits.MaxVertices, limits.MaxTriangles, limits.MaxEmbeddedTextureBytes,
+                limits.MaxNodes, limits.MaxMaterials, limits.MaxImages, limits.SupportedRequiredExtensions)));
     }
 
     public async Task<RepositoryResult<AssetSummary>> ImportGeneratedMediaAsync(Stream input, string fileName, string mimeType, long? expectedLength, AssetKind kind, CancellationToken cancellationToken, string source = "Generated media")
@@ -386,6 +497,7 @@ public sealed class AssetStore
     {
         var asset = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == assetId && !x.IsArchived, cancellationToken); if (asset is null) return RepositoryResult<AssetPlacementSummary>.NotFound();
         var shot = await db.Shots.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ShotId, cancellationToken); if (shot is null) return RepositoryResult<AssetPlacementSummary>.Invalid("The selected shot does not exist.");
+        if (asset.Kind == nameof(AssetKind.Model)) return RepositoryResult<AssetPlacementSummary>.Invalid("Model assets are inspected in the model viewer; they are not shot placements yet.");
         var expectedRole = asset.Kind switch { "Image" => "Image guide", "Video" => "Video take", _ => "Audio cue" }; var role = string.IsNullOrWhiteSpace(request.Role) ? expectedRole : request.Role.Trim(); if (role != expectedRole) return RepositoryResult<AssetPlacementSummary>.Invalid($"{asset.Kind} assets use the '{expectedRole}' shot role.");
         var existing = await db.AssetPlacements.AsNoTracking().SingleOrDefaultAsync(x => x.AssetId == assetId && x.ShotId == request.ShotId && x.Role == role, cancellationToken); if (existing is not null) return RepositoryResult<AssetPlacementSummary>.Ok(new(existing.Id, existing.AssetId, existing.ShotId, shot.Code, shot.Title, existing.Role, existing.CreatedAt));
         var record = new AssetPlacementRecord { Id = Guid.NewGuid(), AssetId = assetId, ShotId = request.ShotId, Role = role, CreatedAt = timeProvider.GetUtcNow() }; db.AssetPlacements.Add(record); AddAudit("AssetPlaced", "Asset", assetId, new { request.ShotId, role }); await db.SaveChangesAsync(cancellationToken); return RepositoryResult<AssetPlacementSummary>.Ok(new(record.Id, record.AssetId, record.ShotId, shot.Code, shot.Title, record.Role, record.CreatedAt));

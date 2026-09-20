@@ -33,6 +33,10 @@ TOKEN = os.environ.get("YUE2_WORKER_TOKEN", "")
 MODEL = os.environ.get("YUE2_MODEL", "m-a-p/YuE2-3B")
 VAE = os.environ.get("YUE2_VAE", "m-a-p/YuE2-Vae")
 DEVICE = os.environ.get("YUE2_DEVICE", "cuda")
+BACKEND = os.environ.get("YUE2_BACKEND", "torch").strip().lower()
+OFFLOAD_AR = os.environ.get("YUE2_OFFLOAD_AR", "false").strip().lower() == "true"
+_NAR_QUERY_CHUNK = os.environ.get("YUE2_NAR_QUERY_CHUNK_SIZE", "").strip()
+NAR_QUERY_CHUNK_SIZE = int(_NAR_QUERY_CHUNK) if _NAR_QUERY_CHUNK else None
 ALLOW_DOWNLOADS = os.environ.get("YUE2_ALLOW_DOWNLOADS", "false").lower() == "true"
 OUTPUT_ROOT = Path(os.environ.get("YUE2_OUTPUT_PATH", Path.home() / ".framewright" / "yue2")).expanduser().resolve()
 MAX_BODY_BYTES = 2 * 1024 * 1024
@@ -103,11 +107,24 @@ def get_pipeline() -> Any:
             return pipeline
         from yue2 import YuE2Pipeline  # type: ignore
 
+        if NAR_QUERY_CHUNK_SIZE is not None:
+            import yue2.nar as yue2_nar  # type: ignore
+
+            original_synthesize = yue2_nar.synthesize
+
+            def synthesize_with_bounded_attention(*args: Any, **kwargs: Any) -> Any:
+                kwargs.setdefault("query_chunk_size", NAR_QUERY_CHUNK_SIZE)
+                return original_synthesize(*args, **kwargs)
+
+            yue2_nar.synthesize = synthesize_with_bounded_attention
+
         # The ward against accidental 20+ GB downloads. The operator must opt in.
         pipeline = YuE2Pipeline.from_pretrained(
             MODEL,
             vae=VAE,
             device=DEVICE,
+            backend=BACKEND,
+            offload_ar=OFFLOAD_AR,
             local_files_only=not ALLOW_DOWNLOADS,
         )
         return pipeline
@@ -171,6 +188,9 @@ def artifact_manifest(output: Path, operation: str, request: dict[str, Any]) -> 
         "model": MODEL,
         "vae": VAE,
         "device": DEVICE,
+        "backend": BACKEND,
+        "offloadAr": OFFLOAD_AR,
+        "narQueryChunkSize": NAR_QUERY_CHUNK_SIZE,
         "localFilesOnly": not ALLOW_DOWNLOADS,
         "workerJobId": output.name,
         "requestId": request.get("id"),
@@ -315,6 +335,9 @@ class Handler(BaseHTTPRequestHandler):
                 "model": MODEL,
                 "vae": VAE,
                 "device": DEVICE,
+                "backend": BACKEND,
+                "offloadAr": OFFLOAD_AR,
+                "narQueryChunkSize": NAR_QUERY_CHUNK_SIZE,
                 "downloadsAllowed": ALLOW_DOWNLOADS,
                 "queued": queued,
                 "running": running,
@@ -383,10 +406,18 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    if BACKEND not in {"torch", "torch-eager", "vllm"}:
+        raise SystemExit("YUE2_BACKEND must be torch, torch-eager, or vllm")
+    if NAR_QUERY_CHUNK_SIZE is not None and NAR_QUERY_CHUNK_SIZE < 1:
+        raise SystemExit("YUE2_NAR_QUERY_CHUNK_SIZE must be a positive integer")
     if HOST not in {"127.0.0.1", "::1", "localhost"} and not TOKEN:
         raise SystemExit("YUE2_WORKER_TOKEN is required when binding beyond loopback")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"YuE2 worker listening on http://{HOST}:{PORT}; model={MODEL}; device={DEVICE}; downloads={ALLOW_DOWNLOADS}")
+    print(
+        f"YuE2 worker listening on http://{HOST}:{PORT}; model={MODEL}; "
+        f"device={DEVICE}; backend={BACKEND}; offload_ar={OFFLOAD_AR}; "
+        f"nar_query_chunk_size={NAR_QUERY_CHUNK_SIZE}; downloads={ALLOW_DOWNLOADS}"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

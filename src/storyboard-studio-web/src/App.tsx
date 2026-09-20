@@ -11,7 +11,7 @@ import AuthorityLibraryDialog from './components/AuthorityLibraryDialog'
 import WorldWorkspace from './components/WorldWorkspace'
 import { BoardWorkspace, ReviewWorkspace, SequenceWorkspace, ShotWorkspace } from './components/StudioWorkspaces'
 import { FRAMEWRIGHT_WEBMCP_TOOL_NAMES, registerFramewrightWebMcp } from './webmcp'
-import type { AgentActivityEntry, AssetGenerationDraft, BackupStatus, CodexAssistResponse, CredentialStatus, IntegrationSummary, JobSummary, PairingStatusSummary, ProjectSummary, ReferenceSummary, RuntimeReadinessSummary, ShotRevisionProposalSummary, ShotSummary, StudioSnapshot, Workspace } from './types'
+import type { AgentActivityEntry, AssetGenerationDraft, BackupStatus, CodexAssistResponse, CredentialStatus, DirectorViewQuery, IntegrationSummary, JobSummary, PairingStatusSummary, ProjectSummary, ReferenceSummary, RuntimeReadinessSummary, ShotRevisionProposalSummary, ShotSummary, StudioSnapshot, Workspace } from './types'
 
 const SketchWorkspace = lazy(() => import('./components/SketchWorkspace'))
 
@@ -43,6 +43,8 @@ export default function App() {
   const [assetLandingId, setAssetLandingId] = useState<string>()
   const [authorityGeneration, setAuthorityGeneration] = useState<{ authorityId: string; expectedVersion: number; description: string; lockedConstraint: string }>()
   const [selectedAuthorityId, setSelectedAuthorityId] = useState<string>()
+  const [directorMode, setDirectorMode] = useState(false)
+  const [displayedRevision, setDisplayedRevision] = useState<{ shotId: string; version: number; archived: boolean }>()
   const [commentPin, setCommentPin] = useState<{ x: number; y: number } | null>(null)
   const [commentText, setCommentText] = useState('')
   const [commentReference, setCommentReference] = useState<ReferenceSummary>()
@@ -62,8 +64,10 @@ export default function App() {
   const [agentActivity, setAgentActivity] = useState<AgentActivityEntry[]>([])
   const [agentProposals, setAgentProposals] = useState<ShotRevisionProposalSummary[]>([])
   const selectedShotRef = useRef<{ id?: string; version?: number }>({})
+  const directorViewRef = useRef<DirectorViewQuery | undefined>(undefined)
   const activitySequence = useRef(0)
   const proposalLoadSequence = useRef(0)
+  const loadAgentProposalsRef = useRef<(() => Promise<void>) | undefined>(undefined)
 
   const refresh = useCallback(async (quiet = false) => {
     try {
@@ -124,23 +128,64 @@ export default function App() {
       // Modal dialogs handle their own Escape via the native `cancel` event, so
       // only the non-modal assistant panel is dismissed here. Handling Escape
       // for all of them would close two layers on a single press.
-      if (event.key === 'Escape' && assistantOpen) setAssistantOpen(false)
+      if (event.key === 'Escape' && assistantOpen) { setAssistantOpen(false); return }
+      // Director Mode hides the rails, so Escape must lead back out — but only
+      // once the modal on top of it has had its own press.
+      if (event.key === 'Escape' && directorMode && !document.querySelector('dialog[open]')) setDirectorMode(false)
     }
     window.addEventListener('keydown', keydown)
     return () => window.removeEventListener('keydown', keydown)
-  }, [assistantOpen])
+  }, [assistantOpen, directorMode])
+  // Leaving the shot would strand the artist in a full-view canvas that no
+  // longer matches the workspace, so full view never outlives its subject.
+  useEffect(() => { if (workspace !== 'shot') setDirectorMode(false) }, [workspace])
 
   const selected = studio?.shots.find(x => x.id === selectedId) ?? studio?.shots[0]
   selectedShotRef.current = { id: selected?.id, version: selected?.version }
+  // Browser tools must describe the revision on screen, which is the archived
+  // candidate whenever one is being previewed rather than the live head.
+  const previewing = displayedRevision && displayedRevision.shotId === selected?.id && workspace === 'shot' ? displayedRevision : undefined
+  directorViewRef.current = selected ? {
+    shotId: selected.id,
+    displayedVersion: previewing?.version ?? selected.version,
+    archived: previewing?.archived ?? false,
+    directorMode: directorMode && workspace === 'shot',
+    tool,
+  } : undefined
   const selectedAuthority = studio?.references.find(x => x.id === selectedAuthorityId)
   const comments = useMemo(() => studio?.comments.filter(x => x.shotId === selected?.id && x.version === selected.version && x.state === 'Open') ?? [], [studio, selected])
   const references = useMemo(() => studio?.references.filter(x => selected?.referenceIds.includes(x.id)) ?? [], [studio, selected])
   const webMcpReady = studio !== null
+  const noteDisplayedRevision = useCallback((revision: { shotId: string; version: number; archived: boolean }) => setDisplayedRevision(current =>
+    current && current.shotId === revision.shotId && current.version === revision.version && current.archived === revision.archived ? current : revision), [])
+  // Applying is a validated server operation, not a UI shortcut: it refuses a
+  // stale or undecided proposal, records the one moment it was applied, and
+  // hands back frozen instructions for the ordinary revision surface. Nothing
+  // here authorizes a provider; the artist's Generate action still does that.
+  const applyProposal = useCallback(async (proposal: ShotRevisionProposalSummary) => {
+    const result = await studioApi.webMcpApplyProposal(proposal.id)
+    void loadAgentProposalsRef.current?.()
+    if (!result.ok || !result.data) return result.message
+    const instructions = result.data.instructions
+    const preserved = instructions.preservedConstraints.length > 0
+      ? `\n\nPRESERVE EXACTLY: ${instructions.preservedConstraints.join('; ')}.`
+      : ''
+    const targeted = instructions.targetedNotes.length > 0
+      ? `\n\nTARGETED NOTES:\n${instructions.targetedNotes.map(note => `- at ${Math.round(note.x * 100)}% across / ${Math.round(note.y * 100)}% down: ${note.body}`).join('\n')}`
+      : ''
+    setSelectedId(instructions.shotId)
+    setCodexImplementation({ id: Date.now(), direction: `${instructions.direction}${preserved}${targeted}` })
+    setWorkspace('shot')
+    setAgentOpen(false)
+    setToast(`${instructions.code} direction applied. Nothing has been generated yet.`)
+    return undefined
+  }, [])
   const loadAgentProposals = useCallback(async () => {
     const sequence = ++proposalLoadSequence.current
     const result = await studioApi.webMcpProposals()
     if (sequence === proposalLoadSequence.current && result.ok && result.data) setAgentProposals(result.data)
   }, [])
+  loadAgentProposalsRef.current = loadAgentProposals
   useEffect(() => {
     if (!webMcpReady) return
     if (!agentToolsEnabled) {
@@ -151,6 +196,7 @@ export default function App() {
     const unregister = registerFramewrightWebMcp({
       getSelectedShotId: () => selectedShotRef.current.id,
       getSelectedShotVersion: () => selectedShotRef.current.version,
+      getDirectorView: () => directorViewRef.current,
       onAvailability: (available, detail) => { setWebMcpAvailable(available); setWebMcpDetail(detail) },
       onActivity: (toolName, state, message) => setAgentActivity(current => [{ id: ++activitySequence.current, tool: toolName, state, message, at: new Date().toISOString() }, ...current].slice(0, 12)),
       onInspectShot: (shotId, continuity) => { setSelectedId(shotId); setWorkspace(continuity ? 'review' : 'shot'); setAgentOpen(true) },
@@ -219,7 +265,7 @@ export default function App() {
   const active: Workspace = selected || workspace === 'assets' || workspace === 'world' || (workspace === 'authority' && selectedAuthority) ? workspace : 'board'
   const shotScoped = active === 'shot' || active === 'review' || active === 'sequence'
 
-  return <div className="app-shell">
+  return <div className={`app-shell${directorMode && active === 'shot' ? ' director-mode' : ''}`}>
     <a className="skip-link" href="#studio-workspace">Skip to workspace</a>
     <aside className="workspace-rail" aria-label="Workspaces">
       <button className="brand" onClick={() => setWorkspace('board')} aria-label="Framewright home" title="Framewright · Build every shot with intention"><div className="brand-glyph"><Film size={20} /></div><span>FRAME</span></button>
@@ -248,7 +294,7 @@ export default function App() {
         {active === 'world' && <WorldWorkspace project={studio.project} onSaved={(saved, message) => { setStudio(current => current ? { ...current, project: saved } : current); setToast(message) }} />}
         {active === 'authority' && selectedAuthority && !assetGenerationDraft && <AuthorityWorkspace studio={studio} authority={selectedAuthority} onBack={() => { setBoardView('authorities'); setWorkspace('board') }} onOpenGeneration={(draft, revision) => { setAuthorityGeneration({ authorityId: selectedAuthority.id, expectedVersion: selectedAuthority.version, ...revision }); setAssetGenerationDraft(draft) }} onJobQueued={acceptQueuedJob} onChanged={(saved, message) => { setSelectedAuthorityId(saved.id); setToast(message); void refresh() }} onDeleted={message => { setSelectedAuthorityId(undefined); setBoardView('authorities'); setWorkspace('board'); setToast(message); void refresh() }} />}
         {active === 'authority' && selectedAuthority && assetGenerationDraft && authorityGeneration && <Suspense fallback={<WorkspaceLoading label="Opening authority workspace" />}><SketchWorkspace key={assetGenerationDraft.id} shot={selected ?? assetFallbackShot(assetGenerationDraft)} references={studio.references} assetDraft={assetGenerationDraft} authorityTarget={{ referenceId: authorityGeneration.authorityId, expectedVersion: authorityGeneration.expectedVersion, description: authorityGeneration.description, lockedConstraint: authorityGeneration.lockedConstraint }} onOpenFrame={() => { setAssetGenerationDraft(undefined); setAuthorityGeneration(undefined) }} onJobQueued={() => undefined} onAssetJobQueued={job => { acceptQueuedJob(job); setAssetGenerationDraft(undefined); setAuthorityGeneration(undefined); setToast(`${job.shotCode} queued. Its new authority version will attach automatically when ready.`) }} /></Suspense>}
-        {active === 'shot' && selected && <ShotWorkspace studio={studio} shot={selected} comments={comments} references={references} tool={tool} setTool={setTool} onAddComment={(x, y, reference) => { setCommentPin({ x, y }); setCommentReference(reference); setCommentText(reference ? `Use this approved reference for the subject or region marked here.` : '') }} onMoveComment={moveComment} onResolveReferencePin={resolveComment} onRatify={ratify} onOpenReview={candidateId => { setReviewCandidateId(candidateId); setWorkspace('review') }} onOpenAssets={() => setWorkspace('assets')} onEdit={() => setEntityEditor({ kind: 'shot', shot: selected })} onShotSaved={saved => { setStudio(current => current ? { ...current, shots: current.shots.map(item => item.id === saved.id ? saved : item) } : current); setToast(`${saved.code} intent saved${saved.version !== selected.version ? ` as working v${saved.version}` : ''}.`); void refresh(true) }} onShotContractSaved={(saved, message) => { setStudio(current => current ? { ...current, shots: current.shots.map(item => item.id === saved.id ? saved : item) } : current); setToast(message); void refresh(true) }} onCandidatesChanged={async message => { setToast(message); await refresh() }} onJobQueued={() => { setToast('Generation started. It will keep running if you leave this shot.'); void followGeneration(selected.id, selected.version) }} onAskCodex={() => void askCodex()} codexBusy={codexBusy} generationBusy={generationBusy} activeJob={activeShotJob} implementationRequest={codexImplementation} onImplementationConsumed={() => setCodexImplementation(undefined)} onSketchLaunchConsumed={() => undefined} />}
+        {active === 'shot' && selected && <ShotWorkspace studio={studio} shot={selected} comments={comments} references={references} tool={tool} setTool={setTool} directorMode={directorMode} onDirectorMode={setDirectorMode} onDisplayedRevision={noteDisplayedRevision} onAddComment={(x, y, reference) => { setCommentPin({ x, y }); setCommentReference(reference); setCommentText(reference ? `Use this approved reference for the subject or region marked here.` : '') }} onMoveComment={moveComment} onResolveReferencePin={resolveComment} onRatify={ratify} onOpenReview={candidateId => { setReviewCandidateId(candidateId); setWorkspace('review') }} onOpenAssets={() => setWorkspace('assets')} onEdit={() => setEntityEditor({ kind: 'shot', shot: selected })} onShotSaved={saved => { setStudio(current => current ? { ...current, shots: current.shots.map(item => item.id === saved.id ? saved : item) } : current); setToast(`${saved.code} intent saved${saved.version !== selected.version ? ` as working v${saved.version}` : ''}.`); void refresh(true) }} onShotContractSaved={(saved, message) => { setStudio(current => current ? { ...current, shots: current.shots.map(item => item.id === saved.id ? saved : item) } : current); setToast(message); void refresh(true) }} onCandidatesChanged={async message => { setToast(message); await refresh() }} onJobQueued={() => { setToast('Generation started. It will keep running if you leave this shot.'); void followGeneration(selected.id, selected.version) }} onAskCodex={() => void askCodex()} codexBusy={codexBusy} generationBusy={generationBusy} activeJob={activeShotJob} implementationRequest={codexImplementation} onImplementationConsumed={() => setCodexImplementation(undefined)} onSketchLaunchConsumed={() => undefined} />}
         {active === 'review' && selected && <ReviewWorkspace studio={studio} shot={selected} comments={comments} initialCandidateId={reviewCandidateId} onReturnToShot={() => setWorkspace('shot')} onResolveComment={id => void resolveComment(id)} onCandidatesChanged={async message => { setToast(message); await refresh() }} generationBusy={generationBusy} />}
         {active === 'sequence' && selected && <SequenceWorkspace studio={studio} selectedId={selected.id} onSelect={setSelectedId} onReordered={() => void refresh()} onJobQueued={acceptQueuedJob} />}
       </div>
@@ -263,7 +309,7 @@ export default function App() {
     {entityEditor?.kind === 'shot' && <ShotEditorDialog shot={entityEditor.shot} initialImage={entityEditor.initialImage} references={studio.references} suggestedCode={nextShotCode(studio.shots)} onClose={() => setEntityEditor(null)} onSaved={saved => { setEntityEditor(null); setSelectedId(saved.id); setWorkspace('shot'); setToast(`${saved.code} ${saved.currentAssetId ? 'image draft created' : 'intent saved'}.`); void refresh() }} />}
     {entityEditor?.kind === 'authority' && <AuthorityEditorDialog onClose={() => setEntityEditor(null)} onSaved={saved => { setEntityEditor(null); setBoardView('authorities'); setSelectedAuthorityId(saved.id); setWorkspace('authority'); setToast(`${saved.name} v${saved.version} created as authority.`); void refresh() }} />}
     {libraryOpen && <AuthorityLibraryDialog onClose={() => setLibraryOpen(false)} onError={setError} onChanged={message => { setToast(message); void refresh() }} />}
-    {agentOpen && <AgentActivityPanel available={webMcpAvailable} enabled={agentToolsEnabled} detail={webMcpDetail} activity={agentActivity} proposals={agentProposals} shots={studio.shots} onToggleEnabled={() => setAgentToolsEnabled(value => !value)} onClose={() => setAgentOpen(false)} onRefresh={() => void loadAgentProposals()} onUpdated={() => void loadAgentProposals()} onOpenRevision={proposal => { setSelectedId(proposal.shotId); setCodexImplementation({ id: Date.now(), direction: proposal.creativeDirection }); setWorkspace('shot'); setAgentOpen(false) }} />}
+    {agentOpen && <AgentActivityPanel available={webMcpAvailable} enabled={agentToolsEnabled} detail={webMcpDetail} activity={agentActivity} proposals={agentProposals} shots={studio.shots} onToggleEnabled={() => setAgentToolsEnabled(value => !value)} onClose={() => setAgentOpen(false)} onRefresh={() => void loadAgentProposals()} onUpdated={() => void loadAgentProposals()} onApply={applyProposal} />}
     {toast && <div className="toast success" role="status" aria-live="polite"><Check size={17} />{toast}</div>}
     {error && <div className="toast error" role="alert"><CircleAlert size={17} /><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error"><X size={16} /></button></div>}
   </div>
@@ -418,10 +464,14 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
   return <article className={`integration-card state-${integration.state.toLowerCase()}`}><div className="integration-icon">{integration.id === 'codex' ? <Bot /> : integration.id === 'comfyui' ? <Blocks /> : <WandSparkles />}</div><div className="integration-copy"><div><h3>{integration.name}{integration.id === 'openai' && <em className="preview-tag">Preview</em>}</h3><span>{stateIcon}{integration.headline}</span></div><p>{integration.detail}</p>{integration.endpoint && <code>{integration.endpoint}</code>}</div></article>
 }
 
-function AgentActivityPanel({ available, enabled, detail, activity, proposals, shots, onToggleEnabled, onClose, onRefresh, onUpdated, onOpenRevision }: { available: boolean; enabled: boolean; detail: string; activity: AgentActivityEntry[]; proposals: ShotRevisionProposalSummary[]; shots: ShotSummary[]; onToggleEnabled: () => void; onClose: () => void; onRefresh: () => void; onUpdated: () => void; onOpenRevision: (proposal: ShotRevisionProposalSummary) => void }) {
+function AgentActivityPanel({ available, enabled, detail, activity, proposals, shots, onToggleEnabled, onClose, onRefresh, onUpdated, onApply }: { available: boolean; enabled: boolean; detail: string; activity: AgentActivityEntry[]; proposals: ShotRevisionProposalSummary[]; shots: ShotSummary[]; onToggleEnabled: () => void; onClose: () => void; onRefresh: () => void; onUpdated: () => void; onApply: (proposal: ShotRevisionProposalSummary) => Promise<string | undefined> }) {
   const [editing, setEditing] = useState<ShotRevisionProposalSummary>()
   const [busy, setBusy] = useState(false)
-  const act = async (operation: () => Promise<unknown>) => { setBusy(true); try { await operation(); onUpdated() } finally { setBusy(false) } }
+  const [failure, setFailure] = useState<string>()
+  const act = async (operation: () => Promise<unknown>) => { setBusy(true); setFailure(undefined); try { await operation(); onUpdated() } finally { setBusy(false) } }
+  // Applying is the artist's move, so its refusal belongs on the card rather
+  // than in a toast that disappears before it is read.
+  const apply = async (proposal: ShotRevisionProposalSummary) => { setBusy(true); setFailure(undefined); try { setFailure(await onApply(proposal)) } finally { setBusy(false) } }
   return <aside className="agent-activity-panel" data-testid="agent-activity-panel" role="dialog" aria-labelledby="agent-activity-title">
     <header><div><p className="eyebrow">Shared human-agent workspace</p><h2 id="agent-activity-title">Agent activity</h2></div><button onClick={onClose} aria-label="Close agent activity"><X /></button></header>
     <section className={`agent-availability ${available ? 'available' : ''}`}><CircleDot size={17} /><div><strong>{available ? 'WebMCP available' : enabled ? 'WebMCP unavailable' : 'WebMCP paused'}</strong><p>{detail}</p></div><button data-testid="agent-tools-toggle" onClick={onToggleEnabled}>{enabled ? 'Pause tools' : 'Enable tools'}</button></section>
@@ -431,7 +481,12 @@ function AgentActivityPanel({ available, enabled, detail, activity, proposals, s
       {proposals.map(proposal => { const shot = shots.find(item => item.id === proposal.shotId); const draft = editing?.id === proposal.id ? editing : proposal; return <article className="proposal-card" key={proposal.id} data-testid="agent-proposal-card">
         <div className="proposal-heading"><div><span>{shot?.code ?? 'Shot'} · base v{proposal.baseVersion}</span><strong>{proposal.state}</strong></div><em>{proposal.desiredMediaType}</em></div>
         <div className="proposal-diff"><div><small>Before · shot intent</small><p>{shot?.description ?? 'Shot no longer available.'}</p><p>{shot?.action}</p></div><div><small>After · proposed direction</small>{proposal.state === 'Pending' ? <><textarea aria-label="Proposed creative direction" value={draft.creativeDirection} maxLength={1000} onChange={event => setEditing({ ...draft, creativeDirection: event.target.value })} /><textarea aria-label="Proposal rationale" value={draft.rationale} maxLength={600} onChange={event => setEditing({ ...draft, rationale: event.target.value })} /></> : <><p>{proposal.creativeDirection}</p><p>{proposal.rationale}</p></>}</div></div>
-        <footer>{proposal.state === 'Pending' ? <><button disabled={busy || !editing || editing.id !== proposal.id} onClick={() => void act(() => studioApi.webMcpEditProposal(proposal.id, { creativeDirection: draft.creativeDirection, rationale: draft.rationale, desiredMediaType: draft.desiredMediaType }))}>Save edit</button><button className="secondary" disabled={busy} onClick={() => void act(() => studioApi.webMcpRejectProposal(proposal.id))}>Reject</button><button className="primary" disabled={busy} onClick={() => void act(() => studioApi.webMcpAcceptProposal(proposal.id))}><Check size={15} />Accept direction</button></> : proposal.state === 'Accepted' ? <button className="primary" onClick={() => onOpenRevision(proposal)}><WandSparkles size={15} />Open revision options</button> : <span>Rejected · no shot changes</span>}</footer>
+        <div className="proposal-scope" data-testid="agent-proposal-scope"><span><strong>{proposal.noteIds.length}</strong> targeted {proposal.noteIds.length === 1 ? 'note' : 'notes'}</span><span><strong>{proposal.preservedConstraints.length}</strong> preserved</span>{proposal.preservedConstraints.map(rule => <em key={rule} title={rule}><LockKeyhole size={12} />{rule}</em>)}</div>
+        <footer>{proposal.state === 'Pending' ? <><button disabled={busy || !editing || editing.id !== proposal.id} onClick={() => void act(() => studioApi.webMcpEditProposal(proposal.id, { creativeDirection: draft.creativeDirection, rationale: draft.rationale, desiredMediaType: draft.desiredMediaType }))}>Save edit</button><button className="secondary" disabled={busy} onClick={() => void act(() => studioApi.webMcpRejectProposal(proposal.id))}>Reject</button><button className="primary" disabled={busy} onClick={() => void act(() => studioApi.webMcpAcceptProposal(proposal.id))}><Check size={15} />Accept direction</button></>
+          : proposal.state === 'Accepted' ? <><span>Nothing is generated by applying</span><button className="primary" disabled={busy} onClick={() => void apply(proposal)}><WandSparkles size={15} />Apply to revision</button></>
+          : proposal.state === 'Applied' ? <><span>Applied · no provider was called</span><button disabled={busy} onClick={() => void apply(proposal)}><WandSparkles size={15} />Reopen instructions</button></>
+          : <span>Rejected · no shot changes</span>}</footer>
+        {failure && <p className="proposal-failure" role="alert" data-testid="agent-proposal-failure">{failure}</p>}
       </article> })}
     </section>
     <section><div className="agent-section-title"><h3>Recent calls</h3><span>{activity.length}</span></div>{activity.length === 0 ? <p className="agent-empty">Waiting for the first browser tool call.</p> : <ol className="agent-log">{activity.map(item => <li key={item.id}><i className={item.state.toLowerCase()} /><div><strong>{item.tool}</strong><span>{item.message}</span></div><time>{new Date(item.at).toLocaleTimeString()}</time></li>)}</ol>}</section>

@@ -8,7 +8,7 @@ Branch: `challenge/webmcp-storyboard`
 
 Before this slice, Framewright exposed its own workstation-local server MCP endpoint at `/mcp`, but a browser agent could not discover the open storyboard, inspect the selected shot, or collaborate through the visible React application.
 
-After this slice, a supported browser can discover six narrowly scoped tools through the proposed browser WebMCP imperative API. An agent can inspect the active project, shots, authorities, notes, and continuity; stage a durable revision proposal; and see that proposal appear immediately in the ordinary application. The artist can edit, accept, or reject the proposal. Creating or accepting the proposal does not submit generation work. An accepted direction opens Framewright's existing revision choices, where the human deliberately chooses the next provider-agnostic step.
+After this slice, a supported browser can discover eight narrowly scoped tools through the proposed browser WebMCP imperative API. An agent can inspect the active project, shots, authorities, notes, and continuity; stage a durable revision proposal; and see that proposal appear immediately in the ordinary application. The artist can edit, accept, or reject the proposal. Creating or accepting the proposal does not submit generation work. An accepted direction opens Framewright's existing revision choices, where the human deliberately chooses the next provider-agnostic step.
 
 Unsupported browsers keep the complete ordinary application and show an honest unavailable state in **Agent activity**.
 
@@ -20,10 +20,64 @@ Unsupported browsers keep the complete ordinary application and show an honest u
 | `list_storyboard_shots` | Paginated active-project shot summaries, maximum 20 | true | true | false | Read only |
 | `get_shot_details` | Bounded shot, authority, note, revision, and media context | true | true | false | Read only; selects the shot visibly |
 | `inspect_shot_continuity` | Existing continuity evaluation | true | true | false | Read only; opens Review visibly |
-| `propose_shot_revision` | Durable, reversible pending direction | false | true | false | Adds a review proposal only; no canonical edit or provider call |
+| `get_director_context` | The exact revision on screen, its open notes, constraints, authorities, available actions, and a state token | true | true | false | Read only |
+| `observe_current_frame` | The picture for a previously read context, refused once that view changes | true | true | false | Read only |
+| `propose_shot_revision` | Durable, reversible pending direction, bound to a director context the agent read, naming its targeted notes and preserved constraints | false | true | false | Adds a review proposal only; no canonical edit or provider call |
 | `get_generation_status` | Bounded durable-ledger job status | true | true | false | Read only |
 
 All schemas have object roots, explicit bounds, required fields, enums where appropriate, and `additionalProperties: false`. Tool metadata is static source code. Storyboard content is always treated as untrusted data.
+
+## Director context and its picture
+
+`get_director_context` returns one bounded packet describing the revision the
+artist actually has on screen - the archived candidate whenever one is being
+previewed, not the live head - together with a `stateToken`.
+
+The token is a SHA-256 digest of persisted state only: project, shot, live and
+displayed version, the shot's update time, the frame asset and its content hash,
+the markup revision, camera, constraints, authorities, and every open note with
+its normalized position and text. A browser cannot talk a stale view into
+looking current, because it does not contribute anything the token is made of.
+The active tool and the full-view flag are reported but deliberately excluded:
+they change what the artist is doing, not which revision is on screen.
+
+`observe_current_frame` resolves the picture for a token, and only while that
+token still matches. Once the artist pins a note, edits the shot, or moves to a
+different revision, the pairing is refused with `stale_context` and the agent is
+told to read the context again. The refusal carries no replacement token, so it
+cannot be used to skip the re-read it is asking for. Structured context and
+visual context therefore can never describe two different revisions.
+
+Proposals remain unavailable while an archived revision is previewed:
+`availableActions` omits `propose_shot_revision`, matching the read-only lock the
+artist sees in the workspace.
+
+## Proposal scope, and what applying one does
+
+A proposal cannot be made blind. `propose_shot_revision` requires the state
+token from a director context the agent has read, so the sequence is always
+inspect, then propose; a token from a view that has since moved is refused with
+`stale_context` and nothing is written.
+
+A proposal states its own scope. `noteIds` are the marked regions it is aimed
+at, and `preservedConstraints` are the rules it promises not to touch. The
+service validates that every preserved rule is one the shot or one of its
+attached authorities actually holds, so an agent cannot reassure the artist with
+an invented constraint that nothing enforces. Both appear on the proposal card
+before the artist decides.
+
+The states are distinct and ordered: Pending, then Accepted or Rejected, then
+Applied. Rejecting changes nothing. Applying is the artist's action and the only
+step that turns a direction into working instructions: the service refuses a
+pending or rejected proposal, refuses one whose shot has moved on, records the
+single moment it was applied, and returns frozen instructions - direction,
+rationale, preserved constraints, and the targeted notes with their normalized
+coordinates - which open in the ordinary revision surface. Applying again
+replays that same application rather than doubling it.
+
+Applying still authorizes no provider. The instructions carry
+`generationAuthorized: false`, and the existing explicit Generate action in the
+revision surface remains the only thing that spends GPU time or money.
 
 ## Security and threat model
 

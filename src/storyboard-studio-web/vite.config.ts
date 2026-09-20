@@ -9,7 +9,13 @@ export default defineConfig({
     rolldownOptions: {
       output: {
         codeSplitting: {
-          groups: [{ name: 'vendor', test: /node_modules[\\/]/ }],
+          groups: [
+            // three.js is only needed once an artist opens a model, so it keeps
+            // its own chunk rather than riding along in the shared vendor bundle
+            // that every page load pays for.
+            { name: 'three', test: /node_modules[\\/]three[\\/]/ },
+            { name: 'vendor', test: /node_modules[\\/]/ },
+          ],
         },
       },
     },

@@ -123,6 +123,8 @@ app.Use(async (context, next) =>
             requestSize.MaxRequestBodySize = AssetStore.MaxImageRequestBytes;
         else if (context.Request.Path.StartsWithSegments("/api/assets/media", StringComparison.OrdinalIgnoreCase))
             requestSize.MaxRequestBodySize = AssetStore.MaxMediaRequestBytes;
+        else if (context.Request.Path.Equals("/api/assets/models", StringComparison.OrdinalIgnoreCase))
+            requestSize.MaxRequestBodySize = AssetStore.MaxModelRequestBytes;
     }
     var pairing = context.RequestServices.GetRequiredService<PairingService>();
     var allowLan = app.Configuration.GetValue("Studio:AllowLan", false);
@@ -433,6 +435,10 @@ app.MapGet("/api/maintenance/diagnostics", async Task<IResult> (
 // return domain failures as stable envelopes and never dispatch a provider.
 app.MapGet("/api/webmcp/context", async (Guid? selectedShotId, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.ContextAsync(selectedShotId, cancellationToken)));
+app.MapGet("/api/webmcp/director/context", async (Guid shotId, int? displayedVersion, bool? archivedPreview, bool? directorMode, string? tool, WebMcpStoryboardService service, CancellationToken cancellationToken)
+    => Results.Ok(await service.DirectorContextAsync(shotId, displayedVersion, archivedPreview ?? false, directorMode ?? false, tool, cancellationToken)));
+app.MapGet("/api/webmcp/director/observation", async (Guid shotId, int? displayedVersion, bool? archivedPreview, string? stateToken, WebMcpStoryboardService service, CancellationToken cancellationToken)
+    => Results.Ok(await service.DirectorObservationAsync(shotId, displayedVersion, archivedPreview ?? false, stateToken, cancellationToken)));
 app.MapGet("/api/webmcp/shots", async (int? offset, int? limit, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.ListShotsAsync(offset ?? 0, limit ?? 10, cancellationToken)));
 app.MapGet("/api/webmcp/shots/{shotId:guid}", async (Guid shotId, WebMcpStoryboardService service, CancellationToken cancellationToken)
@@ -449,6 +455,8 @@ app.MapPost("/api/webmcp/proposals/{proposalId:guid}/accept", async (Guid propos
     => Results.Ok(await service.AcceptAsync(proposalId, cancellationToken)));
 app.MapPost("/api/webmcp/proposals/{proposalId:guid}/reject", async (Guid proposalId, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.RejectAsync(proposalId, cancellationToken)));
+app.MapPost("/api/webmcp/proposals/{proposalId:guid}/apply", async (Guid proposalId, WebMcpStoryboardService service, CancellationToken cancellationToken)
+    => Results.Ok(await service.ApplyAsync(proposalId, cancellationToken)));
 app.MapGet("/api/webmcp/jobs/{jobId:guid}", async (Guid jobId, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.JobStatusAsync(jobId, cancellationToken)));
 app.MapGet("/api/shots/{shotId:guid}/visual-audit", async Task<IResult> (
@@ -588,6 +596,21 @@ app.MapPost("/api/assets/images", async Task<IResult> (
     if (file is null) return Results.BadRequest(new { error = "The multipart field 'file' is required." });
     return ToHttpResult(await assets.ImportImageAsync(file, cancellationToken));
 }).DisableAntiforgery();
+
+app.MapPost("/api/assets/models", async Task<IResult> (
+    HttpContext context, AssetStore assets, CancellationToken cancellationToken) =>
+{
+    if (context.Request.Headers["X-Storyboard-Studio"] != "1") return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!context.Request.HasFormContentType) return Results.BadRequest(new { error = "A multipart model upload is required." });
+    var form = await context.Request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("file");
+    if (file is null) return Results.BadRequest(new { error = "The multipart field 'file' is required." });
+    return ToHttpResult(await assets.ImportModelAsync(file, cancellationToken));
+}).DisableAntiforgery();
+
+app.MapGet("/api/assets/{assetId:guid}/model-profile", async Task<IResult> (
+    Guid assetId, AssetStore assets, CancellationToken cancellationToken)
+    => ToHttpResult(await assets.ModelProfileAsync(assetId, cancellationToken)));
 
 app.MapPost("/api/assets/media", async Task<IResult> (
     HttpContext context, AssetKind kind, AssetStore assets, CancellationToken cancellationToken) =>

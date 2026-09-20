@@ -1,5 +1,5 @@
 import { studioApi } from './api'
-import type { ShotRevisionProposalSummary, WebMcpEnvelope } from './types'
+import type { DirectorViewQuery, ShotRevisionProposalSummary, WebMcpEnvelope } from './types'
 
 type JsonSchema = Record<string, unknown>
 type ToolExecution = (input: Record<string, unknown>, context: { signal?: AbortSignal }) => Promise<WebMcpEnvelope>
@@ -9,18 +9,25 @@ type ModelContext = { registerTool: (tool: BrowserTool, options: { signal: Abort
 declare global { interface Document { modelContext?: ModelContext } }
 
 const emptySchema = { type: 'object', properties: {}, required: [], additionalProperties: false } as const
+const noShotOpen: WebMcpEnvelope = {
+  ok: false, status: 'error', code: 'no_shot_open',
+  message: 'No shot is open in the workspace. Ask the artist to open one, then read the context again.', retryable: true,
+}
 const shotIdSchema = {
   type: 'object', properties: { shotId: { type: 'string', format: 'uuid', maxLength: 36 } }, required: ['shotId'], additionalProperties: false,
 } as const
 
 export const FRAMEWRIGHT_WEBMCP_TOOL_NAMES = [
   'get_storyboard_context', 'list_storyboard_shots', 'get_shot_details',
-  'inspect_shot_continuity', 'propose_shot_revision', 'get_generation_status',
+  'inspect_shot_continuity', 'get_director_context', 'observe_current_frame',
+  'propose_shot_revision', 'get_generation_status',
 ] as const
 
 export interface WebMcpBridgeOptions {
   getSelectedShotId: () => string | undefined
   getSelectedShotVersion: () => number | undefined
+  /** What the artist actually has on screen, including an archived preview. */
+  getDirectorView: () => DirectorViewQuery | undefined
   onAvailability: (available: boolean, detail: string) => void
   onActivity: (tool: string, state: 'Running' | 'Succeeded' | 'Failed' | 'Cancelled', message: string) => void
   onInspectShot: (shotId: string, continuity: boolean) => void
@@ -78,15 +85,38 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
       execute: run('inspect_shot_continuity', async (input, signal) => { const id = String(input.shotId); const result = await studioApi.webMcpContinuity(id, signal); if (result.ok) options.onInspectShot(id, true); return result }),
     },
     {
+      name: 'get_director_context', title: 'Get director context',
+      description: 'Read the exact shot revision on screen, its open notes, constraints, authorities, and a state token that binds this context to the frame itself.',
+      inputSchema: emptySchema, annotations: read,
+      execute: run('get_director_context', (_input, signal) => {
+        const view = options.getDirectorView()
+        return view ? studioApi.webMcpDirectorContext(view, signal) : Promise.resolve(noShotOpen)
+      }),
+    },
+    {
+      name: 'observe_current_frame', title: 'Observe the current frame',
+      description: 'Resolve the picture for a previously read director context. A view that changed since then is refused so structured and visual context can never disagree.',
+      inputSchema: {
+        type: 'object', properties: { stateToken: { type: 'string', minLength: 64, maxLength: 64 } }, required: ['stateToken'], additionalProperties: false,
+      }, annotations: read,
+      execute: run('observe_current_frame', (input, signal) => {
+        const view = options.getDirectorView()
+        return view ? studioApi.webMcpDirectorObservation(view, String(input.stateToken), signal) : Promise.resolve(noShotOpen)
+      }),
+    },
+    {
       name: 'propose_shot_revision', title: 'Propose shot revision',
-      description: 'Stage reversible creative direction for human review without changing the shot or dispatching generation.',
+      description: 'Stage reversible creative direction for human review, bound to a director context you have read, naming the notes it targets and the constraints it preserves. It changes no shot and dispatches nothing.',
       inputSchema: {
         type: 'object', properties: {
           shotId: { type: 'string', format: 'uuid', maxLength: 36 }, expectedVersion: { type: 'integer', minimum: 1, maximum: 1000000 },
           creativeDirection: { type: 'string', minLength: 1, maxLength: 1000 }, rationale: { type: 'string', maxLength: 600 },
           desiredMediaType: { type: 'string', enum: ['image', 'video'] }, authorityIds: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 100 } },
-          noteIds: { type: 'array', maxItems: 20, items: { type: 'string', format: 'uuid', maxLength: 36 } }, idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
-        }, required: ['shotId', 'expectedVersion', 'creativeDirection', 'rationale', 'desiredMediaType', 'authorityIds', 'noteIds', 'idempotencyKey'], additionalProperties: false,
+          noteIds: { type: 'array', maxItems: 20, items: { type: 'string', format: 'uuid', maxLength: 36 } },
+          preservedConstraints: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 400 } },
+          observedStateToken: { type: 'string', minLength: 64, maxLength: 64 },
+          idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+        }, required: ['shotId', 'expectedVersion', 'creativeDirection', 'rationale', 'desiredMediaType', 'authorityIds', 'noteIds', 'preservedConstraints', 'observedStateToken', 'idempotencyKey'], additionalProperties: false,
       }, annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: false },
       execute: run('propose_shot_revision', async (input, signal) => {
         const result = await studioApi.webMcpPropose(input as Parameters<typeof studioApi.webMcpPropose>[0], signal)

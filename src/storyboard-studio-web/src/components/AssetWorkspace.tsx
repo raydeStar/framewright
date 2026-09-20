@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Archive, ArrowLeft, ArrowRight, BadgeCheck, Check, Clapperboard, Download, Folder, FolderOpen, GitCompare, Grid2X2, Image, ImagePlus, Library, List, LoaderCircle, Music2, Pause, PenLine, Play, Plus, Search, SlidersHorizontal, Sparkles, Upload, Video, WandSparkles, X } from 'lucide-react'
+import { Archive, ArrowLeft, ArrowRight, BadgeCheck, Box, Check, Clapperboard, Download, Folder, FolderOpen, GitCompare, Grid2X2, Image, ImagePlus, Library, List, LoaderCircle, Music2, Pause, PenLine, Play, Plus, Search, SlidersHorizontal, Sparkles, Upload, Video, WandSparkles, X } from 'lucide-react'
 import { studioApi } from '../api'
 import type { AssetCollectionSummary, AssetGenerationDraft, AssetGenerationReference, AssetPlacementSummary, AssetReviewNoteSummary, AssetSummary, JobSummary, ReferenceSummary, ShotSummary, StudioSnapshot } from '../types'
 import Dialog from './Dialog'
+import ModelInspectionWorkspace from './ModelInspectionWorkspace'
 import AssetReviewPins from './AssetReviewPins'
 
-type LibraryView = 'all' | 'images' | 'audio' | 'video' | 'authorities' | 'archived' | `collection:${string}`
+type LibraryView = 'all' | 'images' | 'audio' | 'video' | 'models' | 'authorities' | 'archived' | `collection:${string}`
 export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority, onOpenGeneration, onOpenSequence, onJobQueued, onToast }: {
   studio: StudioSnapshot
   initialAssetId?: string
@@ -61,6 +62,7 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     if (view === 'images' && asset.kind !== 'Image') return false
     if (view === 'audio' && asset.kind !== 'Audio') return false
     if (view === 'video' && asset.kind !== 'Video') return false
+    if (view === 'models' && asset.kind !== 'Model') return false
     if (view === 'collection:unfiled' && asset.collectionId) return false
     if (view.startsWith('collection:') && view !== 'collection:unfiled' && asset.collectionId !== view.slice('collection:'.length)) return false
     if (normalized && ![asset.displayName, asset.originalFileName, asset.source, asset.notes, ...asset.tags].join(' ').toLowerCase().includes(normalized)) return false
@@ -73,10 +75,11 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     try {
       let imported = 0
       for (const file of Array.from(files)) {
-        if (file.type.startsWith('image/')) await studioApi.uploadImage(file, file.name)
+        if (file.name.toLowerCase().endsWith('.glb')) await studioApi.uploadModel(file)
+        else if (file.type.startsWith('image/')) await studioApi.uploadImage(file, file.name)
         else if (file.type.startsWith('audio/')) await studioApi.uploadMedia(file, 'Audio')
         else if (file.type.startsWith('video/')) await studioApi.uploadMedia(file, 'Video')
-        else throw new Error(`${file.name} is not a supported image, audio, or video file.`)
+        else throw new Error(`${file.name} is not a supported image, audio, video, or GLB model file.`)
         imported++
       }
       await refresh(); onToast(`${imported} asset${imported === 1 ? '' : 's'} imported into the library.`)
@@ -100,6 +103,7 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     { id: 'images' as const, label: 'Images', icon: <Image />, count: libraryAssets.filter(x => !x.isArchived && x.kind === 'Image').length },
     { id: 'audio' as const, label: 'Music & audio', icon: <Music2 />, count: libraryAssets.filter(x => !x.isArchived && x.kind === 'Audio').length },
     { id: 'video' as const, label: 'Video takes', icon: <Video />, count: libraryAssets.filter(x => !x.isArchived && x.kind === 'Video').length },
+    { id: 'models' as const, label: 'Models', icon: <Box />, count: libraryAssets.filter(x => !x.isArchived && x.kind === 'Model').length },
     { id: 'authorities' as const, label: 'Authorities', icon: <BadgeCheck />, count: studio.references.length },
     { id: 'archived' as const, label: 'Archived', icon: <Archive />, count: assets.filter(x => x.isArchived).length },
   ]
@@ -118,13 +122,14 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     })
   }, [rawGenerationReferences])
 
+  if (selected?.kind === 'Model') return <ModelInspectionWorkspace asset={selected} onBack={() => setSelectedId(undefined)} onError={setError} />
   if (selected?.kind === 'Image') return <ImageRevisionWorkspace asset={selected} collections={collections} shots={studio.shots} references={generationReferences} onBack={() => setSelectedId(undefined)} onOpenGeneration={onOpenGeneration} onChanged={async message => { await refresh(); onToast(message) }} onEditAuthority={onEditAuthority} />
 
   return <main className="workspace asset-workspace">
     <header className="asset-hero">
       <div><p className="eyebrow">Project media pool</p><h1>Asset library</h1><p>One searchable home for approved references, working images, music, audio, and video takes.</p></div>
       <div className="asset-hero-actions">
-        <input ref={fileRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,audio/*,video/mp4,video/webm" onChange={event => void importFiles(event.target.files ?? undefined)} />
+        <input ref={fileRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,audio/*,video/mp4,video/webm,.glb,model/gltf-binary" onChange={event => void importFiles(event.target.files ?? undefined)} />
         <button className="secondary" onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={17} />Import media</button>
         <button className="primary" onClick={() => setCreateOpen(true)}><Plus size={18} />Create new</button>
       </div>
@@ -160,7 +165,7 @@ function AssetCard({ asset, placementCount, selected, onSelect }: { asset: Asset
   const [playing, setPlaying] = useState(false)
   return <article className={`asset-card ${selected ? 'selected' : ''}`} draggable={!asset.isArchived} onDragStart={event => { event.dataTransfer.setData('text/asset-id', asset.id); event.dataTransfer.effectAllowed = 'move' }}>
     <button className="asset-card-open" onClick={onSelect} aria-label={`Open ${asset.displayName}`}>
-      <div className={`asset-thumbnail ${asset.kind.toLowerCase()}`}>{asset.kind === 'Image' ? <img src={asset.contentUrl} alt="" /> : asset.kind === 'Video' ? <video src={asset.contentUrl} muted preload="metadata" /> : <><Music2 /><div className="asset-wave">{[2,5,3,7,4,8,3,6,2,5,7,3].map((height, index) => <i key={index} style={{ height: `${height * 8}%` }} />)}</div></>}<span>{asset.kind}</span></div>
+      <div className={`asset-thumbnail ${asset.kind.toLowerCase()}`}>{asset.kind === 'Image' ? <img src={asset.contentUrl} alt="" /> : asset.kind === 'Video' ? <video src={asset.contentUrl} muted preload="metadata" /> : asset.kind === 'Model' ? <Box size={26} /> : <><Music2 /><div className="asset-wave">{[2,5,3,7,4,8,3,6,2,5,7,3].map((height, index) => <i key={index} style={{ height: `${height * 8}%` }} />)}</div></>}<span>{asset.kind}</span></div>
       <div className="asset-card-copy"><strong>{asset.displayName}</strong><small>{asset.source} · {formatSize(asset.bytes)}</small><div>{asset.tags.slice(0, 2).map(tag => <em key={tag}>{tag}</em>)}{placementCount > 0 && <em className="used"><Clapperboard size={11} />{placementCount}</em>}</div></div>
     </button>
     {asset.kind === 'Audio' && <button className="asset-quick-play" onClick={event => { event.stopPropagation(); const audio = event.currentTarget.parentElement?.querySelector('audio'); if (!audio) return; if (playing) audio.pause(); else void audio.play(); setPlaying(!playing) }} aria-label={`${playing ? 'Pause' : 'Play'} ${asset.displayName}`}>{playing ? <Pause size={14} /> : <Play size={14} />}<audio src={asset.contentUrl} onEnded={() => setPlaying(false)} /></button>}

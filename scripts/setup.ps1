@@ -12,6 +12,11 @@ param(
     [string]$YuE2Model = 'm-a-p/YuE2-3B',
     [string]$YuE2Vae = 'm-a-p/YuE2-Vae',
     [string]$YuE2Device = 'cuda',
+    [ValidateSet('torch', 'torch-eager', 'vllm')]
+    [string]$YuE2Backend = 'torch',
+    [switch]$YuE2OffloadAr,
+    [ValidateRange(0, 65536)]
+    [int]$YuE2NarQueryChunkSize = 0,
     [string]$YuE2WorkerToken,
     [switch]$EnableLocalVoice,
     [switch]$Launch,
@@ -209,6 +214,9 @@ if ($Mode -eq 'Docker') {
         FRAMEWRIGHT_YUE2_MODEL = $YuE2Model
         FRAMEWRIGHT_YUE2_VAE = $YuE2Vae
         FRAMEWRIGHT_YUE2_DEVICE = $YuE2Device
+        FRAMEWRIGHT_YUE2_BACKEND = $YuE2Backend
+        FRAMEWRIGHT_YUE2_OFFLOAD_AR = $YuE2OffloadAr.ToString().ToLowerInvariant()
+        FRAMEWRIGHT_YUE2_NAR_QUERY_CHUNK_SIZE = $(if ($YuE2NarQueryChunkSize -gt 0) { $YuE2NarQueryChunkSize } else { '' })
         FRAMEWRIGHT_CODEX_IMAGEGEN_ENABLED = $EnableCodexImageGen.ToString().ToLowerInvariant()
         FRAMEWRIGHT_LOCAL_VOICE_ENABLED = $EnableLocalVoice.ToString().ToLowerInvariant()
     })
@@ -231,6 +239,9 @@ else {
     Set-ObjectProperty $yue2 'Model' $YuE2Model
     Set-ObjectProperty $yue2 'Vae' $YuE2Vae
     Set-ObjectProperty $yue2 'Device' $YuE2Device
+    Set-ObjectProperty $yue2 'Backend' $YuE2Backend
+    Set-ObjectProperty $yue2 'OffloadAr' ([bool]$YuE2OffloadAr)
+    Set-ObjectProperty $yue2 'NarQueryChunkSize' $YuE2NarQueryChunkSize
     Set-ObjectProperty $codex 'NonInteractiveImageEnabled' ([bool]$EnableCodexImageGen)
     Set-ObjectProperty $qwen 'Enabled' ([bool]$EnableLocalVoice)
     $parent = Split-Path -Parent $settingsFile

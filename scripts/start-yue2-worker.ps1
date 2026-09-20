@@ -37,6 +37,9 @@ if (Test-Path -LiteralPath $environmentPath -PathType Leaf) {
             'FRAMEWRIGHT_YUE2_MODEL' { $env:YUE2_MODEL = $value }
             'FRAMEWRIGHT_YUE2_VAE' { $env:YUE2_VAE = $value }
             'FRAMEWRIGHT_YUE2_DEVICE' { $env:YUE2_DEVICE = $value }
+            'FRAMEWRIGHT_YUE2_BACKEND' { $env:YUE2_BACKEND = $value }
+            'FRAMEWRIGHT_YUE2_OFFLOAD_AR' { $env:YUE2_OFFLOAD_AR = $value }
+            'FRAMEWRIGHT_YUE2_NAR_QUERY_CHUNK_SIZE' { $env:YUE2_NAR_QUERY_CHUNK_SIZE = $value }
         }
     }
 }
@@ -48,6 +51,9 @@ if (Test-Path -LiteralPath $localSettingsPath -PathType Leaf) {
         if ($local.Model) { $env:YUE2_MODEL = [string]$local.Model }
         if ($local.Vae) { $env:YUE2_VAE = [string]$local.Vae }
         if ($local.Device) { $env:YUE2_DEVICE = [string]$local.Device }
+        if ($local.Backend) { $env:YUE2_BACKEND = [string]$local.Backend }
+        if ($null -ne $local.OffloadAr) { $env:YUE2_OFFLOAD_AR = ([bool]$local.OffloadAr).ToString().ToLowerInvariant() }
+        if ($local.NarQueryChunkSize) { $env:YUE2_NAR_QUERY_CHUNK_SIZE = [string]$local.NarQueryChunkSize }
         if ($local.OutputPath) { $env:YUE2_OUTPUT_PATH = [string]$local.OutputPath }
     }
 }

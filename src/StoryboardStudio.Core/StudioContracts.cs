@@ -73,12 +73,32 @@ public enum ManifestState
     Cancelled
 }
 
+/// <summary>One material as the model inspector reports it.</summary>
+public sealed record ModelMaterialSummary(string Name, bool Textured, string AlphaMode, bool DoubleSided);
+
+/// <summary>The bounded GLB subset and the ceilings that refuse a model before it loads.</summary>
+public sealed record ModelSupportLimits(
+    long MaxBytes, int MaxVertices, int MaxTriangles, long MaxEmbeddedTextureBytes,
+    int MaxNodes, int MaxMaterials, int MaxImages, string[] SupportedRequiredExtensions);
+
+/// <summary>What the artist reads about a stored model before and while inspecting it.</summary>
+public sealed record ModelProfileSummary(
+    Guid AssetId, string DisplayName, string ContentHash, long Bytes, string ContentUrl,
+    string Container, string SpecificationVersion, string Generator,
+    int NodeCount, int MeshCount, int PrimitiveCount, int VertexCount, int TriangleCount,
+    int ImageCount, long EmbeddedTextureBytes, long BinaryChunkBytes,
+    string[] DeclaredExtensions, string[] RequiredExtensions,
+    ModelMaterialSummary[] Materials,
+    double[] BoundsMin, double[] BoundsMax, double[] Dimensions,
+    ModelSupportLimits Limits);
+
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AssetKind
 {
     Image,
     Video,
-    Audio
+    Audio,
+    Model
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

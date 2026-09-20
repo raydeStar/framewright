@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Aperture, ArrowLeft, ArrowRight, BadgeCheck, Check, CircleAlert, Clapperboard, Cpu, Download, Film, ImagePlus, Layers3, Library, LoaderCircle, LockKeyhole, MessageCircle, Music2, Pause, PenLine, Play, Plus, Redo2, RotateCcw, Scan, Sparkles, Trash2, Undo2, Volume2, WandSparkles, X } from 'lucide-react'
+import { Aperture, ArrowLeft, ArrowRight, BadgeCheck, Check, CircleAlert, Clapperboard, Cpu, Download, Film, ImagePlus, Layers3, Library, LoaderCircle, LockKeyhole, Maximize2, MessageCircle, Minimize2, Music2, Pause, PenLine, Play, Plus, Redo2, RotateCcw, Scan, Sparkles, Trash2, Undo2, Volume2, WandSparkles, X } from 'lucide-react'
 import { studioApi } from '../api'
 import { getSupersededJobIds } from '../jobState'
 import Artwork from './Artwork'
@@ -448,9 +448,11 @@ function CameraGuide({ value, disabled, onChange }: { value: string; disabled: b
   </div>
 }
 
-export function ShotWorkspace({ studio, shot, comments, references, tool, setTool, onAddComment, onMoveComment, onResolveReferencePin, onRatify, onOpenReview, onOpenAssets, onEdit, onShotSaved, onShotContractSaved, onCandidatesChanged, onJobQueued, onAskCodex, codexBusy, generationBusy, activeJob, implementationRequest, onImplementationConsumed, sketchLaunch, onSketchLaunchConsumed }: {
+export function ShotWorkspace({ studio, shot, comments, references, tool, setTool, directorMode, onDirectorMode, onDisplayedRevision, onAddComment, onMoveComment, onResolveReferencePin, onRatify, onOpenReview, onOpenAssets, onEdit, onShotSaved, onShotContractSaved, onCandidatesChanged, onJobQueued, onAskCodex, codexBusy, generationBusy, activeJob, implementationRequest, onImplementationConsumed, sketchLaunch, onSketchLaunchConsumed }: {
   studio: StudioSnapshot; shot: ShotSummary; comments: CommentSummary[]; references: ReferenceSummary[];
   tool: 'select' | 'draw' | 'comment'; setTool: (tool: 'select' | 'draw' | 'comment') => void;
+  directorMode: boolean; onDirectorMode: (directorMode: boolean) => void;
+  onDisplayedRevision: (revision: { shotId: string; version: number; archived: boolean }) => void;
   onAddComment: (x: number, y: number, reference?: ReferenceSummary) => void; onMoveComment: (id: string, x: number, y: number) => Promise<void>; onResolveReferencePin: (id: string) => void; onRatify: () => void; onOpenReview: (candidateId?: string) => void; onOpenAssets: () => void; onEdit: () => void; onShotSaved: (shot: ShotSummary) => void; onShotContractSaved: (shot: ShotSummary, message: string) => void; onCandidatesChanged: (message: string) => Promise<void>; onJobQueued: () => void; onAskCodex: () => void; codexBusy: boolean; generationBusy: boolean; activeJob?: JobSummary; implementationRequest?: { id: number; direction: string }; onImplementationConsumed: () => void; sketchLaunch?: { id: number; prompt?: string; route?: 'fast' | 'precision'; underlayAssetId?: string }; onSketchLaunchConsumed: () => void
 }) {
   const [tab, setTab] = useState<'intent' | 'refs' | 'rules' | 'media'>('intent')
@@ -554,6 +556,10 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
   const displayedVersion = preview && !peeking ? preview.version : shot.version
   const displayedComments = useMemo(() => studio.comments.filter(comment => comment.shotId === shot.id && comment.version === displayedVersion && comment.state === 'Open'), [displayedVersion, shot.id, studio.comments])
   const archivedPreview = Boolean(preview && !peeking)
+
+  // Browser tools read the revision on screen, not the live head, so the shell
+  // is told whenever the previewed candidate changes.
+  useEffect(() => { onDisplayedRevision({ shotId: shot.id, version: displayedVersion, archived: archivedPreview }) }, [archivedPreview, displayedVersion, onDisplayedRevision, shot.id])
 
   const clearDisplayedPins = async () => {
     if (archivedPreview || clearingPins || displayedComments.length === 0) return
@@ -683,7 +689,13 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
     } finally { setEndpointBusy(false) }
   }
   if (canvasMode === 'sketch') return <Suspense fallback={<main className="workspace workspace-loading" role="status"><LoaderCircle className="spin" /><p>Opening composition lab</p></main>}><SketchWorkspace key={`${shot.id}-${sketchPurpose}`} shot={shot} references={references} purpose={sketchPurpose} launch={sketchLaunch} onLaunchConsumed={onSketchLaunchConsumed} onOpenFrame={() => setCanvasMode('frame')} onJobQueued={onJobQueued} /></Suspense>
-  return <main className="workspace shot-workspace" data-testid="shot-workspace" style={{ '--project-aspect': `${studio.project.deliveryWidth} / ${studio.project.deliveryHeight}` } as React.CSSProperties}>
+  return <main className={`workspace shot-workspace${directorMode ? ' director-mode' : ''}`} data-testid="shot-workspace" style={{
+    '--project-aspect': `${studio.project.deliveryWidth} / ${studio.project.deliveryHeight}`,
+    // Full view fits the frame to whichever container edge binds first, so the
+    // stage keeps the exact delivery aspect and normalized pin coordinates
+    // continue to mean the same place in the picture at any size.
+    '--project-aspect-number': `${studio.project.deliveryWidth / studio.project.deliveryHeight}`,
+  } as React.CSSProperties}>
     <aside className="version-rail">
       <div className="rail-label">Versions</div>
       {(['Sketch', 'Draft', 'Final', 'Video'] as const).map((stage, index) => {
@@ -708,10 +720,19 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
           <button aria-label="Place comment" aria-pressed={tool === 'comment' && !pinningReference} className={tool === 'comment' && !pinningReference ? 'active' : ''} disabled={archivedPreview} title={archivedPreview ? 'Promote this draft before adding new feedback' : 'Pin feedback to this version'} onClick={() => { setPinningReference(undefined); setTool('comment') }}><MessageCircle size={17} /></button>
         </div>
         <div className="canvas-title"><span>{shot.code}</span><strong>{shot.title}</strong><em>{tool === 'draw' ? 'Markup' : pinningReference ? `Place ${pinningReference.name}` : tool === 'comment' ? 'Place a pin' : 'Review'}</em></div>
-        <div className="toolbar-actions shot-toolbar-actions"><button onClick={() => openSketch('Draft')}><PenLine size={17} />Sketch</button><button onClick={onEdit} disabled={archivedPreview} title={archivedPreview ? 'Promote this draft before editing the live shot contract' : 'Edit shot intent'}><Clapperboard size={17} />Edit intent</button><button onClick={() => onOpenReview(preview?.id)}><Layers3 size={17} />{preview ? `Compare v${preview.version} to latest` : 'Compare'}</button></div>
+        <div className="toolbar-actions shot-toolbar-actions">
+          {!directorMode && <button onClick={() => openSketch('Draft')}><PenLine size={17} />Sketch</button>}
+          {!directorMode && <button onClick={onEdit} disabled={archivedPreview} title={archivedPreview ? 'Promote this draft before editing the live shot contract' : 'Edit shot intent'}><Clapperboard size={17} />Edit intent</button>}
+          <button className="compare-action" onClick={() => onOpenReview(preview?.id)}><Layers3 size={17} />{preview ? `Compare v${preview.version} to latest` : 'Compare'}</button>
+          {/* Full view only restyles the shell. The canvas stays mounted, so
+              unsaved markup, pins, and inspector drafts survive the trip. */}
+          <button className={`director-mode-toggle${directorMode ? ' active' : ''}`} aria-pressed={directorMode} aria-keyshortcuts="Escape" title={directorMode ? 'Leave full view (Escape)' : 'Direct this frame in full view'} onClick={() => onDirectorMode(!directorMode)}>{directorMode ? <Minimize2 size={17} /> : <Maximize2 size={17} />}{directorMode ? 'Exit full view' : 'Director mode'}</button>
+        </div>
       </div>
-      <ShotCanvas shot={shot} comments={displayedComments} references={studio.references} displayVersion={displayedVersion} readOnly={archivedPreview} tool={tool} placingReference={pinningReference} referenceDrop={draggingReference} onAddComment={(x, y) => { onAddComment(x, y, pinningReference); setPinningReference(undefined) }} onMoveComment={onMoveComment} onResolveComment={onResolveReferencePin} onMarkupReady={setMarkupReady} onMarkupGuideReady={rememberMarkupGuide} onCompositionGuideReady={rememberCompositionGuide} deliveryWidth={studio.project.deliveryWidth} deliveryHeight={studio.project.deliveryHeight} videoUrl={currentVideoUrl}
-        previewCandidate={preview} peeking={peeking} activeJob={activeJob} />
+      <div className="canvas-stage">
+        <ShotCanvas shot={shot} comments={displayedComments} references={studio.references} displayVersion={displayedVersion} readOnly={archivedPreview} tool={tool} placingReference={pinningReference} referenceDrop={draggingReference} onAddComment={(x, y) => { onAddComment(x, y, pinningReference); setPinningReference(undefined) }} onMoveComment={onMoveComment} onResolveComment={onResolveReferencePin} onMarkupReady={setMarkupReady} onMarkupGuideReady={rememberMarkupGuide} onCompositionGuideReady={rememberCompositionGuide} deliveryWidth={studio.project.deliveryWidth} deliveryHeight={studio.project.deliveryHeight} videoUrl={currentVideoUrl}
+          previewCandidate={preview} peeking={peeking} activeJob={activeJob} />
+      </div>
       <VideoEndpointStrip shot={shot} candidates={candidates} busy={endpointBusy || generationBusy} error={endpointError} onChange={saveVideoEndpoints}
         onView={candidate => { setPreviewId(candidate.isCurrent ? undefined : candidate.id); setPeeking(false); setTool('select') }}
         onCreateLastFrame={() => setLastFrameOpen(true)} />

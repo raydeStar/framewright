@@ -292,6 +292,12 @@ public sealed class ShotRevisionProposalRecord
     public long CreatedAtUnixMs { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
+    /// <summary>When the artist pushed this accepted direction into the revision surface. Applying twice replays this one.</summary>
+    public DateTimeOffset? AppliedAt { get; set; }
+    /// <summary>The director-context token the agent had read when it proposed. A view that moved on invalidates the proposal.</summary>
+    public string? ObservedStateToken { get; set; }
+    /// <summary>Constraints the proposal promises not to touch. Always a subset of the shot's own rules and locked authorities.</summary>
+    public string PreservedConstraintsJson { get; set; } = "[]";
 }
 
 public sealed class ShotVisualAuditRecord

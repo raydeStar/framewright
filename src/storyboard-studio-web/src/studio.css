@@ -997,7 +997,9 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
   .shot-wall { grid-template-columns: 1fr 1fr; gap: 10px; }.shot-card-body { padding: 11px; }.shot-card-body > p { display: none; }.shot-title-row h2 { font-size: var(--text-lg); }.new-shot-card { min-height: 210px; }
   .shot-workspace { position: relative; display: block; overflow: hidden; }.version-rail { display: none; }.shot-center { height: 100%; grid-template-rows: 52px minmax(0,1fr) auto auto; padding-bottom: 280px; }.shot-inspector { position: absolute; left: 0; right: 0; bottom: 0; height: 280px; border: 0; border-top: 1px solid var(--line-strong); border-radius: 15px 15px 0 0; box-shadow: 0 -12px 35px rgba(0,0,0,.32); grid-template-rows: 48px minmax(0,1fr) auto; }.shot-inspector::before { content: ''; position: absolute; top: 6px; left: calc(50% - 20px); width: 40px; height: 3px; border-radius: 3px; background: var(--line-strong); }.inspector-tabs { padding-top: 4px; }.inspector-scroll { padding: 12px 15px; }.inspector-section { padding-bottom: 8px; margin-bottom: 8px; }.codex-note { min-height: 52px; }.generation-panel { padding: 8px 12px; }.generation-state { display: none; }
   .canvas-toolbar { grid-template-columns: auto 1fr auto; }.canvas-title { justify-self: start; margin-left: 9px; }.canvas-title strong { display: none; }.toolbar-actions button:not(:last-child) { display: none; }.shot-canvas { width: 100%; }.shot-transport { justify-content: flex-start; padding-left: 12px; }
-  .shot-toolbar-actions button:first-child { display: flex; }
+  /* Sketch keeps the first slot and the full-view toggle keeps the last; compare
+     is named explicitly so it is not squeezed out by the narrow-toolbar rule. */
+  .shot-toolbar-actions button:first-child, .shot-toolbar-actions .compare-action { display: flex; }
   .sketch-toolbar-actions button { display: grid !important; width: 44px; height: 44px; padding: 0; }
   .sketch-workspace .shot-center { padding-bottom: 310px; }.sketch-workspace .shot-inspector { height: 310px; grid-template-rows: minmax(0,1fr) auto; }.sketch-inspector > header { display: none; }.sketch-inspector .inspector-scroll { display: grid; grid-template-columns: minmax(240px,.9fr) minmax(330px,1.1fr); gap: 14px; overflow-x: auto; }.sketch-inspector .prompt-helper { align-self: end; }.sketch-inspector .route-section { grid-column: 2; grid-row: 1 / span 2; margin: 0; padding: 0; border: 0; }.sketch-inspector .packet-preview { display: none; }.route-card { min-height: 67px; }.sketch-submit { grid-template-columns: 1fr auto auto; align-items: center; }.sketch-submit > p { margin: 0; }.sketch-submit button { min-height: 44px; }.sketch-controls { overflow-x: auto; }.sketch-controls > button { flex: 0 0 auto; }.sketch-stage-shell { padding: 12px; }.sketch-stage { width: 100%; }
   .review-workspace { grid-template-rows: 54px minmax(250px,1fr) 280px; }.review-header { grid-template-columns: 1fr auto; }.review-header .linked { display: none; }.review-header > .segmented button { padding: 0 7px; font-size: var(--text-2xs); }.review-bottom { grid-template-columns: 1fr 1fr; }.decision-panel { position: absolute; left: 0; right: 0; bottom: 0; height: 90px; background: var(--surface-2); border-top: 1px solid var(--line); flex-direction: row; align-items: center; overflow: hidden; }.decision-panel h2 { font-size: var(--text-lg); margin: 5px 0; }.decision-panel p { display: none; }.decision-actions { min-width: 260px; }.feedback-panel, .continuity-panel { padding-bottom: 95px; }
@@ -1704,3 +1706,67 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .proposal-card{margin:12px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#111915}.proposal-heading{display:flex;justify-content:space-between;align-items:center;padding:11px 13px;border-bottom:1px solid var(--line)}.proposal-heading div{display:flex;gap:8px;align-items:center}.proposal-heading span{color:var(--muted);font-size:12px}.proposal-heading strong{text-transform:uppercase;font-size:10px;color:#7dd3a4}.proposal-heading em{font-style:normal;color:var(--muted);font-size:12px}.proposal-diff{display:grid;grid-template-columns:1fr 1fr}.proposal-diff>div{padding:12px}.proposal-diff>div+div{border-left:1px solid var(--line);background:#15241f}.proposal-diff small{display:block;margin-bottom:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.proposal-diff p{margin:5px 0;font-size:13px;line-height:1.4}.proposal-diff textarea{box-sizing:border-box;width:100%;min-height:78px;margin-bottom:7px;padding:9px;border:1px solid var(--line);border-radius:6px;background:#0d1411;color:var(--text);resize:vertical}.proposal-diff textarea+textarea{min-height:56px}.proposal-card footer{display:flex;justify-content:flex-end;gap:7px;padding:10px 12px;border-top:1px solid var(--line)}.proposal-card footer button{display:flex;gap:6px;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--text);font-weight:700}.proposal-card footer .primary{background:var(--accent);color:#071014}.proposal-card footer span{color:var(--muted);font-size:12px}
 .agent-log{list-style:none;padding:0;margin:0}.agent-log li{display:grid;grid-template-columns:8px 1fr auto;gap:10px;align-items:start;padding:8px 0;border-bottom:1px solid var(--line)}.agent-log li>i{width:7px;height:7px;margin-top:5px;border-radius:50%;background:#e0b66c}.agent-log li>i.succeeded{background:#7dd3a4}.agent-log li>i.failed{background:#dd806d}.agent-log li>i.cancelled{background:#929994}.agent-log li div{display:flex;flex-direction:column;gap:2px}.agent-log li strong{font-size:12px}.agent-log li span,.agent-log time{font-size:11px;color:var(--muted)}
 @media(max-width:700px){.proposal-diff{grid-template-columns:1fr}.proposal-diff>div+div{border-left:0;border-top:1px solid var(--line)}.agent-button{padding:8px}.agent-button svg~*{display:none}}
+
+/* ── Director Mode ───────────────────────────────────────────────────────────
+   Full-view image direction. Only the shell restyles: the shot workspace and
+   its canvas stay mounted, so the displayed revision, pins, unsaved markup,
+   unsaved inspector drafts, and navigation context survive entering and
+   leaving full view. The stage keeps the exact delivery aspect at every size
+   so normalized pin coordinates always point at the same place in the picture. */
+.canvas-stage{display:contents}
+.app-shell.director-mode{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+.app-shell.director-mode>.workspace-rail{display:none}
+.app-shell.director-mode .app-main{grid-row:1;grid-template-rows:minmax(0,1fr)}
+.app-shell.director-mode .context-bar{display:none}
+.shot-workspace.director-mode{grid-template-columns:minmax(0,1fr)}
+.shot-workspace.director-mode>.version-rail,.shot-workspace.director-mode>.shot-inspector,.shot-workspace.director-mode .shot-endpoint-strip{display:none}
+.shot-workspace.director-mode .canvas-stage{display:grid;place-items:center;min-width:0;min-height:0;container-type:size}
+/* The tablet layout reserves room for the inspector drawer it hides here. */
+.shot-workspace.director-mode .shot-center{padding-bottom:0}
+.shot-workspace.director-mode .shot-canvas{width:min(100cqw,100cqh*var(--project-aspect-number,1.777));max-width:100%}
+.director-mode-toggle.active{color:var(--accent-strong);border-color:var(--accent)}
+
+/* A proposal states its scope before the artist decides: what it aims at, and
+   what it promises not to touch. */
+.proposal-scope{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 13px;border-top:1px solid var(--line);background:#0e1512;color:var(--muted);font-size:12px}
+.proposal-scope strong{color:var(--text)}
+.proposal-scope em{display:inline-flex;gap:4px;align-items:center;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 7px;border:1px solid var(--line);border-radius:999px;font-style:normal;color:var(--authority)}
+.proposal-failure{margin:0;padding:9px 13px;border-top:1px solid var(--line);background:color-mix(in srgb,#dd806d 12%,transparent);color:#dd806d;font-size:12px}
+
+/* ── Model inspection ────────────────────────────────────────────────────────
+   An isolated surface for one imported model: the geometry on the left, and the
+   numbers measured from the stored file on the right. The stage keeps its own
+   height so the viewer can size its drawing buffer from a real box. */
+.model-workspace{display:grid;grid-template-rows:64px minmax(0,1fr);background:var(--surface-app)}
+.model-header{display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--surface-1)}
+.model-header h1{margin:0;font-size:var(--text-xl)}
+.model-header .eyebrow{margin:0}
+.model-format{margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:var(--text-2xs)}
+.model-layout{min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 330px}
+.model-stage-shell{min-width:0;min-height:0;display:grid;padding:16px}
+.model-viewer{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto auto;gap:8px}
+.model-stage{min-height:260px;border:1px solid var(--line);border-radius:10px;background:var(--surface-void);overflow:hidden;touch-action:none;cursor:grab}
+.model-stage:active{cursor:grabbing}
+.model-stage:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.model-stage canvas{display:block;width:100%;height:100%}
+.model-viewer-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:var(--text-xs)}
+.model-viewer-bar>div{display:flex;gap:7px}
+.model-viewer-bar button{min-height:40px;padding:0 13px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font-weight:650}
+.model-viewer-orbit{margin:0;color:var(--quiet);font:var(--text-2xs) ui-monospace,monospace}
+.model-inspector{min-height:0;overflow-y:auto;padding:16px;border-left:1px solid var(--line);background:var(--surface-1);display:grid;gap:18px;align-content:start}
+.model-inspector h2{display:flex;align-items:center;gap:7px;margin:0 0 9px;font-size:var(--text-sm);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.model-inspector dl{display:grid;gap:5px;margin:0}
+.model-inspector dl>div{display:flex;justify-content:space-between;gap:12px;font-size:var(--text-xs)}
+.model-inspector dt{color:var(--quiet)}
+.model-inspector dd{margin:0;color:var(--text);font-weight:650;font-variant-numeric:tabular-nums}
+.model-inspector ul{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.model-inspector ul li{display:grid;gap:2px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface-2)}
+.model-inspector ul li strong{font-size:var(--text-xs)}
+.model-inspector ul li small{color:var(--quiet);font-size:var(--text-2xs)}
+.model-note{margin:8px 0 0;color:var(--quiet);font-size:var(--text-2xs);line-height:1.45}
+.model-bounds,.model-hash{margin:6px 0 0;color:var(--quiet);font:var(--text-2xs) ui-monospace,monospace}
+.asset-thumbnail.model{display:grid;place-items:center;color:var(--muted)}
+@media (pointer: coarse), (max-width: 860px) {
+  .model-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(240px,1fr) auto}
+  .model-inspector{border-left:0;border-top:1px solid var(--line)}
+}

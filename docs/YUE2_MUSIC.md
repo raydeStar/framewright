@@ -124,6 +124,27 @@ YuE2__Vae=m-a-p/YuE2-Vae
 YuE2__Device=cuda
 ```
 
+The worker defaults to YuE2's `torch` backend. On Windows PyTorch builds that
+do not include FlashAttention, select the official eager fallback during setup:
+
+```powershell
+.\scripts\setup.ps1 -Mode Native -EnableYuE2 -YuE2Backend torch-eager
+```
+
+The chosen backend is exposed by `/health` and retained in each artifact
+manifest, so the performance tradeoff is visible rather than silently guessed.
+For long vocal arrangements that exceed 24 GB during acoustic synthesis, add
+`-YuE2OffloadAr`. YuE2 then moves the unused autoregressive layers to system
+memory during that bounded stage; this changes speed and peak VRAM, not the
+request, score, seed, or model weights. The choice is likewise recorded in
+health and artifact manifests.
+
+Exceptionally long arrangements can also exceed memory during the acoustic
+prefill that occurs before AR offloading. Add `-YuE2NarQueryChunkSize 256` to
+use YuE2's built-in query-chunked attention for that stage. Framewright records
+the block size in `/health` and every artifact manifest. This is a performance
+and peak-memory control; it does not rewrite the request, ABC, seed, or weights.
+
 Docker uses the equivalent `FRAMEWRIGHT_YUE2_*` values and reaches the host
 worker through `host.docker.internal`. Tokens and local paths belong only in the
 ignored `.env` or `appsettings.Local.json`.

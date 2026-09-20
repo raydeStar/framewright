@@ -1858,3 +1858,154 @@ test('asset library organizes media and carries it into shot work', async ({ pag
   await expectNoHorizontalPageOverflow(page)
   verifyConsole()
 })
+
+test('director mode gives the frame the whole workstation without forking shot state', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/409 \(Conflict\)/])
+  const note = `Full-view direction note ${testInfo.project.name}-${Date.now()}`
+  const draftSuffix = ` Director-mode draft ${testInfo.project.name}.`
+  const code = testInfo.project.name === 'tablet' ? 'SH-DM-T' : 'SH-DM-D'
+  const opener = new RegExp(`Open ${code},`)
+  await page.request.post('/api/shots', { data: {
+    code, title: 'Full-view direction proof', description: 'Remora holds the seal at the chain court gate.', durationFrames: 72,
+    camera: '50mm equivalent · medium · locked', action: 'Remora waits for the gate.', referenceIds: [], constraints: ['Keep the seal in the anatomical left hand.'],
+  } })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: opener }).click()
+  await expect(page.getByTestId('shot-workspace')).toBeVisible()
+
+  // One extra candidate through the no-network proof route so full view has a
+  // live head and an archived revision to move between.
+  await page.locator('.shot-toolbar-actions').getByRole('button', { name: 'Sketch' }).click()
+  const brief = page.getByRole('textbox', { name: 'Creative brief' })
+  await brief.fill(`${await brief.inputValue()} Director mode proof.`)
+  await expect(page.getByText(/Saved to studio/)).toBeVisible()
+  await page.getByRole('button', { name: 'Generate draft in ComfyUI' }).click()
+  await expect(page.getByRole('alert')).toContainText('Submission is off')
+  const snapshot = await (await page.request.get('/api/studio')).json()
+  const shot = snapshot.shots.find((item: { code: string }) => item.code === code)
+  const manifests = await (await page.request.get(`/api/shots/${shot.id}/manifests`)).json()
+  const proof = await page.request.post(`/api/manifests/${manifests[0].id}/dispatch`, { data: { expectedManifestHash: manifests[0].manifestHash, adapterId: 'local-proof' } })
+  expect(proof.ok()).toBe(true)
+  await page.reload()
+  await page.getByRole('button', { name: opener }).click()
+
+  // An unsaved inspector draft is the strictest proof that full view restyles
+  // the shell rather than remounting the workspace.
+  const description = page.getByRole('textbox', { name: 'Shot description' })
+  await description.fill(`${await description.inputValue()}${draftSuffix}`)
+  await expect(page.getByText('Unsaved intent changes')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Place comment' }).click()
+  await page.getByTestId('shot-canvas').focus()
+  await page.getByTestId('shot-canvas').press('Enter')
+  await page.getByPlaceholder(/Be specific/).fill(note)
+  await page.getByRole('button', { name: 'Pin feedback' }).click()
+  await expect(page.getByText('Feedback pinned to this exact version.')).toBeVisible()
+  const pin = page.getByRole('button', { name: new RegExp(note.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })
+  const savedPin = async () => {
+    const state = await (await page.request.get('/api/studio')).json()
+    return state.comments.find((comment: { body: string }) => comment.body === note) as { id: string; x: number; y: number; version: number }
+  }
+  const pinned = await savedPin()
+  expect(pinned).toBeTruthy()
+
+  // Where the pin sits inside the frame, as a fraction of the stage. This must
+  // survive every size the stage takes, or notes drift off their subject.
+  const placement = async () => {
+    const stage = (await page.getByTestId('shot-canvas').boundingBox())!
+    const marker = (await pin.boundingBox())!
+    return { stage, x: (marker.x + marker.width / 2 - stage.x) / stage.width, y: (marker.y + marker.height / 2 - stage.y) / stage.height }
+  }
+  const windowed = await placement()
+  expect(windowed.x).toBeCloseTo(pinned.x, 2)
+  expect(windowed.y).toBeCloseTo(pinned.y, 2)
+
+  // Full view is reachable by keyboard and, on a coarse pointer, by a target
+  // that meets the production minimum.
+  const toggle = page.getByRole('button', { name: 'Director mode' })
+  if (testInfo.project.name === 'tablet') expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  await toggle.focus()
+  await toggle.press('Enter')
+
+  await expect(page.locator('.workspace-rail')).toBeHidden()
+  await expect(page.locator('.context-bar')).toBeHidden()
+  await expect(page.locator('.version-rail')).toBeHidden()
+  await expect(page.locator('.shot-inspector')).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Exit full view' })).toBeVisible()
+  await expect(page.locator('.canvas-caption')).toContainText(code)
+
+  // A wide workstation gives the frame more room. A tablet frame is already
+  // full width, so there full view buys chrome-free height rather than pixels.
+  const full = await placement()
+  const area = (box: { width: number; height: number }) => box.width * box.height
+  expect(area(full.stage)).toBeGreaterThanOrEqual(area(windowed.stage))
+  if (testInfo.project.name === 'desktop') expect(full.stage.width).toBeGreaterThan(windowed.stage.width)
+  expect(full.stage.width / full.stage.height).toBeCloseTo(snapshot.project.deliveryWidth / snapshot.project.deliveryHeight, 1)
+  expect(full.stage.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1)
+  expect(full.stage.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1)
+  expect(full.x).toBeCloseTo(pinned.x, 2)
+  expect(full.y).toBeCloseTo(pinned.y, 2)
+  await expectNoHorizontalPageOverflow(page)
+  await expectNoSeriousAccessibilityViolations(page)
+
+  // A modal opened inside full view gets its own Escape before the shell does.
+  await page.getByRole('button', { name: 'Place comment' }).click()
+  await page.getByTestId('shot-canvas').press('Enter')
+  await expect(page.getByPlaceholder(/Be specific/)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByPlaceholder(/Be specific/)).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Exit full view' })).toBeVisible()
+
+  // Drawing is a first-class full-view action, not a windowed-only one.
+  await page.getByRole('button', { name: 'Draw annotation' }).click()
+  const markup = page.locator('.shot-canvas canvas')
+  const ink = (await markup.boundingBox())!
+  await page.mouse.move(ink.x + ink.width * .3, ink.y + ink.height * .35)
+  await page.mouse.down()
+  await page.mouse.move(ink.x + ink.width * .6, ink.y + ink.height * .6, { steps: 8 })
+  await page.mouse.up()
+  await expect(page.getByText(/AI edit guide saved/)).toBeVisible()
+
+  // A narrower workstation must not move the note off its subject.
+  const viewport = page.viewportSize()!
+  await page.setViewportSize({ width: Math.round(viewport.width * .72), height: Math.round(viewport.height * .82) })
+  await expect.poll(async () => Math.abs((await placement()).x - pinned.x)).toBeLessThan(.015)
+  expect((await placement()).y).toBeCloseTo(pinned.y, 2)
+  await page.setViewportSize(viewport)
+
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.shot-inspector')).toBeVisible()
+  await expect(page.locator('.workspace-rail')).toBeVisible()
+  await expect(description).toHaveValue(new RegExp(draftSuffix.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  await expect(page.getByText('Unsaved intent changes')).toBeVisible()
+  await expect(page.getByText(/AI edit guide saved/)).toBeVisible()
+  await expect(pin).toBeVisible()
+
+  // The archived revision keeps its own locks in full view, and the live
+  // head note never migrates onto it.
+  const archived = page.getByRole('listbox', { name: 'Candidate versions' }).locator('.review-chip:not(.is-current)').first()
+  const archivedVersion = (await archived.innerText()).trim()
+  await archived.click()
+  await page.getByRole('button', { name: 'Director mode' }).click()
+  await expect(page.locator('.preview-banner')).toContainText(`Reviewing ${archivedVersion}`)
+  await expect(page.getByRole('button', { name: 'Draw annotation' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Place comment' })).toBeDisabled()
+  await expect(pin).toBeHidden()
+  await page.getByRole('button', { name: 'Exit full view' }).click()
+  await page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option').first().click()
+
+  // Reopening the workspace shows exactly what was saved, and nothing that was
+  // only ever a draft.
+  await page.reload()
+  await page.getByRole('button', { name: opener }).click()
+  await expect(pin).toBeVisible()
+  await expect(page.getByText(/Apply & regenerate attaches this guide/)).toBeVisible()
+  await expect(description).not.toHaveValue(new RegExp(draftSuffix.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  const reopened = await savedPin()
+  expect(reopened.x).toBeCloseTo(pinned.x, 3)
+  expect(reopened.version).toBe(pinned.version)
+
+  await page.request.post(`/api/comments/${pinned.id}/resolve`)
+  verifyConsole()
+})

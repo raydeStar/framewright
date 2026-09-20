@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using StoryboardStudio.Api.Persistence;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -16,6 +19,8 @@ public sealed record CreateShotRevisionProposalRequest(
     string DesiredMediaType,
     string[] AuthorityIds,
     Guid[] NoteIds,
+    string[] PreservedConstraints,
+    string ObservedStateToken,
     string IdempotencyKey);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -29,6 +34,8 @@ public sealed class WebMcpStoryboardService(
     ContinuityService continuity,
     TimeProvider timeProvider)
 {
+    /// <summary>Bumped whenever the director packet's shape changes.</summary>
+    private const int DirectorContextVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<WebMcpEnvelope> ContextAsync(Guid? selectedShotId, CancellationToken cancellationToken)
@@ -88,14 +95,177 @@ public sealed class WebMcpStoryboardService(
             : Success("continuity_inspected", $"Continuity is {report.GateState} for {report.ShotCode}.", report);
     }
 
+    /// <summary>
+    /// The exact state the artist is looking at, as one bounded packet, plus a
+    /// state token that binds it to the picture an agent can open for itself.
+    ///
+    /// The token is derived only from persisted state, so a browser cannot talk
+    /// its own stale view into looking current, and it deliberately excludes the
+    /// active tool and full-view flag: those change what the artist is doing,
+    /// not which revision is on screen.
+    /// </summary>
+    public async Task<WebMcpEnvelope> DirectorContextAsync(
+        Guid shotId, int? displayedVersion, bool archivedPreview, bool directorMode, string? tool, CancellationToken cancellationToken)
+    {
+        var (view, failure) = await ResolveViewAsync(shotId, displayedVersion, archivedPreview, cancellationToken);
+        if (view is null) return failure!;
+
+        var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == db.ActiveProjectId, cancellationToken);
+        var authorityIds = Parse<string[]>(view.Shot.ReferenceIdsJson) ?? [];
+        var authorities = await db.References.AsNoTracking().Where(x => authorityIds.Contains(x.Id))
+            .Select(x => new
+            {
+                x.Id, x.Name, x.Category, Version = x.CurrentVersion,
+                LockedConstraint = db.ReferenceVersions.Where(version => version.ReferenceId == x.Id && version.Version == x.CurrentVersion)
+                    .Select(version => version.LockedConstraint).FirstOrDefault()
+            }).Take(20).ToArrayAsync(cancellationToken);
+
+        return Success("director_context", $"{view.Shot.Code} v{view.DisplayedVersion} is on screen with {view.Notes.Length} open {(view.Notes.Length == 1 ? "note" : "notes")}.", new
+        {
+            contextVersion = DirectorContextVersion,
+            stateToken = view.StateToken,
+            project = new { project.Id, project.Name, project.SequenceCode, project.AspectRatio, project.DeliveryWidth, project.DeliveryHeight, project.FramesPerSecond },
+            subject = new
+            {
+                kind = "shot", shotId = view.Shot.Id, view.Shot.Code, view.Shot.Title, view.Shot.Stage, view.Shot.Approval,
+                liveVersion = view.Shot.Version, displayedVersion = view.DisplayedVersion, archived = view.Archived,
+                editable = !view.Archived, view.Shot.Camera, view.Shot.DurationFrames, view.Shot.UpdatedAt
+            },
+            view = new { directorMode, fullView = directorMode, tool = NormalizeTool(tool) },
+            visual = new
+            {
+                kind = view.AssetId is null ? "placeholder" : "frame",
+                assetId = view.AssetId,
+                contentUrl = view.AssetId is null ? null : $"/api/assets/{view.AssetId}/content",
+                contentHash = view.AssetHash,
+                width = view.Width, height = view.Height,
+                markupRevision = view.MarkupRevision,
+                describes = view.AssetId is null
+                    ? "No generated frame yet. The workspace is showing a placeholder storyboard layout."
+                    : $"The exact frame on screen for {view.Shot.Code} v{view.DisplayedVersion}. Note coordinates are normalized to this frame."
+            },
+            annotations = view.Notes.Select(note => new { note.Id, note.X, note.Y, note.Body, authorityId = note.ReferenceId, authorityVersion = note.ReferenceVersion, boundToVersion = note.Version }).ToArray(),
+            constraints = Parse<string[]>(view.Shot.ConstraintsJson) ?? [],
+            authorities,
+            availableActions = AvailableActions(view.Archived)
+        });
+    }
+
+    /// <summary>
+    /// The picture that goes with a packet. It is served only while the state
+    /// token still matches, so structured context and visual context can never
+    /// describe two different revisions.
+    /// </summary>
+    public async Task<WebMcpEnvelope> DirectorObservationAsync(
+        Guid shotId, int? displayedVersion, bool archivedPreview, string? stateToken, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(stateToken) || stateToken.Length != 64 || !stateToken.All(Uri.IsHexDigit))
+            return Failure("invalid_state_token", "Read the director context first, then pass back its exact state token.");
+
+        var (view, failure) = await ResolveViewAsync(shotId, displayedVersion, archivedPreview, cancellationToken);
+        if (view is null) return failure!;
+        if (!string.Equals(view.StateToken, stateToken, StringComparison.OrdinalIgnoreCase))
+            return new WebMcpEnvelope(false, "conflict", "stale_context",
+                "This view changed after that context was read. Read the director context again before acting on it.", null, true);
+
+        return Success("frame_observation", view.AssetId is null
+            ? $"{view.Shot.Code} v{view.DisplayedVersion} has no generated frame yet."
+            : $"The frame on screen is {view.Shot.Code} v{view.DisplayedVersion}.", new
+        {
+            contextVersion = DirectorContextVersion,
+            stateToken = view.StateToken,
+            shotId = view.Shot.Id,
+            displayedVersion = view.DisplayedVersion,
+            archived = view.Archived,
+            kind = view.AssetId is null ? "placeholder" : "frame",
+            contentUrl = view.AssetId is null ? null : $"/api/assets/{view.AssetId}/content",
+            contentHash = view.AssetHash,
+            width = view.Width, height = view.Height,
+            markupRevision = view.MarkupRevision,
+            openNoteCount = view.Notes.Length
+        });
+    }
+
+    private async Task<(DirectorView? View, WebMcpEnvelope? Failure)> ResolveViewAsync(
+        Guid shotId, int? displayedVersion, bool archivedPreview, CancellationToken cancellationToken)
+    {
+        var shot = await db.Shots.AsNoTracking().SingleOrDefaultAsync(x => x.Id == shotId, cancellationToken);
+        if (shot is null) return (null, Failure("shot_not_found", "That shot is not part of the active project."));
+
+        // Only an archived preview can name a revision of its own. When the
+        // workspace is on the live head the server resolves which revision that
+        // is now, so a browser that is one refresh behind reports honest current
+        // state instead of an error - and an observation carrying the older
+        // token still fails as stale.
+        if (archivedPreview && displayedVersion is > 0 && displayedVersion > shot.Version)
+            return (null, Failure("revision_not_found", $"{shot.Code} has no revision v{displayedVersion} in the active project."));
+        var archived = archivedPreview && displayedVersion is > 0 && displayedVersion != shot.Version;
+        var version = archived ? displayedVersion!.Value : shot.Version;
+        var assetId = shot.CurrentAssetId;
+        if (archived)
+        {
+            // SQLite cannot order DateTimeOffset, so this bounded per-version set
+            // is ordered after materialization rather than in the query.
+            var candidates = await db.CandidateVersions.AsNoTracking()
+                .Where(x => x.ShotId == shot.Id && x.Version == version).Take(20).ToArrayAsync(cancellationToken);
+            var candidate = candidates.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+            if (candidate is null)
+                return (null, Failure("revision_not_found", $"{shot.Code} has no archived revision v{version} in the active project."));
+            assetId = candidate.AssetId;
+        }
+
+        var asset = assetId is null ? null : await db.Assets.AsNoTracking()
+            .Where(x => x.Id == assetId).Select(x => new { x.ContentHash, x.Width, x.Height }).SingleOrDefaultAsync(cancellationToken);
+        var markupRevision = await db.FrameMarkups.AsNoTracking()
+            .Where(x => x.ShotId == shot.Id && x.Version == version).Select(x => (int?)x.Revision).FirstOrDefaultAsync(cancellationToken) ?? 0;
+        var openNotes = await db.Comments.AsNoTracking()
+            .Where(x => x.ShotId == shot.Id && x.Version == version && x.State == "Open").Take(40).ToArrayAsync(cancellationToken);
+        var notes = openNotes.OrderBy(x => x.CreatedAt).Take(20).ToArray();
+
+        return (new DirectorView(shot, version, archived, assetId, asset?.ContentHash, asset?.Width, asset?.Height, markupRevision, notes,
+            ComputeStateToken(shot, version, archived, assetId, asset?.ContentHash, markupRevision, notes)), null);
+    }
+
+    private static string ComputeStateToken(
+        ShotRecord shot, int version, bool archived, Guid? assetId, string? assetHash, int markupRevision, CommentRecord[] notes)
+    {
+        var builder = new StringBuilder()
+            .Append("director-context-v").Append(DirectorContextVersion)
+            .Append('|').Append(shot.ProjectId).Append('|').Append(shot.Id)
+            .Append('|').Append(shot.Version).Append('|').Append(version).Append('|').Append(archived ? '1' : '0')
+            .Append('|').Append(shot.UpdatedAt.ToUnixTimeMilliseconds())
+            .Append('|').Append(assetId).Append('|').Append(assetHash)
+            .Append('|').Append(markupRevision)
+            .Append('|').Append(shot.Camera).Append('|').Append(shot.ConstraintsJson).Append('|').Append(shot.ReferenceIdsJson);
+        foreach (var note in notes.OrderBy(x => x.Id))
+            builder.Append('|').Append(note.Id)
+                .Append(':').Append(note.X.ToString("F4", CultureInfo.InvariantCulture))
+                .Append(':').Append(note.Y.ToString("F4", CultureInfo.InvariantCulture))
+                .Append(':').Append(note.Body);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+    }
+
+    private static string[] AvailableActions(bool archived) => archived
+        ? ["get_shot_details", "inspect_shot_continuity", "observe_current_frame"]
+        : ["get_shot_details", "inspect_shot_continuity", "observe_current_frame", "propose_shot_revision"];
+
+    private static string NormalizeTool(string? tool) => tool?.Trim().ToLowerInvariant() switch
+    {
+        "draw" => "draw", "comment" => "comment", _ => "select"
+    };
+
+    private sealed record DirectorView(
+        ShotRecord Shot, int DisplayedVersion, bool Archived, Guid? AssetId, string? AssetHash,
+        int? Width, int? Height, int MarkupRevision, CommentRecord[] Notes, string StateToken);
+
     public async Task<WebMcpEnvelope> ProposeAsync(CreateShotRevisionProposalRequest request, CancellationToken cancellationToken)
     {
         var validation = Validate(request.CreativeDirection, request.Rationale, request.DesiredMediaType);
         if (validation is not null) return validation;
         if (string.IsNullOrWhiteSpace(request.IdempotencyKey) || request.IdempotencyKey.Length > 128)
             return Failure("invalid_idempotency_key", "Supply an idempotency key of 1 to 128 characters.");
-        if (request.AuthorityIds.Length > 12 || request.NoteIds.Length > 20)
-            return Failure("too_many_bindings", "A proposal can bind at most 12 authorities and 20 notes.");
+        if (request.AuthorityIds.Length > 12 || request.NoteIds.Length > 20 || request.PreservedConstraints.Length > 20)
+            return Failure("too_many_bindings", "A proposal can bind at most 12 authorities, 20 notes, and 20 preserved constraints.");
 
         var existing = await db.ShotRevisionProposals.SingleOrDefaultAsync(x => x.IdempotencyKey == request.IdempotencyKey, cancellationToken);
         if (existing is not null)
@@ -110,6 +280,31 @@ public sealed class WebMcpStoryboardService(
         if (shot is null) return Failure("shot_not_found", "That shot is not part of the active project.");
         if (shot.Version != request.ExpectedVersion) return Stale(shot.Version);
 
+        // A proposal has to be anchored in a view the agent actually read. Without
+        // this, "propose" is a blind write dressed as collaboration.
+        var (observed, observationFailure) = await ResolveViewAsync(shot.Id, null, false, cancellationToken);
+        if (observed is null) return observationFailure!;
+        if (!string.Equals(observed.StateToken, request.ObservedStateToken, StringComparison.OrdinalIgnoreCase))
+            return new WebMcpEnvelope(false, "conflict", "stale_context",
+                "This shot changed after that director context was read. Read it again before proposing.", null, true);
+
+        // Everything a proposal promises to preserve must be a rule the shot or
+        // one of its authorities really holds, so an agent cannot invent a
+        // reassuring constraint that nothing enforces.
+        var shotConstraints = Parse<string[]>(shot.ConstraintsJson) ?? [];
+        var attachedAuthorityIds = Parse<string[]>(shot.ReferenceIdsJson) ?? [];
+        var lockedConstraints = await db.References.AsNoTracking()
+            .Where(x => attachedAuthorityIds.Contains(x.Id))
+            .Select(x => db.ReferenceVersions.Where(version => version.ReferenceId == x.Id && version.Version == x.CurrentVersion)
+                .Select(version => version.LockedConstraint).FirstOrDefault())
+            .ToArrayAsync(cancellationToken);
+        var preservable = new HashSet<string>(
+            shotConstraints.Concat(lockedConstraints.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!)),
+            StringComparer.OrdinalIgnoreCase);
+        var invented = request.PreservedConstraints.Select(x => x.Trim()).Where(x => !preservable.Contains(x)).ToArray();
+        if (invented.Length > 0)
+            return Failure("invalid_preserved_constraints", "A proposal can only promise to preserve this shot's own rules and its attached authorities' locked constraints.");
+
         var authorityCount = await db.References.CountAsync(x => request.AuthorityIds.Contains(x.Id), cancellationToken);
         var noteCount = await db.Comments.CountAsync(x => request.NoteIds.Contains(x.Id) && x.ShotId == shot.Id && x.Version == shot.Version, cancellationToken);
         if (authorityCount != request.AuthorityIds.Distinct().Count() || noteCount != request.NoteIds.Distinct().Count())
@@ -122,6 +317,8 @@ public sealed class WebMcpStoryboardService(
             CreativeDirection = request.CreativeDirection.Trim(), Rationale = request.Rationale.Trim(),
             DesiredMediaType = NormalizeMedia(request.DesiredMediaType), AuthorityIdsJson = JsonSerializer.Serialize(request.AuthorityIds.Distinct(), JsonOptions),
             NoteIdsJson = JsonSerializer.Serialize(request.NoteIds.Distinct(), JsonOptions), State = "Pending",
+            PreservedConstraintsJson = JsonSerializer.Serialize(request.PreservedConstraints.Select(x => x.Trim()).Distinct(), JsonOptions),
+            ObservedStateToken = observed.StateToken,
             IdempotencyKey = request.IdempotencyKey.Trim(), CreatedAt = now, CreatedAtUnixMs = now.ToUnixTimeMilliseconds(), UpdatedAt = now
         };
         db.ShotRevisionProposals.Add(proposal);
@@ -160,6 +357,59 @@ public sealed class WebMcpStoryboardService(
     public Task<WebMcpEnvelope> AcceptAsync(Guid id, CancellationToken cancellationToken) => DecideAsync(id, "Accepted", cancellationToken);
     public Task<WebMcpEnvelope> RejectAsync(Guid id, CancellationToken cancellationToken) => DecideAsync(id, "Rejected", cancellationToken);
 
+    /// <summary>
+    /// The artist pushing an accepted direction into the ordinary revision
+    /// surface. This is the only step that turns a proposal into working
+    /// instructions, it happens once, and it still authorizes no provider: the
+    /// existing explicit Generate action remains the only thing that does.
+    /// </summary>
+    public async Task<WebMcpEnvelope> ApplyAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var proposal = await db.ShotRevisionProposals.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (proposal is null) return Failure("proposal_not_found", "That proposal is not part of the active project.");
+        if (proposal.State == "Rejected") return Failure("proposal_rejected", "A rejected proposal cannot be applied.");
+        if (proposal.State == "Pending") return Failure("proposal_not_accepted", "Accept this direction before applying it.");
+
+        var shot = await db.Shots.AsNoTracking().SingleOrDefaultAsync(x => x.Id == proposal.ShotId, cancellationToken);
+        if (shot is null || shot.Version != proposal.BaseVersion || shot.UpdatedAt != proposal.BaseUpdatedAt)
+            return Stale(shot?.Version);
+
+        var instructions = await InstructionsAsync(proposal, shot, cancellationToken);
+        // Applying twice is a replay, never a second application. The artist can
+        // reopen the revision surface as often as they like.
+        if (proposal.State == "Applied")
+            return Success("proposal_replayed", "This direction was already applied. Reopening the same instructions.", instructions);
+
+        proposal.State = "Applied";
+        proposal.AppliedAt = proposal.UpdatedAt = timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(cancellationToken);
+        return Success("proposal_applied",
+            "The direction is open in the ordinary revision surface. Nothing was generated; the artist still chooses when to render.",
+            await InstructionsAsync(proposal, shot, cancellationToken));
+    }
+
+    private async Task<object> InstructionsAsync(ShotRevisionProposalRecord proposal, ShotRecord shot, CancellationToken cancellationToken)
+    {
+        var noteIds = Parse<Guid[]>(proposal.NoteIdsJson) ?? [];
+        var targets = await db.Comments.AsNoTracking()
+            .Where(x => noteIds.Contains(x.Id) && x.ShotId == shot.Id && x.Version == proposal.BaseVersion)
+            .Select(x => new { x.Id, x.X, x.Y, x.Body, authorityId = x.ReferenceId, authorityVersion = x.ReferenceVersion })
+            .Take(20).ToArrayAsync(cancellationToken);
+        return new
+        {
+            proposal = ToSummary(proposal),
+            instructions = new
+            {
+                shotId = shot.Id, shot.Code, baseVersion = proposal.BaseVersion,
+                direction = proposal.CreativeDirection, proposal.Rationale, proposal.DesiredMediaType,
+                preservedConstraints = Parse<string[]>(proposal.PreservedConstraintsJson) ?? [],
+                targetedNotes = targets,
+                generationAuthorized = false,
+                note = "These are working instructions for the artist's revision surface. No provider job exists until the artist starts one."
+            }
+        };
+    }
+
     public async Task<WebMcpEnvelope> JobStatusAsync(Guid jobId, CancellationToken cancellationToken)
     {
         var job = await db.Jobs.AsNoTracking().Where(x => x.Id == jobId)
@@ -175,6 +425,7 @@ public sealed class WebMcpStoryboardService(
         if (proposal is null) return Failure("proposal_not_found", "That proposal is not part of the active project.");
         if (proposal.State == state) return Success("proposal_replayed", $"This proposal was already {state.ToLowerInvariant()}.", ToSummary(proposal));
         if (proposal.State != "Pending") return Failure("proposal_decided", $"This proposal was already {proposal.State.ToLowerInvariant()}.");
+
         var shot = await db.Shots.AsNoTracking().SingleOrDefaultAsync(x => x.Id == proposal.ShotId, cancellationToken);
         if (shot is null || shot.Version != proposal.BaseVersion || shot.UpdatedAt != proposal.BaseUpdatedAt)
             return Stale(shot?.Version);
@@ -196,7 +447,7 @@ public sealed class WebMcpStoryboardService(
 
     private static string NormalizeMedia(string value) => value.Trim().ToLowerInvariant() switch { "image" => "Image", "video" => "Video", _ => value.Trim() };
     private static T? Parse<T>(string json) { try { return JsonSerializer.Deserialize<T>(json, JsonOptions); } catch (JsonException) { return default; } }
-    private static object ToSummary(ShotRevisionProposalRecord x) => new { x.Id, x.ShotId, x.BaseVersion, x.CreativeDirection, x.Rationale, x.DesiredMediaType, authorityIds = Parse<string[]>(x.AuthorityIdsJson) ?? [], noteIds = Parse<Guid[]>(x.NoteIdsJson) ?? [], x.State, x.CreatedAt, x.UpdatedAt, x.DecidedAt };
+    private static object ToSummary(ShotRevisionProposalRecord x) => new { x.Id, x.ShotId, x.BaseVersion, x.CreativeDirection, x.Rationale, x.DesiredMediaType, authorityIds = Parse<string[]>(x.AuthorityIdsJson) ?? [], noteIds = Parse<Guid[]>(x.NoteIdsJson) ?? [], preservedConstraints = Parse<string[]>(x.PreservedConstraintsJson) ?? [], x.State, x.CreatedAt, x.UpdatedAt, x.DecidedAt, x.AppliedAt };
     private static WebMcpEnvelope Success(string code, string message, object? data, bool retryable = false) => new(true, "success", code, message, data, retryable);
     private static WebMcpEnvelope Failure(string code, string message) => new(false, "error", code, message);
     private static WebMcpEnvelope Stale(int? currentVersion) => new(false, "conflict", "stale_shot", currentVersion is null ? "The source shot no longer exists." : $"The shot is now v{currentVersion}. Refresh before deciding this proposal.");

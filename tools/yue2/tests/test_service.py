@@ -52,6 +52,15 @@ class YuE2WorkerContractTests(unittest.TestCase):
         self.assertFalse(ready)
         self.assertIn("not installed", detail)
 
+    def test_memory_controls_are_recorded_in_artifact_manifest(self):
+        with mock.patch.object(service, "BACKEND", "torch-eager"), \
+             mock.patch.object(service, "OFFLOAD_AR", True), \
+             mock.patch.object(service, "NAR_QUERY_CHUNK_SIZE", 256):
+            manifest = service.artifact_manifest(Path(self.id()), "compose", request())
+        self.assertEqual("torch-eager", manifest["backend"])
+        self.assertTrue(manifest["offloadAr"])
+        self.assertEqual(256, manifest["narQueryChunkSize"])
+
     def test_active_queue_is_capped_before_a_job_is_retained(self):
         with service.jobs_lock:
             for index in range(service.MAX_ACTIVE_JOBS):

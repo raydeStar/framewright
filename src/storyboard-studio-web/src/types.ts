@@ -92,7 +92,7 @@ export interface RuntimeReadinessSummary { status: 'Ready' | 'Degraded' | 'NotRe
 export interface ProductionExportReadiness { canExportProduction: boolean; blockers: string[]; warnings: string[]; shotCount: number; ratifiedShotCount: number; openNoteCount: number; activeJobCount: number; examinedAt: string }
 export interface AuthorityBinding { id: string; name: string; category: string; version: number }
 export interface GenerationManifestSummary { id: string; shotId: string; shotCode: string; shotVersion: number; sketchId: string; sketchRevision: number; route: GenerationRoute; purpose: GenerationPurpose; state: 'Prepared' | 'Dispatched' | 'Completed' | 'Failed' | 'Cancelled'; creativeBrief: string; authorities: AuthorityBinding[]; constraints: string[]; manifestHash: string; providerCallMade: boolean; compositionAssetId?: string; compositionAssetHash?: string; createdAt: string; lastFrameAssetId?: string; lastFrameAssetHash?: string; videoQuality?: VideoQuality; videoSeed?: number; videoTakeId?: string; promotedFromJobId?: string }
-export interface AssetSummary { id: string; projectId: string; kind: 'Image' | 'Video' | 'Audio'; originalFileName: string; mimeType: string; bytes: number; width?: number; height?: number; durationSeconds?: number; contentHash: string; contentUrl: string; createdAt: string; displayName: string; collectionId?: string; tags: string[]; notes: string; source: string; isArchived: boolean; updatedAt: string; revisionFamilyId?: string; revisionNumber?: number; isCurrentRevision: boolean; parentAssetId?: string; revisionPrompt: string; revisionEngine: string }
+export interface AssetSummary { id: string; projectId: string; kind: 'Image' | 'Video' | 'Audio' | 'Model'; originalFileName: string; mimeType: string; bytes: number; width?: number; height?: number; durationSeconds?: number; contentHash: string; contentUrl: string; createdAt: string; displayName: string; collectionId?: string; tags: string[]; notes: string; source: string; isArchived: boolean; updatedAt: string; revisionFamilyId?: string; revisionNumber?: number; isCurrentRevision: boolean; parentAssetId?: string; revisionPrompt: string; revisionEngine: string }
 export interface AssetCollectionSummary { id: string; projectId: string; name: string; color: string; sortOrder: number; assetCount: number; createdAt: string; updatedAt: string }
 export interface AssetPlacementSummary { id: string; assetId: string; shotId: string; shotCode: string; shotTitle: string; role: string; createdAt: string }
 export interface AssetGenerationReference { id: string; assetId: string; label: string; detail: string; imageUrl: string; source: 'Shot' | 'Asset' | 'Authority' }
@@ -106,5 +106,24 @@ export interface GenerationPreflightSummary { manifestId: string; manifestHash: 
 export interface CandidateVersionSummary { id: string; shotId: string; version: number; stage: ShotStage; approval: ApprovalState; isCurrent: boolean; assetId?: string; assetUrl?: string; sourceManifestId?: string; createdAt: string; supersededAt?: string; width?: number; height?: number }
 
 export interface WebMcpEnvelope<T = unknown> { ok: boolean; status: string; code: string; message: string; retryable: boolean; data?: T }
-export interface ShotRevisionProposalSummary { id: string; shotId: string; baseVersion: number; creativeDirection: string; rationale: string; desiredMediaType: 'Image' | 'Video'; authorityIds: string[]; noteIds: string[]; state: 'Pending' | 'Accepted' | 'Rejected'; createdAt: string; updatedAt: string; decidedAt?: string }
+export interface ShotRevisionProposalSummary { id: string; shotId: string; baseVersion: number; creativeDirection: string; rationale: string; desiredMediaType: 'Image' | 'Video'; authorityIds: string[]; noteIds: string[]; preservedConstraints: string[]; state: 'Pending' | 'Accepted' | 'Rejected' | 'Applied'; createdAt: string; updatedAt: string; decidedAt?: string; appliedAt?: string }
+/** What applying an accepted proposal hands to the ordinary revision surface. Never a provider call. */
+export interface ShotRevisionInstructions { proposal: ShotRevisionProposalSummary; instructions: { shotId: string; code: string; baseVersion: number; direction: string; rationale: string; desiredMediaType: 'Image' | 'Video'; preservedConstraints: string[]; targetedNotes: { id: string; x: number; y: number; body: string; authorityId?: string; authorityVersion?: number }[]; generationAuthorized: boolean; note: string } }
+/** What the artist currently has on screen in the Shot workspace. */
+export interface DirectorViewQuery { shotId: string; displayedVersion: number; archived: boolean; directorMode?: boolean; tool?: string }
+/** One material as the model inspector reports it. */
+export interface ModelMaterialSummary { name: string; textured: boolean; alphaMode: string; doubleSided: boolean }
+/** The supported GLB subset and the ceilings that refuse a model before it loads. */
+export interface ModelSupportLimits { maxBytes: number; maxVertices: number; maxTriangles: number; maxEmbeddedTextureBytes: number; maxNodes: number; maxMaterials: number; maxImages: number; supportedRequiredExtensions: string[] }
+/** What the artist reads about a stored model, measured from the stored bytes. */
+export interface ModelProfileSummary {
+  assetId: string; displayName: string; contentHash: string; bytes: number; contentUrl: string
+  container: string; specificationVersion: string; generator: string
+  nodeCount: number; meshCount: number; primitiveCount: number; vertexCount: number; triangleCount: number
+  imageCount: number; embeddedTextureBytes: number; binaryChunkBytes: number
+  declaredExtensions: string[]; requiredExtensions: string[]
+  materials: ModelMaterialSummary[]
+  boundsMin: number[]; boundsMax: number[]; dimensions: number[]
+  limits: ModelSupportLimits
+}
 export interface AgentActivityEntry { id: number; tool: string; state: 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'; message: string; at: string }

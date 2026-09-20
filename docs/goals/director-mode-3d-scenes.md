@@ -1,0 +1,892 @@
+# Goal: Director Mode and reusable 3D scene production
+
+**Project:** Framewright  
+**Suggested repository path:** `docs/goals/director-mode-3d-scenes.md`  
+**Plan version:** 1.0  
+**Created:** 2026-09-19  
+**Overall status:** IN_PROGRESS  
+**Active milestone:** M05. M00, M01 and M04 are VERIFIED; M02 and M03 are CONTRACT_VERIFIED.  
+**Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
+
+> Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
+
+This is an implementation goal, not a claim that the described capabilities exist. The author reviewed repository documentation, not a running workstation or a complete source audit. No implementation, tests, provider calls, or production acceptance were performed while preparing this file. M00 must reconcile this plan against the actual checkout.
+
+## 1. Start here
+
+Read the applicable `AGENTS.md`, this section, the shared contracts below, and the next dependency-ready milestone. Inspect relevant source before editing. Read supporting documents when the active milestone needs them; do not repeatedly load every document or implement the entire roadmap at once.
+
+Use this kickoff instruction:
+
+```text
+Execute docs/goals/director-mode-3d-scenes.md, starting with M00.
+Follow the applicable AGENTS.md. Establish the current baseline first.
+Work through one dependency-ready milestone at a time. Implement, test,
+inspect the actual result, repair failures, and record evidence before advancing.
+Continue automatically across proven milestones within existing permissions.
+Do not weaken acceptance criteria, invent passing evidence, rebuild existing
+features unnecessarily, or turn this into one wholesale implementation.
+```
+
+Keep this file as the single goal-level source of truth. Update the progress and decision records as work proceeds. Do not create a parallel requirements document for every milestone. Detailed specifications may be linked when necessary; each requirement should have one authoritative home.
+
+### Execution rules for this goal
+
+1. **Before a milestone:** Inspect its implementation surface and dependencies. Record concrete checks and fixtures before changing behavior. Reuse working capabilities; verify an already implemented milestone instead of rebuilding it.
+2. **During implementation:** Run focused checks first. Then exercise the connected behavior through the actual application and persistence boundary. Do not substitute mocked UI responses for integration evidence.
+3. **Before advancing:** Check relevant existing regressions, inspect the diff and test quality, record results and limitations, and make a local checkpoint consistent with repository policy. Never include unrelated user changes, private media, secrets, or weights.
+4. **When a repair stalls:** After two attempts without new evidence, stop speculative patching. Capture inputs, state, logs, and a minimal reproducer before trying another repair.
+5. **When a dependency fails:** Repair and regression-test the prerequisite. Do not compensate for a broken contract in its consumer. Independent milestones may proceed when their own dependencies are satisfied.
+6. **When the plan needs adjustment:** Preserve the outcome and acceptance guarantees. Record justified implementation changes. Obtain user agreement before cutting required scope, changing trust boundaries, weakening approval rules, or adding substantial infrastructure.
+
+No approval is needed merely to advance a passing engineering milestone. Existing consent requirements for provider calls, GPU work, downloads, production canaries, credentials, artistic ratification, and destructive actions still apply. This goal does not authorize automatic publishing, deployment, tagging, or edits to another repository.
+
+### Status and evidence vocabulary
+
+- `NOT_STARTED`: No implementation evidence recorded.
+- `IN_PROGRESS`: One active integrated slice is being implemented or repaired.
+- `CONTRACT_VERIFIED`: Deterministic application and contract checks pass, but a declared external-host, provider, hardware, or human acceptance check remains unavailable.
+- `VERIFIED`: All required acceptance checks for the milestone have actually passed.
+- `BLOCKED`: A named prerequisite, defect, permission, or environment condition prevents further work.
+
+Dependencies normally require `VERIFIED`. A `CONTRACT_VERIFIED` interface may support explicitly labeled deterministic development, but it does not prove the real integration. Record that dependency and keep the uncommissioned runtime capability disabled or visibly unavailable. Never work around a known failing contract or claim the dependent live workflow is supported.
+
+Evidence labels: **D** = deterministic checks; **A** = actual application with real service/persistence; **H** = actual browser/agent host; **L** = explicitly authorized live provider/worker; **V** = recorded human visual acceptance; **P** = packaged runtime/recovery.
+
+## 2. Product outcome and boundaries
+
+Framewright becomes a local-first production workspace in which an artist can:
+
+- Draw, annotate, and refine an image using the existing shared image workspace.
+- Inspect a model, save it as a reusable library asset, and preserve its source and revisions.
+- Generate a model from a selected image through a validated provider route.
+- Prepare a model through the existing Reference Asset Compiler where its capabilities are proven.
+- Leave static props unrigged, animate rigid parts when appropriate, and optionally rig and animate a supported character class.
+- Assemble individually selectable assets into an editable scene, frame a shot, and render a reviewed animated take.
+- Use a full-view **Director Mode** with model-independent browser tools for shared visual context, comments, and proposed edits.
+
+The workflow is connected, not mandatory:
+
+```text
+Sketch or reference -> image revision -> model revision -> optional preparation
+    -> optional rig -> compatible animation -> scene instances -> shot -> render
+
+Imported models, existing library assets, and approved clips can enter at their
+appropriate stage. The library is available throughout, not only at the end.
+```
+
+Astra may be the user's preferred visual collaborator. No domain entity, tool schema, provider contract, or required application control may depend on that model. The manual application must remain usable without an agent or browser-tool support.
+
+**Editable scene data and generated video are different products.** A video is a take derived from a frozen scene/shot state. It must not replace the scene that produced it.
+
+### First supported release profile
+
+Keep the first release deliberately bounded:
+
+| Area | Required initial support |
+| --- | --- |
+| Image creation and review | Extend existing sketch, image, reference, feedback, and revision behavior. |
+| Browser-facing model format | A validated, self-contained GLB subset; explicitly list supported materials and extensions. |
+| Static assets | Import, inspect, preserve revisions, reuse in library and scenes. |
+| Model generation | One commissioned image-to-3D route, not a provider marketplace. |
+| Preparation | One proven compiler/Blender route preserving the chosen source authority. |
+| Rigging | One named, tested humanoid profile and one verified rig-creation route. |
+| Animation | Compatible clip import/playback, basic instance timing, rigid-part and camera motion. |
+| Scenes | Small editable scenes with object instances, basic lighting, camera, and save/reopen. |
+| Browser-agent collaboration | Narrow structured reads/proposals plus actual host and visual-context evidence. |
+| Output | A reviewed still and short animated take, plus a portable editable project package. |
+
+Preserve existing image, video, dialogue, voice, and music workflows. YuE2 composition work and other existing media routes are not being redesigned by this goal.
+
+**Outside this release:** arbitrary topology editing in the browser; a general Blender replacement; universal auto-rigging; arbitrary-skeleton retargeting; facial performance, cloth/hair simulation, physics, gameplay, and a full nonlinear editor; exact single-image room reconstruction; new hosting/multi-tenant architecture; mandatory new subscriptions; automatic model downloads; distributed GPU scheduling; a second chat or agent-orchestration platform; new engine-export features beyond proven existing routes. These exclusions do not remove rigging, animation, or editable animated scenes from the required goal.
+
+## 3. Existing foundations to preserve
+
+The inspected Framewright documentation describes a local-first React/ASP.NET Core application, SQLite plus content-addressed assets, immutable review evidence, shared image composition, project-scoped library records, owned jobs, and server-side validation/approval boundaries. Reconcile the exact source implementation in M00 rather than treating documentation as runtime proof. [R1][R2][R3]
+
+The existing `AGENTS.md` requires isolated tests, human-initiated provider dispatch, read-only Codex advice, and browser tools that may stage proposals but must not ratify canon or dispatch providers as a side effect. Preserve these boundaries. [R0]
+
+The Reference Asset Compiler is `raydeStar/reference-asset-compiler`. Its README documents mesh preparation, review receipts, static-prop routes, rig-related tooling, and engine validation. It also explicitly limits the resumable character operator to modeling review and distinguishes contract-tested routes from fresh live acceptance. Do not infer that its character pipeline is already safely autonomous. [R4]
+
+### Responsibility boundaries
+
+| Owner | Responsibility |
+| --- | --- |
+| Framewright application service | Intent, project scope, IDs/revisions, library, scenes/shots, validation, approvals, persistence, audit, and job ownership. |
+| Existing browser client | Canvas/model/scene interaction, selection, previews, markup, playback, and accessible controls. |
+| WebMCP adapter | Narrow browser-facing context/proposal tools over the same application behavior, not an alternative backend. |
+| ComfyUI | Allowlisted generation workflows whose capabilities and outputs are validated. |
+| Compiler/Blender worker | Named preparation, rig, validation, and export operations proven in the existing pipeline. |
+| Existing output/audio services | Encoding, production packaging, and separately editable sound. |
+
+Prefer existing abstractions and dependencies. Choose a browser 3D renderer after inspecting available code; Three.js is a candidate, not a mandate to replace working infrastructure. Reuse compiler functions through a narrow adapter instead of copying an entire repository or importing an Unreal runtime requirement into Framewright's browser workflow.
+
+ComfyUI remains the preferred generation backend where a suitable route is proven. If the compiler's existing direct generator is the practical initial route, document the tradeoff and obtain agreement before substituting it for the requested ComfyUI-backed path. Do not rebuild a working direct pipeline as a node graph solely for uniformity.
+
+## 4. Shared contracts
+
+These are acceptance requirements, not prescribed class names. Map them to current types. Add schema only as the first consuming milestone requires it; do not prebuild every future subsystem.
+
+### 4.1 Identity, versions, and scene instances
+
+- Preserve project scoping on every read, write, job, asset, annotation, and export. A guessed ID from another project must not grant access.
+- Separate reusable asset identity from immutable source/model revisions and editable library metadata. Reuse the content-addressed store; do not create a competing asset system.
+- A scene contains distinct instances referencing exact asset revisions. Two chairs may share source bytes but have different transforms. Do not overload a shot-placement relationship that cannot represent repeated scene instances.
+- Define scene working state, immutable scene snapshots, and shot bindings. A shot binding identifies the exact scene snapshot, camera, and time interval.
+- Creating a new model revision does not silently update existing scenes. Explicit upgrades are reviewable and preserve old references.
+- Source images, meshes, textures, rigs, clips, and renders retain provenance and hashes. Archive is not deletion; referenced evidence must remain resolvable.
+- New mesh topology invalidates dependent rig, skin, animation-compatibility, and geometry-anchor approvals until revalidated. No silent transfer of a successful badge.
+
+### 4.2 Units, geometry, and format support
+
+Before M04, record a single scene coordinate convention, physical units, transform/pivot semantics, color handling, and import/export conversions. Use glTF conventions for the browser interchange boundary unless a documented existing constraint requires conversion. Add a known-dimension asymmetric fixture to catch mirror, axis, and scale mistakes. [W3]
+
+Keep native authoring outputs when necessary, but use supported GLB artifacts for browser inspection. Preserve Framewright-specific metadata in its own project manifest rather than pretending a GLB contains all review and authoring state.
+
+Support a bounded import subset first. Validate containers, resources, geometry, finite transforms, texture allocations, counts, and declared required extensions. Block external network/file references in the initial self-contained route. Enforce configurable resource limits before expensive loading. Unsupported assets get a useful error, not a blank viewport or a success record.
+
+For prepared runtime assets, use the user's approximately 50,000-vertex target where practical. Record vertex and triangle counts separately. Quality and deformation gates still apply; reaching a count is not proof of production quality. Never destroy the high-resolution authority to meet a derived-asset budget.
+
+### 4.3 Director Mode and annotations
+
+Reuse existing image/sketch/feedback components and revision semantics. Entering full-view mode must not fork document state or lose unsaved work.
+
+Image annotations bind to the exact image revision and content-area coordinates, excluding letterboxing. 3D annotations bind to the project, scene/object instance, model revision, captured camera, and timeline position where relevant. Use a revision-bound surface anchor when supported; otherwise label a note as attached to a frozen viewport capture. Do not invent depth or silently remap marks after topology changes.
+
+Provide both a bounded structured context packet and an actual visual representation. They must identify the same state revision, selection, camera, and time. Detect mismatches caused by user edits or navigation and request fresh context instead of applying stale instructions.
+
+Orbiting the inspection camera must not transform the model. Essential drag, drawing, and selection actions need explicit touch/keyboard alternatives. Unsupported WebGL or browser-tool capabilities must leave an honest, usable fallback.
+
+### 4.4 Agent tools, proposals, and permissions
+
+Expose typed operations for current context, selected objects, relevant annotations, available capabilities, proposal staging, and owned job/result inspection. Add only the tools the active milestone needs.
+
+Browser tools and normal UI commands share validation and application services. Preserve the existing distinction between server MCP and browser WebMCP. Verify the current browser API and actual host; do not assume a familiar API name, a polyfill, or a mocked registration proves native integration. WebMCP remains an evolving draft at this plan's source-review date. [W1]
+
+The initial agent interaction is **inspect -> propose -> user reviews/applies -> inspect result**. User application of a proposal uses normal validated commands. An explicit Generate/Render action remains the provider authorization boundary. A proposed edit, an applied edit, an approved asset, and a dispatched job are separate states. Agent tools cannot ratify canon or turn a staged proposal into provider dispatch.
+
+Proposals include target IDs, expected revisions, intended changes, preserved constraints, and a bounded scope. Validate the whole batch before applying it. A stale, unauthorized, or malformed batch leaves existing state intact. Applied changes are reversible through the supported history/undo mechanism; undo never rewrites accepted historical evidence.
+
+Treat imported text, model metadata, comments, and provider responses as untrusted content. Tool hints are not authorization. Enforce same-origin/session protections and permissions on the service, not merely in the UI. Expose no arbitrary SQL, shell, Python, filesystem paths, node graphs, provider endpoints, or credentials.
+
+A timeout is not proof that a mutation failed. Reconcile by request/proposal/job identity; represent unresolved outcomes honestly and do not encourage blind retries.
+
+### 4.5 Providers and workers
+
+- Use typed, allowlisted operations with capability preflight and bounded inputs/outputs. Missing workers or unsupported profiles produce actionable blocked states before dispatch.
+- Extend existing job ownership where appropriate; do not create a separate scene-generation queue with competing semantics.
+- Freeze exact input revisions, workflow/worker versions, parameters, ownership, and output lineage. Persist request/job identities for recovery.
+- Reconcile interruptions against the existing provider job. Do not claim exactly-once execution across an ambiguous network failure or silently submit a duplicate.
+- Never clear, interrupt, cancel globally, reorder, or harvest someone else's ComfyUI work. UI abandonment is not provider cancellation. ComfyUI exposes distinct queue/history/control routes, so allowlisting matters. [W2]
+- Default new GPU-heavy Framewright operations to conservative serialized execution on the shared workstation. Check capacity without terminating other applications or modifying their jobs.
+- Keep credentials and native worker secrets server-side. Named worker operations resolve asset IDs to authorized storage; browser input cannot choose host commands or arbitrary paths.
+- No provider output is current until validation/import succeeds and its source state remains eligible. Stale output stays a provenance-linked candidate rather than replacing newer work.
+
+### 4.6 Motion and output
+
+Declare asset motion intent as static, rigid-part, or deforming. Static props need no skeleton. Rigid-part motion can use transforms and pivots. Character clips require a verified skeleton/profile relationship.
+
+A rig is a revision-bound derivative, not a generic success flag. Record skeleton profile, rest pose, skinning results, supported clips, and deformation evidence. Initially reject incompatible clips rather than attempting unverified retargeting.
+
+Define timing units, frame rate, clip trim/loop behavior, root-motion policy, and camera interpolation. Preserve project delivery settings. Audio remains separately editable and is not injected into image or motion-generation prompts.
+
+Render from frozen scene/shot inputs, not the browser's incidental current camera. Existing still approval and video gates remain intact. A new 3D render route must join the existing review/candidate flow explicitly, never bypass it through a new export button.
+
+## 5. Verification and release gates
+
+### Milestone acceptance
+
+Before calling a milestone verified, record:
+
+- Its defined user outcome through the real application where applicable.
+- Focused regression evidence and at least the meaningful failure/conflict case for its contract.
+- Save/reopen or restart evidence whenever persistent state is introduced or changed.
+- Relevant earlier walking-path regressions, not just the newest component tests.
+- Actual external/visual evidence required below, with unavailable checks marked unrun.
+
+A success notification, endpoint status, schema migration, screenshot, or green mocked test is not sufficient by itself. Inspect resulting state and behavior. Test new bug checks against the reproducer or an intentionally broken implementation when practical. Do not weaken tests, automatically bless changed visual baselines, or suppress existing failures to manufacture a pass.
+
+Use known, licensed, small fixtures in isolated workspaces. Do not read or modify the artist's production database/media for routine tests. Explicit live canaries use authorized disposable inputs and obey existing provider permissions.
+
+### Test layers
+
+**Fast:** Existing build/type/lint checks and focused unit/contract tests. Discover exact commands in M00.
+
+**Feature:** Real browser/service/storage journeys, invalid input, concurrency, revision binding, and worker-adapter tests using clearly labeled controlled doubles where external execution is unavailable.
+
+**Live:** Separately authorized provider/worker and actual browser-agent checks. Record installed versions, workflow hashes, hardware, outputs, and known quality limits. No fixture result counts as live evidence.
+
+**Release:** Existing repository gates, packaged runtime, supported desktop/tablet behavior, migrations, backup/restore, export/reopen, degraded operation, and targeted security checks. The current `AGENTS.md` names `./scripts/verify.ps1` and `./scripts/public-release-audit.ps1`; verify their current contracts before use. [R0]
+
+For each schema change, test upgrading a representative prior-schema fixture in an isolated workspace at the introducing milestone. Do not wait until release to discover an incompatible migration, and never use the production database as a migration experiment.
+
+Add package smoke checks when a milestone changes runtime dependencies, native-worker access, assets, or deployment configuration. Do not postpone all packaging discovery until M18.
+
+### Safe to build on versus ready to release
+
+A proven narrow contract can advance while optional formats, richer controls, thumbnails, and optimization remain deferred. Data loss, wrong-target edits, permission bypasses, false success, unreconciled provider effects, and broken prerequisite behavior cannot be filed as polish.
+
+A phase may be released independently only for its verified capabilities. New unfinished routes remain gated. The full goal is complete only when all required milestones and release acceptance pass; adding documentation or checkboxes does not make a capability officially supported.
+
+## 6. Milestone roadmap
+
+All milestones start `NOT_STARTED`. The order below is the default execution order; use the dependencies to select independent work when an external acceptance gate is blocked.
+
+| ID | Phase | Observable increment | Dependencies | Required evidence |
+| --- | --- | --- | --- | --- |
+| M00 | Baseline | Reproduce and protect the existing image/library path | None | D, A |
+| M01 | Director Mode | Full-view image feedback with correct revisions | M00 | D, A |
+| M02 | Director Mode | Browser tools observe the exact displayed state | M01 | D, A, H |
+| M03 | Director Mode | Review and apply a bounded image-edit proposal | M02 contract | D, A, H |
+| M04 | Model foundation | Safely import and inspect one supported GLB | M00 | D, A |
+| M05 | Model foundation | Save/reopen reusable model revisions | M04 | D, A |
+| M06 | Model foundation | Place library models into a persistent scene | M05 | D, A |
+| M07 | Generation | One image-to-model adapter proves its owned-job contract | M05 | D, A |
+| M08 | Generation | One live image-to-model route reaches the scene | M06, M07 | D, A, L, V |
+| M09 | Preparation | Produce a reviewed derivative without replacing its source | M05, M07 | D, A, L, V |
+| M10 | Scene direction | Orbit, annotate, and propose edits to the correct 3D object | M03 contract, M06 | D, A, H |
+| M11 | Scene direction | Turn a reference into an editable blockout proposal | M10 | D, A, H, V |
+| M12 | Scene direction | Replace one placeholder with a detailed reusable asset | M08, M11 | D, A, L |
+| M13 | Motion | Inspect a known rigged character and validate its rig | M05 | D, A |
+| M14 | Motion | Create and review a rig for the supported character profile | M09, M13 | D, A, L, V |
+| M15 | Motion | Reuse compatible clips and animate rigid parts | M06, M13 | D, A |
+| M16 | Shots | Persist scene timing/camera and review a scene-derived still | M12, M15 | D, A, L, V |
+| M17 | Rendering | Render a reviewed animated take from frozen scene state | M14, M16 | D, A, L, V, P |
+| M18 | Release | Reopen/export/recover the complete supported workflow | All required milestones | D, A, H, L, V, P |
+
+### M00. Protect the current walking path
+
+**Deliver:** Inspect actual source, repository instructions, branches/worktree, tests, packaging, existing MCP/browser tools, and the relevant compiler checkout when accessible. Record exact commit IDs, commands, prerequisites, and a reuse map in the ledger. Do not alter another repository or install missing tooling.
+
+Reproduce a small existing image/sketch -> feedback -> revision -> library save/reopen journey in an isolated workspace. Identify which reported manual failures are reproducible rather than assuming the entire app is healthy or broken.
+
+**Prove:** The protected journey exercises real persistence. Reproduce and repair failures that invalidate the next phase, with regression checks. Record unrelated baseline failures without hiding them. Confirm tests cannot reach production paths/providers. Establish the small fixture set and package-smoke command.
+
+**Defer:** Unrelated application cleanup. Do not begin new Director Mode or 3D features in this milestone.
+
+### M01. Full-view image direction
+
+**Deliver:** A full-view Director Mode using existing image/sketch/comment components. Preserve the active subject, revision, references, locks, draft state, and navigation context. Expose draw, pin/comment, selection, and compare through existing behavior.
+
+**Prove:** Draw and pin an instruction on revision A; switching to B does not move the note or mutate B. Return to A and reopen the workspace with the expected saved state. Resizing/letterboxing does not misplace pins. Entering/exiting full view preserves edits. Archived/ratified restrictions still apply. Keyboard and touch alternatives work for the primary path.
+
+**Defer:** Rich brush libraries, custom layouts, and a new conversational UI.
+
+### M02. Exact context through browser tools
+
+**Deliver:** A versioned context packet and the smallest read-only browser-tool surface. Include selected subject/revision, relevant annotations/constraints, available actions, and a matching viewport capture or validated host visual-observation path. Feature-detect the actual browser API and keep host specifics in a thin adapter.
+
+**Prove:** An actual supported agent/browser can discover tools, read context, and observe the same annotated revision the user sees. Record host/browser versions and access configuration. Reject or refresh stale selection/capture combinations and wrong-project requests. Navigation unregisters or safely invalidates old tool state. Unsupported environments retain manual Director Mode.
+
+**Defer:** Additional hosts. Without actual-host evidence, mark `CONTRACT_VERIFIED`, not native WebMCP support. A shim or synthetic client proves only its own contract.
+
+### M03. Proposed image edits, not hidden writes
+
+**Deliver:** The agent can stage a bounded edit proposal from the current image, notes, and constraints. The user can inspect, reject, or apply it. Applied instructions feed the existing revision/generation UI; only the existing explicit user action authorizes generation.
+
+**Prove:** A supported host stages an edit aimed at a marked region while preserving a locked subject. Rejecting changes nothing. Applying targets the expected revision; stale revisions and malformed batches fail without partial mutation. Applying twice cannot double-apply the same proposal. The prior revision remains inspectable. A real-app proof adapter demonstrates candidate feedback without contacting production; do not claim live image generation from that test.
+
+**Defer:** Autonomous ratification, provider dispatch, and unattended acceptance. Existing Codex advice remains read-only.
+
+### M04. Import and inspect one supported model
+
+**Deliver:** Import a small self-contained GLB into an unapproved project asset, validate it, and open an isolated model viewer. Support orbit, zoom, frame/reset view, material inspection, and basic geometry/resource statistics. Record the supported format/extension and resource-limit profile.
+
+**Prove:** A known-scale asymmetric fixture has correct orientation, dimensions, and materials. Camera orbit does not alter object transforms. Malformed/truncated assets, oversized resources, external references, and unsupported required extensions are rejected safely. Failed imports create no usable-looking broken asset. Switching models releases resources; missing graphics support produces an honest fallback.
+
+**Defer:** Other file formats, advanced shading, sculpting, and automatic repair.
+
+### M05. Durable model library and revisions
+
+**Deliver:** Extend existing library behavior for reusable models: name, tags/collection, revision selection, source/provenance, and non-destructive archive. Preserve immutable media facts while editing organization. Use current project/global-library boundaries; do not invent a global sharing service.
+
+**Prove:** Save a model, restart the app, and reopen the exact revision with correct metadata/materials. A new revision does not overwrite the old one. Duplicate content reuses storage where appropriate without crossing project permissions. Referenced archived assets remain resolvable. Attempts to access another project's model fail. Existing image/audio/video library behavior still passes.
+
+**Defer:** Bulk import, automated tagging, and elaborate thumbnails.
+
+### M06. A small persistent scene
+
+**Deliver:** A scene editor with basic lighting/camera and distinct instances of library revisions. Add, select, move, rotate, scale, duplicate, and remove an instance using explicit controls and optional gizmos. Establish scene snapshots and revision-conflict behavior only as needed for this slice.
+
+**Prove:** Place two instances of one prop and transform them independently. Save, restart, and reopen with the correct asset revisions, transforms, camera, and light settings. Editing a library name does not move objects. A stale save fails without erasing newer work. Missing/unavailable assets have explicit placeholders with preserved identity. Removing an instance does not delete the library asset.
+
+**Defer:** Advanced lighting, collision, snapping, large-world editing, and instancing optimization.
+
+### M07. Image-to-model contract without pretending it is commissioned
+
+**Deliver:** Freeze a selected image revision into a model-generation request. Add one typed provider/worker adapter, capability preflight, durable owned-job progress, and validated model-candidate import. Use controlled adapter outputs to prove application behavior without making GPU/provider requests.
+
+**Prove:** A real-app fixture run produces a reviewable model with exact image lineage. Missing capabilities block before submission. Invalid output never becomes a usable model. Restart resumes a known job identity. Simulate the ambiguous submission/reply window: reconcile or report unknown, never silently resubmit. A stale source leaves the output as an older-source candidate. Duplicate deliveries do not duplicate accepted artifacts.
+
+**Defer:** Provider comparisons and additional models. Label the route uncommissioned until M08.
+
+### M08. Commission one live image-to-model route
+
+**Deliver:** After explicit authorization, use the actual configured ComfyUI workflow or agreed compiler-backed route on a bounded image. Capture workflow/worker versions, request/job IDs, source/output hashes, resource use, and relevant limitations.
+
+**Prove:** A real generated model imports, can be orbited, survives library save/reopen, and appears in the M06 scene at sensible scale. Record human visual acceptance of the supported static-prop output. Validate known-job recovery without manipulating unrelated provider work. A repeat delivery does not replace newer state or create duplicate committed output.
+
+**Defer:** Broad style fidelity, arbitrary character readiness, and multiple generators. Missing hardware, authorization, or a viable route is a named blocker, not a fixture pass.
+
+### M09. Reviewed model preparation
+
+**Deliver:** Adapt one proven Reference Asset Compiler/Blender preparation route for a selected model revision. Produce a derivative for browser/runtime use with appropriate geometry, UV/material handling, statistics, fixed-view review evidence, and retained native output when needed. Reuse existing receipts and review gates.
+
+**Prove:** Run the actual worker on a bounded supported mesh. Source geometry remains unchanged; the derivative cites it. Compare source/derivative fixed views and inspect material/UV integrity. Save/reopen both revisions. Worker failure, bad output, or excessive quality loss leaves the source usable and the derivative unapproved. Record human acceptance. A topology-changing derivative cannot inherit old rig/anchor approval.
+
+**Defer:** General mesh editing, universal retopology, and automatic artistic approval.
+
+### M10. Direct the selected 3D object
+
+**Deliver:** Extend Director Mode to isolated models and scenes. Context includes object/instance identity, revision, camera, visible notes, and relevant time. Add supported surface/captured-view annotations and proposal operations for existing transforms or revision requests.
+
+**Prove:** Select one of two identical prop instances, orbit, annotate it, and have an actual host propose a change to that instance only. User application leaves the other instance unchanged. Save/reopen the annotation and resulting state. Changing topology makes the old surface note explicitly stale rather than moving it elsewhere. Scene edits occurring after capture invalidate stale proposals. Agent-unavailable mode preserves normal controls.
+
+**Defer:** Arbitrary screen-to-geometry reconstruction and free-form mesh editing.
+
+### M11. Reference-to-scene blockout
+
+**Deliver:** From a selected reference or sketch, let the agent propose an editable construction plan: object roles, library matches, simple geometry, motion intent, approximate scale, camera, and uncertain/occluded areas. Show a lightweight blockout before any expensive asset generation.
+
+**Prove:** In the actual host workflow, review a bounded scene proposal and create distinct placeholders/simple geometry through user approval. The user can correct one placement and camera framing independently. Save/reopen the blockout. Reference IDs and assumptions remain inspectable. No provider job runs merely because the plan was proposed or applied. Record human composition acceptance.
+
+**Defer:** Exact reconstruction of hidden geometry, automatic physical inference, and unlimited object batches.
+
+### M12. Replace a placeholder, preserve the scene
+
+**Deliver:** For one selected placeholder, reuse a library model or explicitly generate a candidate, inspect/review it, and bind the chosen revision to that scene instance. Keep the generation plan and lineage attached to the intended target.
+
+**Prove:** Replace one placeholder without altering its instance identity, approved placement/pivot, other objects, lighting, or camera. Handle source-unit conversion explicitly. Save/reopen the result. A failed job leaves the blockout usable; a stale scene cannot be overwritten by a late result. Reuse the resulting asset in a second scene. Exercise a bounded live generation path after authorization, not only preexisting fixtures.
+
+**Defer:** Automatic full-scene regeneration and concurrent generation orchestration.
+
+### M13. Inspect a known rigged character
+
+**Deliver:** Import a licensed, known-good rigged fixture for one documented humanoid profile. Expose skeleton/rest-pose inspection and profile/skin validation. This proves storage and inspection before trusting generated rigs.
+
+**Prove:** Save/reopen mesh, skeleton, bind data, and materials. Confirm expected bone hierarchy/profile, finite transforms, valid skin weights, and a deterministic pose change. Wrong-profile or broken-skin fixtures fail honestly. A rig remains linked to its exact mesh revision. Static props still require no skeleton. Do not label arbitrary imported bones as animation-ready.
+
+**Defer:** More body classes, hand/facial rigs, and arbitrary retargeting.
+
+### M14. Create one supported rig
+
+**Deliver:** Integrate one actual compiler/Blender rigging route for an eligible prepared humanoid revision. Preflight the input, installed tooling/license where applicable, profile, and landmarks. Produce a new candidate rig and the existing pipeline's deformation-review evidence.
+
+**Prove:** After authorization, run the real worker and inspect a representative pose suite in the browser and worker output. Check source preservation, bind/rest pose, weights, obvious joint collapse, and source/profile lineage. A human records acceptance. Validate a known compatible clip through the compiler's existing motion-proof route; reusable browser clip controls are verified separately in M15. Missing landmarks, unusable topology, or poor deformation leave a reviewable failure, not an animation-ready badge.
+
+**Defer:** Universal automatic rigging and silent mannequin substitution. Existing compiler automation limits are engineering work, not permission to skip this milestone.
+
+### M15. Compatible clips and rigid-part motion
+
+**Deliver:** Add reusable compatible animation clips to the library. Inspect, play, pause, scrub, trim, loop, and attach a clip to a compatible character instance. Support a minimal transform/pivot track for a rigid prop, such as a door or lantern, without creating a skeleton.
+
+**Prove:** Two character instances share one clip but have independent playback settings. Scrubbing to known times produces expected poses. Save/reopen clip bindings and timing. Reject mismatched skeletons and invalid duration/time values before playback. A rigid prop animates around its declared pivot; static props stay unchanged. Record the supported root-motion policy and prevent double application of movement.
+
+**Defer:** Clip blending, arbitrary retargeting, procedural motion generation, and advanced animation editing.
+
+### M16. Scene timing, camera, and a reviewed shot still
+
+**Deliver:** Assemble object motion and camera timing in a small scene timeline. Bind a Framewright shot to a frozen scene snapshot, camera, time range, and project delivery contract. Produce a scene-derived still through one actual render path and feed it into existing candidate review.
+
+**Prove:** Save/reopen exact timing, clip revisions, camera, and delivery settings. The shot camera is distinct from the inspection camera. Scrubbing fixed times reproduces expected poses and framing. Render the selected frame through the real route after authorization and retain provenance. Human review/ratification uses existing rules; later scene edits do not rewrite the approved frame or snapshot. Existing sequence/audio controls remain functional.
+
+**Defer:** Complex camera curves, shot blending, and a replacement sequence editor.
+
+### M17. Render an animated shot, not just a viewport recording
+
+**Deliver:** Use one verified deterministic 3D rendering route, preferably existing Blender/encoding capabilities, to render the bound scene/shot interval. Freeze scene, assets, rigs, clips, camera, frame rate, dimensions, and render settings. Join owned-job recovery, candidate review, and existing production export. Preserve the approved-still prerequisite.
+
+**Prove:** A short bounded scene containing the M14-generated rig, a compatible clip, a rigid/static prop, and camera motion produces a playable take. Validate decoded duration, frame dimensions/rate, frame count/timing policy, and source manifest. Inspect representative frames and record human visual acceptance. Reopen the editable scene after rendering. Reconcile interrupted/duplicate delivery without replacing accepted work. Test the packaged route; keep sound separately editable/exportable.
+
+**Defer:** A new generative-video model, high-end render farm, and film-quality universal automation. H3 generation remains a separate existing route.
+
+### M18. Release and recovery proof
+
+**Deliver:** Run the complete bounded acceptance scenario below on the actual packaged workstation runtime. Refresh support documentation and setup/preflight messages from evidence, not intended capabilities. Record exact release-candidate revision, dependency/workflow versions, known limitations, and rollback/recovery procedure.
+
+**Prove:** The supported graph survives restart, export/import, and backup/restore in a disposable workspace, including model resources, native derivative references, rigs, clips, scene snapshots, annotations, and shot/take lineage. Exercise unavailable GPU/worker/agent modes and relevant security/resource-limit cases. Run required existing release gates and the manual desktop/tablet/stylus checks that automation cannot establish. No critical baseline regression is waived silently.
+
+**Defer:** Documented noncritical polish only. Do not publish, tag, deploy, or alter production data without explicit authorization.
+
+## 7. Bounded full-goal acceptance scenario
+
+Use a disposable small-workshop project with licensed fixtures or user-authorized source assets. Keep test assets bounded; do not turn the proof into a large art-production project.
+
+1. Start with a sketch/reference, use Director Mode markup and a host-generated proposal, and create a reviewed image through the existing supported image route. Record any required live-image authorization/evidence separately.
+2. Generate one static prop from that image through M08. Inspect it, prepare it when needed, and save its revisions to the library.
+3. Propose and approve a simple scene blockout. Place two instances of a reusable prop and replace one selected placeholder without moving unrelated objects.
+4. Import a suitable prepared humanoid, create its rig through M14, review deformation, and assign a compatible clip. Keep a static prop unrigged and demonstrate one rigid-part motion.
+5. Select and annotate an individual model in the scene. Have the actual host propose a bounded change; apply it through the user-facing review path and verify the correct target.
+6. Define a short shot, review/ratify its still, and render the animated take. Use a small explicitly selected delivery preset for the disposable project; do not override an existing project's settings.
+7. Close and reopen the app, export the editable package, import it into a clean isolated workspace, and restore a backup separately. Verify IDs/remapping, hashes, revision relationships, annotations, placements, motion, camera, and playable output. No original-machine absolute path should be required by the portable package.
+
+The goal passes only with an editable result and recorded evidence. A polished demonstration video cannot substitute for these checks.
+
+## 8. Progress and evidence ledger
+
+Update this section after each milestone. Store verbose logs, images, captures, receipts, and fixtures in appropriate repository or ignored artifact locations; keep this file as their compact index. Never commit private production content or secret-bearing logs.
+
+### Current execution state
+
+- **Repository commit / worktree:** `9ab9b68` on `main`; work continues on `feature/director-mode` branched from it. The artist's previously uncommitted working tree (YuE2 music composition, guided setup/worker scripts, release audit, `AGENTS.md`, `LICENSE`, docs, this goal file) was landed as `9ab9b68` at the user's instruction before M00 was recorded. No linked worktrees. Branches `challenge/webmcp-storyboard` (`f8540a0`) and `production-hardening` (`64998d0`) are untouched.
+- **Compiler revision and configured location:** Reference Asset Compiler is NOT checked out on this workstation and no configured location was found. Blocker for M09/M14; not required before then.
+- **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
+- **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
+- **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
+- **Active milestone:** M05 (durable model library and revisions).
+- **Last verified milestone:** M04. M02 and M03 remain CONTRACT_VERIFIED pending an actual WebMCP host.
+- **External acceptance blockers:** (1) No Reference Asset Compiler checkout - blocks M09/M14. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
+- **Next action:** Implement M05 on `feature/director-mode`: reusable model library records, revision selection, provenance, and non-destructive archive on top of the M04 import.
+
+### Milestone status
+
+| Milestone | Status | Evidence / blocker reference |
+| --- | --- | --- |
+| M00 | VERIFIED | M00 acceptance record below; commit `9ab9b68` |
+| M01 | VERIFIED | M01 acceptance record below |
+| M02 | CONTRACT_VERIFIED | M02 acceptance record below; no actual agent host available |
+| M03 | CONTRACT_VERIFIED | M03 acceptance record below; no actual agent host available |
+| M04 | VERIFIED | M04 acceptance record below |
+| M05 | IN_PROGRESS | Active; depends on M04 |
+| M06 | NOT_STARTED | None |
+| M07 | NOT_STARTED | None |
+| M08 | NOT_STARTED | None |
+| M09 | NOT_STARTED | None |
+| M10 | NOT_STARTED | None |
+| M11 | NOT_STARTED | None |
+| M12 | NOT_STARTED | None |
+| M13 | NOT_STARTED | None |
+| M14 | NOT_STARTED | None |
+| M15 | NOT_STARTED | None |
+| M16 | NOT_STARTED | None |
+| M17 | NOT_STARTED | None |
+| M18 | NOT_STARTED | None |
+
+### M00 acceptance record
+
+```text
+Milestone / status / date: M00 / VERIFIED / 2026-09-19
+Tested code revision or worktree identity: 9ab9b68 (main), clean working tree, no linked worktrees
+Outcome and supported constraints: The existing image/sketch -> feedback -> revision -> library
+  save/reopen walking path is reproducible in an isolated workspace and is protected by the
+  existing browser suite. No Director Mode or 3D work was started in this milestone.
+Implementation surfaces reused/changed: No application source changed. One baseline commit
+  (9ab9b68) landed the artist's previously uncommitted working tree at their instruction.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check (tsc --noEmit, eslint --max-warnings 0, prettier)
+  - npm --prefix src/storyboard-studio-web run test:e2e (desktop Chromium + iPad Pro 11 WebKit)
+  - powershell -File ./scripts/public-release-audit.ps1
+Results by evidence class (D/A/H/L/V/P):
+  D: 144 backend tests passed, 0 failed, 0 skipped (31 s). Frontend typecheck, lint, and format
+     checks clean. Tracked release-content audit passed.
+  A: 86 browser journeys passed, 0 failed, 6 intentionally skipped tablet-only exclusions
+     (92 discovered) in 3.1 min against a real ASP.NET Core service, real SQLite, and a real
+     content-addressed asset root in a disposable temp data root. Covers the protected path:
+     sketch composition persistence, version-bound pins and drawn markup, candidate review,
+     feedback regeneration freezing the current frame, authority revision pins, and the asset
+     library carrying media into shot work.
+  H: NOT RUN. No actual WebMCP agent host was exercised.
+  L: NOT RUN. No provider, GPU, or worker call was made or authorized.
+  V: NOT RUN. No human visual acceptance was required for M00.
+  P: NOT RUN. Packaged-runtime smoke deferred; no runtime dependency changed.
+Artifact paths, hashes, job IDs, and environment versions: Playwright HTML report at
+  src/storyboard-studio-web/playwright-report/ (gitignored). .NET SDK 10.0.203, Node v22.15.0,
+  npm 11.11.0, Windows 11 Pro 26200.
+Failure/conflict/restart checks: The existing suite already covers stale-save conflicts, archived
+  candidate read-only locks, job restart recovery, and proposal staleness. No new ones were added.
+Relevant earlier-path regression results: The full backend and browser suites are the earlier-path
+  regression set and passed in full.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (it runs npm ci and a Release rebuild; its
+  component steps were run individually and passed, and it is reserved for the release-candidate
+  gate). Reference Asset Compiler inspection (not present on this workstation). Live provider and
+  packaged-runtime checks (out of scope for M00 and unauthorized).
+Human approvals actually recorded, where required: The user authorized landing the working tree
+  onto main. No provider or artistic approval was required or taken.
+Known defects and dependency impact: No reproducible manual failure was found in the baseline; the
+  reported remaining manual failures could not be reproduced by these checks. Record a concrete
+  reproducer if one recurs.
+Permitted deferrals: Full verify.ps1 gate until a release candidate; package smoke until a runtime
+  dependency changes.
+Checkpoint: 9ab9b68 on main; feature/director-mode created from it.
+Next dependency-ready milestone: M01.
+```
+
+#### M00 reuse map
+
+| Need | Existing surface to reuse | Notes |
+| --- | --- | --- |
+| Image canvas, pins, drawn markup | `ShotCanvas` in `src/storyboard-studio-web/src/components/StudioWorkspaces.tsx` | Version-bound comments, durable markup with undo/redo/clear, project-aspect stage, `object-fit: cover` so there is no letterbox margin to exclude. |
+| Exact-image review notes | `AssetReviewPins` (`src/storyboard-studio-web/src/components/AssetReviewPins.tsx`) | Already excludes letterboxing by measuring natural aspect; bound to one asset id; drag, keyboard nudge, resolve. |
+| Sketch and composition lab | `SketchWorkspace`, `BlockingKit` | Lazy-loaded; revision-checked. |
+| Shot workspace shell | `ShotWorkspace` | Rail + canvas + inspector grid; owns tool state, candidate preview, and archived read-only locks. |
+| Candidate compare | `CandidateReviewBar`, `ReviewWorkspace` | Compare to latest, peek with `\`, promote and delete. |
+| Browser agent tools | `src/storyboard-studio-web/src/webmcp.ts`, `WebMcpStoryboardService`, `/api/webmcp/*` | Six closed-schema shot tools, proposal staging, abort-signal lifecycle, honest unsupported-browser fallback. |
+| Server domain services | `StudioRepository`, `StudioDbContext`, `AssetStore`, `GenerationOrchestrator`, `GenerationJobLeaseService` | Project scoping, optimistic concurrency, content-addressed storage, owned jobs. |
+| Test isolation | `StudioApiFactory` (temp data root, providers at `127.0.0.1:1`), `scripts/run-e2e-server.ps1` (temp data root, disabled submission) | Confirms tests cannot reach production paths or providers. |
+| Fixture set | Seeded demo project (6+ shots, authorities) plus the 1x1 PNG data-URL fixture in `e2e/studio.spec.ts` | Add an asymmetric known-dimension 3D fixture before M04. |
+
+### M01 acceptance record
+
+```text
+Milestone / status / date: M01 / VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the commit
+  recorded below (branched from 9ab9b68)
+Outcome and supported constraints: The Shot workspace has a full-view director mode. The rails,
+  context bar, version rail, inspector, and video endpoint strip step aside; the frame takes the
+  whole workstation at the exact delivery aspect; tools, the candidate review bar, Compare, and
+  Exit stay in reach. Only the shell restyles - the workspace and canvas are never remounted - so
+  the displayed revision, pins, unsaved markup, and unsaved inspector drafts survive the round
+  trip. Escape leaves full view only after any open modal has had its own press, and leaving the
+  Shot workspace always leaves full view. No new dependency, no schema change, no server change.
+Implementation surfaces reused/changed:
+  - src/storyboard-studio-web/src/App.tsx: directorMode state, shell class, Escape handling,
+    exit-on-workspace-change, prop wiring.
+  - src/storyboard-studio-web/src/components/StudioWorkspaces.tsx: ShotWorkspace props, the
+    always-present .canvas-stage wrapper, the toolbar toggle, and --project-aspect-number.
+  - src/storyboard-studio-web/src/studio.css: the Director Mode block plus one narrow-toolbar
+    rule so Compare is not squeezed out on a tablet.
+  - Reused unchanged: ShotCanvas, its comment pins and durable markup, CandidateReviewBar, the
+    archived-candidate read-only locks, and the existing revision-bound comment API.
+Commands and checks actually run:
+  - npm --prefix src/storyboard-studio-web run check
+  - npx playwright test studio.spec.ts -g "director mode gives the frame" (desktop, then tablet)
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+  - dotnet test Framewright.slnx --nologo
+Results by evidence class (D/A/H/L/V/P):
+  D: Frontend typecheck, lint, and format checks clean. 144 backend tests passed, 0 failed.
+  A: 88 browser journeys passed, 0 failed, 6 intentionally skipped (94 discovered) in 3.2 min
+     against the real service and real persistence in a disposable temp data root. That is the
+     86-journey M00 baseline plus the new desktop and tablet director-mode journeys, with no
+     regression and no change in the skip set.
+  H: NOT RUN. M01 needs no agent host.
+  L: NOT RUN. No provider was contacted; the second candidate came from the no-network local
+     proof adapter.
+  V: Desktop Chromium and iPad-sized WebKit full-view captures were inspected by the execution
+     agent at artifacts/director-mode/ (gitignored). This is AI inspection, not recorded human
+     visual acceptance.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: The new journey proves the archived-candidate locks still apply
+  in full view (draw and comment disabled, live-head note absent from the archived revision), that
+  a modal inside full view consumes its own Escape, and that a reload reopens the saved pin,
+  markup, and comment version while the never-saved intent draft is correctly gone.
+Relevant earlier-path regression results: The full backend and browser suites passed in full.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (reserved for the release-candidate gate;
+  its component steps passed individually). Physical stylus and screen-reader passes, which
+  automation cannot establish.
+Human approvals actually recorded, where required: None required. No provider call, no
+  ratification, no destructive action.
+Known defects and dependency impact: None found. On a tablet the frame is already full width, so
+  full view buys chrome-free height rather than more pixels; the journey asserts that honestly
+  rather than pretending the frame grows.
+Permitted deferrals: Rich brush libraries, custom full-view layouts, and any new conversational
+  UI, all explicitly deferred by M01.
+Bug-detection check: The new journey was run against two deliberately broken builds. Stretching
+  the stage to ignore the delivery aspect failed the aspect guard (expected 2.4, received 1.88);
+  remounting the shot workspace on entering full view failed the unsaved-draft guard. Both
+  sabotages were reverted before the recorded run.
+Checkpoint: see the M01 commit on feature/director-mode.
+Next dependency-ready milestone: M02.
+```
+
+### M02 acceptance record
+
+```text
+Milestone / status / date: M02 / CONTRACT_VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M02 commit
+Outcome and supported constraints: Browser tools can read the exact state the artist has on
+  screen and the picture that goes with it, and cannot mix the two up. `get_director_context`
+  returns one bounded, versioned packet - project, subject, live and displayed revision, archived
+  flag, camera, duration, view flags, visual, open annotations with normalized coordinates,
+  constraints, authorities, available actions - plus a `stateToken`. `observe_current_frame`
+  resolves that revision's picture only while the token still matches. The packet follows an
+  archived candidate preview rather than the live head, and omits `propose_shot_revision` from
+  available actions while an archived revision is displayed, matching the read-only lock the
+  artist sees. Status is CONTRACT_VERIFIED, not VERIFIED: no actual WebMCP-capable browser or
+  agent host was available, so the only client exercised was the repository's synthetic
+  `document.modelContext` shim. A shim proves its own contract and nothing about native support.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/WebMcpStoryboardService.cs: DirectorContextAsync,
+    DirectorObservationAsync, ResolveViewAsync, and the state-token digest.
+  - src/StoryboardStudio.Api/Program.cs: GET /api/webmcp/director/context and
+    GET /api/webmcp/director/observation, same-origin and project-scoped like the rest.
+  - src/storyboard-studio-web/src/webmcp.ts, api.ts, types.ts: two closed-schema read-only tools
+    (eight in total) behind the existing AbortController registration lifecycle.
+  - src/storyboard-studio-web/src/App.tsx and components/StudioWorkspaces.tsx: the Shot workspace
+    publishes the revision it is displaying, so the tools follow the artist rather than the head.
+  - Reused unchanged: the envelope shape, activity log, project query filters, continuity and
+    proposal services, and the existing /mcp workstation endpoint.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check
+  - npx playwright test webmcp.spec.ts --project=desktop
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 147 backend tests passed, 0 failed (144 baseline plus three director-context contract tests).
+     Frontend typecheck, lint, and format checks clean.
+  A: 92 browser journeys passed, 0 failed, 6 intentionally skipped (98 discovered) against the
+     real service and real persistence in a disposable temp data root. Two new agent journeys
+     cover the live head with staleness and refresh, and an archived preview with a cross-revision
+     token refusal.
+  H: NOT RUN, and this is the milestone's ceiling. No WebMCP-capable browser build or agent host
+     is installed on this workstation, so tool discovery and context reading were exercised only
+     through the synthetic shim. Record host and browser versions when one becomes available.
+  L: NOT RUN. No provider was contacted. The second candidate used by the archived-preview
+     journey came from the no-network local proof adapter.
+  V: NOT RUN. No human visual acceptance was required for M02.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: An edit after the context was read refuses the paired observation
+  with `stale_context` and `retryable: true`, and the refusal deliberately carries no replacement
+  token so it cannot be used to skip the re-read it asks for. A token read while previewing an
+  archived revision is refused against the live head. Unknown shots, revisions above the live
+  head, malformed tokens, and a shot belonging to another project are each refused by code.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the M01 director-mode journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually). Actual-host discovery (no such host available). Physical stylus and
+  screen-reader passes.
+Human approvals actually recorded, where required: None required. The new tools are read-only,
+  create nothing, and dispatch nothing.
+Suite stability observed: one intermediate full-matrix run failed two pre-existing authority
+  journeys (studio.spec.ts:1637 tablet, studio.spec.ts:1749 desktop) that this change does not
+  touch. Both passed in isolation on desktop and tablet and in the recorded full run. Treated as
+  load-sensitive flakiness in the shared serial database, not a regression, and recorded here
+  rather than hidden. Re-check if either recurs.
+Known defects and dependency impact: The workspace publishes its displayed revision one commit
+  after a candidate click, so an agent reading in that instant sees the previous revision. The
+  state token makes that visible rather than silent - the paired observation is refused - and the
+  journey polls rather than assuming lockstep. M03 must not treat a context read as proof that
+  the artist is still on that revision; proposals keep validating expected version server-side.
+Permitted deferrals: Additional hosts, and any capture of the browser viewport itself. The
+  observation resolves the exact frame asset instead, which has no letterbox ambiguity.
+Bug-detection check: With the state token computed without open annotations, the backend
+  staleness test failed as intended (Assert.False failure on the refusal) and passed again once
+  the sabotage was reverted.
+Checkpoint: see the M02 commit on feature/director-mode.
+Next dependency-ready milestone: M03, which the goal allows to proceed on the M02 contract.
+```
+
+### M03 acceptance record
+
+```text
+Milestone / status / date: M03 / CONTRACT_VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M03 commit
+Outcome and supported constraints: A browser agent can stage a bounded edit proposal against the
+  exact view it read, and the artist decides what happens to it. A proposal now carries the
+  director-context state token it was based on, the pinned notes it targets, and the shot rules it
+  promises to preserve. The service refuses a proposal built on a view that has moved
+  (stale_context) and refuses any preserved constraint the shot and its attached authorities do
+  not actually hold (invalid_preserved_constraints), so an agent cannot write blind or reassure
+  the artist with a rule nothing enforces. States are distinct and ordered: Pending, then Accepted
+  or Rejected, then Applied. Rejecting changes nothing. Applying is the artist's action, happens
+  once, refuses a shot that moved on, and opens frozen instructions - direction, rationale,
+  preserved constraints, targeted notes with normalized coordinates - in the existing revision
+  surface. Applying again replays that one application. Nothing in this path authorizes a
+  provider: the instructions carry generationAuthorized: false and the existing explicit Generate
+  action remains the only thing that spends GPU time or money. Status is CONTRACT_VERIFIED, not
+  VERIFIED, for the same reason as M02: no actual WebMCP-capable host exists on this workstation,
+  so the only client exercised was the repository's synthetic shim.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/WebMcpStoryboardService.cs: proposal request gains
+    PreservedConstraints and ObservedStateToken with validation, plus ApplyAsync and its frozen
+    instruction packet.
+  - src/StoryboardStudio.Api/Program.cs: POST /api/webmcp/proposals/{id}/apply.
+  - src/StoryboardStudio.Api/Persistence: ShotRevisionProposals gains AppliedAt,
+    ObservedStateToken, and PreservedConstraintsJson behind migration
+    20260919-director-proposal-apply-v10, additive so existing staged proposals survive.
+  - src/storyboard-studio-web: propose tool schema, apply client call, proposal card scope and
+    apply/reopen actions, and the failure line that keeps a refusal on the card.
+  - Reused unchanged: the existing FeedbackRegenerationDialog revision surface, the Codex
+    implementation-request path it already had, comment/pin storage, and the review gates.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - dotnet test --filter FullyQualifiedName~SchemaMigrationTests
+  - npm --prefix src/storyboard-studio-web run check
+  - npx playwright test webmcp.spec.ts --project=desktop
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 151 backend tests passed, 0 failed (147 before this milestone plus three proposal-scope and
+     apply contract tests and one schema-upgrade test). Frontend typecheck, lint, and format clean.
+  A: 94 browser journeys passed, 0 failed, 6 intentionally skipped (100 discovered) against the
+     real service and real persistence in a disposable temp data root. The new journey pins a
+     note, has the agent read context and propose against it, rejects one proposal without any
+     change, accepts and applies another, checks the revision surface opens carrying the preserved
+     rule and the marked region, reopens it as a replay, and asserts the shot version and the
+     durable job ledger are untouched throughout.
+  H: NOT RUN, and this is the milestone's ceiling, inherited from M02. No WebMCP-capable browser
+     build or agent host is installed on this workstation.
+  L: NOT RUN. No provider was contacted. Applying a proposal creates no job, which the journey
+     asserts against the durable ledger.
+  V: NOT RUN. No human visual acceptance was required for M03.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: Applying before accepting is refused (proposal_not_accepted);
+  applying a rejected proposal is refused (proposal_rejected); applying after the shot moved is
+  refused (stale_shot) and leaves the proposal Accepted rather than Applied; applying twice
+  replays the same AppliedAt rather than doubling; a proposal built on a stale context or an
+  invented constraint leaves no record at all. Schema upgrade from a database that recorded v9
+  restores the three columns and preserves the proposal staged before the upgrade.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the M01 director-mode journeys and the M02 context journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually). Actual-host discovery (no such host available). Live image generation from
+  an applied direction - the milestone explicitly forbids claiming it, and the journey only proves
+  the instructions reach the revision surface unstarted. Physical stylus and screen-reader passes.
+Human approvals actually recorded, where required: None required. Accept and apply are simulated
+  artist clicks inside an isolated test workspace, not artistic ratification of real work.
+Known defects and dependency impact: None found. Note that a proposal binds notes on the live head
+  only; proposing against an archived preview is not offered, matching M02's available actions.
+Permitted deferrals: Autonomous ratification, provider dispatch, and unattended acceptance, all
+  explicitly deferred by M03.
+Bug-detection check: With the once-only guard removed from ApplyAsync, the apply test failed as
+  intended on the replayed AppliedAt comparison, and passed again once the sabotage was reverted.
+Checkpoint: see the M03 commit on feature/director-mode.
+Next dependency-ready milestone: M04, which depends only on M00 but needs the user's decision on a
+  browser 3D renderer dependency before any code is written.
+```
+
+### M04 acceptance record
+
+```text
+Milestone / status / date: M04 / VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M04 commit
+Outcome and supported constraints: A self-contained GLB can be imported, validated, measured, and
+  inspected in an isolated 3D surface. Validation is server-side and happens before any bytes
+  reach a graphics context: container, chunk table, glTF version, required extensions, external
+  URIs, geometry, and seven resource ceilings. A refusal names its reason and leaves no asset
+  record behind. The reported dimensions are scene-space, computed through the node tree rather
+  than read off raw accessors. The viewer orbits an inspection camera, frames and resets the view,
+  lists materials and geometry statistics, releases its GPU context when the model changes or the
+  surface closes, and falls back honestly when WebGL is unavailable. The supported subset is
+  documented in docs/3D_CONVENTIONS.md and reported with every profile, so the artist reads the
+  real ceiling rather than a number in a document that may have drifted.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/GlbModelInspector.cs: the container/subset/ceiling gate and
+    the scene-space bounds computation.
+  - src/StoryboardStudio.Api/Services/AssetStore.cs: ImportModelAsync and ModelProfileAsync, using
+    the existing staging, hashing, content-addressed storage, dedupe, and audit paths.
+  - src/StoryboardStudio.Api/Program.cs: POST /api/assets/models and
+    GET /api/assets/{id}/model-profile, with their own request-size ceiling.
+  - src/StoryboardStudio.Core/StudioContracts.cs: AssetKind.Model plus the profile contracts.
+  - src/storyboard-studio-web: ModelViewer (three.js), ModelInspectionWorkspace, a Models smart
+    view, and the model branch of the existing import control.
+  - fixtures/glb/: the known-dimension asymmetric fixtures and their builder. The folder is
+    named glb rather than models so it does not fall under the gitignore rule that keeps model
+    weights out of the repository.
+  - Reused unchanged: the asset library, content-addressed store, project scoping, and the
+    existing import control the artist already uses for images, audio, and video.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check
+  - npm --prefix src/storyboard-studio-web run build
+  - npx playwright test models.spec.ts (desktop and tablet)
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 164 backend tests passed, 0 failed (151 before this milestone plus ten inspector contract
+     tests and three import/profile API tests). Frontend typecheck, lint, and format clean.
+  A: 100 browser journeys passed, 0 failed, 6 intentionally skipped (106 discovered) against the
+     real service and real persistence in a disposable temp data root. Three new model journeys
+     import the known fixture and check its measurements, materials, and supported subset; open
+     the real 3D view, orbit it by keyboard, and confirm the stored model is unchanged; switch
+     between two models with different extents and confirm exactly one drawing context survives;
+     and refuse a file that is not a GLB with a reason, leaving no model asset behind. The
+     bounding box three.js actually loaded is asserted to match the service's measurement axis
+     for axis.
+  H: NOT REQUIRED for M04. No agent host is involved in importing or inspecting a model.
+  L: NOT RUN. No provider, GPU worker, or network fetch is involved; the initial route refuses
+     external references outright.
+  V: The desktop capture at artifacts/director-mode/desktop-model-viewer.png was inspected by the
+     execution agent. This is AI inspection, not recorded human visual acceptance. The orientation
+     claim does not rest on it: the browser journey asserts that the bounding box three.js
+     actually loaded matches the bounds the service measured, axis for axis.
+  P: NOT RUN as a packaged-runtime check, but the production bundle was built and measured. three
+     .js occupies its own 609 KB (153 KB gzipped) chunk that loads only when a model is opened;
+     the shared vendor chunk is unchanged at 209 KB (66.5 KB gzipped), so start-up cost for
+     artists who never open a model is unchanged.
+Failure/conflict/restart checks: Corrupt magic, wrong GLB version, a header length that disagrees
+  with the file, truncation, external buffer or image URIs, an unsupported required extension,
+  missing accessor bounds, a document with no primitives, and each resource ceiling are all
+  refused by code with a specific reason. A refused import leaves no asset record; re-importing
+  identical bytes returns the same asset rather than a duplicate. A model is rejected as a shot
+  placement rather than being mislabelled with an audio role.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the M01 director-mode journeys and the M02/M03 agent journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually). Human visual acceptance (not required by M04). A real WebGL-less browser
+  (the fallback path is implemented and typed but was not exercised by a journey; Playwright's
+  browsers both provide WebGL).
+Human approvals actually recorded, where required: The user chose three.js over the alternatives
+  before any 3D code was written, and asked to be consulted first. No other approval was required.
+Known defects and dependency impact: The no-WebGL fallback is untested by automation. Models are
+  library assets only: they have no revision stack, no shot placement, and no scene yet, which is
+  exactly what M05 and M06 add.
+Permitted deferrals: Other file formats, advanced shading, sculpting, and automatic repair, all
+  explicitly deferred by M04.
+Bug-detection check: With the inspector ignoring node transforms, the fixture test failed on the
+  dimensions (expected [2, 1, 0.75], got [2, 1, 0.5]) and the mirrored-import test failed on the
+  bounds, then both passed again once the sabotage was reverted.
+Checkpoint: see the M04 commit on feature/director-mode.
+Next dependency-ready milestone: M05.
+```
+
+### Acceptance record template
+
+```text
+Milestone / status / date:
+Tested code revision or worktree identity:
+Outcome and supported constraints:
+Implementation surfaces reused/changed:
+Commands and checks actually run:
+Results by evidence class (D/A/H/L/V/P):
+Artifact paths, hashes, job IDs, and environment versions:
+Failure/conflict/restart checks:
+Relevant earlier-path regression results:
+Checks NOT RUN and why:
+Human approvals actually recorded, where required:
+Known defects and dependency impact:
+Permitted deferrals:
+Checkpoint:
+Next dependency-ready milestone:
+```
+
+Do not claim verification of a later commit when only an earlier code state was tested. Documentation-only evidence updates may follow the tested checkpoint; distinguish them from code changes requiring rechecks.
+
+### Decisions
+
+| ID | Decision | Rationale / validation needed |
+| --- | --- | --- |
+| D01 | Model-independent Director Mode | User requirement; prove host separation and manual fallback. |
+| D02 | Extend existing project, image, library, and job boundaries | Avoid competing state and orchestration systems; map actual source in M00. |
+| D03 | Static/imported assets before generated character automation | Establish persistence/scene contracts without depending on unproven rigging. |
+| D04 | Typed proposals with user application; explicit generation | Preserve current repository permission and approval boundaries. |
+| D05 | One supported GLB/profile/provider/render route first | Prove narrow useful support before expanding breadth. |
+| D06 | Reuse Reference Asset Compiler through a bounded adapter | Verify each reused operation; retain its human gates and receipts. |
+
+### Deferred work
+
+No execution deferrals recorded yet. Add each with an owner/milestone, reason, dependency impact, and disposition. Required acceptance work cannot be renamed polish.
+
+### Known failures and blockers
+
+No runtime assessment performed yet. The user reports remaining manual failures in Framewright; M00 must reproduce and classify them. Do not infer a clean baseline from this empty ledger.
+
+## 9. Source notes and refresh policy
+
+The following documents were inspected on 2026-09-19. They establish the planning context, not live production evidence. File hashes below are Git blob hashes, not repository commit hashes. Capture actual checkout commits in M00. Read current repository instructions before executing; do not overwrite them with this plan.
+
+**[R0] Framewright `AGENTS.md`.** Provider permissions, browser proposal boundary, isolation, and release-check entry points. Git blob `d2e8e195f64d3345b2c1a9c16997d4abc8f5cd26`.
+
+**[R1] Framewright `docs/ARCHITECTURE.md`.** Domain ownership, immutable evidence, storage, project/service boundaries, and external job ownership. Git blob `4389d169d722dcc97ab25892b6c0100d174eb753`.
+
+**[R2] Framewright `docs/IMPLEMENTATION_HANDOFF.md`.** Inspected relevant returned sections covering shared image composition, revision-bound feedback, current capabilities, and production boundaries. This document contains an older reconciliation date; source and runtime verification take precedence over its readiness language.
+
+**[R3] Framewright `docs/ASSET_LIBRARY.md`.** Canonical asset/media-pool model, shared composition, metadata, provenance, and non-destructive placement/archive behavior. Git blob `b40819ffc8854baf2620d265844399677099b2f3`.
+
+**[R4] Reference Asset Compiler `README.md`, lines 1-180.** Existing preparation, rig-related, static-prop, and receipt capabilities, including explicit operator/live-proof limitations. Git blob `13bf1cc12f2ab943ae12986e36cbe0b3786810d5`. Repository: `https://github.com/raydeStar/reference-asset-compiler`.
+
+**[W1] WebMCP draft.** The inspected report is dated 2026-09-17 and identifies itself as a Community Group draft rather than a W3C Standard. Recheck the API and actual host support when implementing; do not rely on an old prototype's interface. Reference: `https://webmachinelearning.github.io/webmcp/`.
+
+**[W2] Official ComfyUI server routes.** Verify submission, progress/history, and control-route semantics for the configured version. Reference: `https://docs.comfy.org/development/comfyui-server/comms_routes`.
+
+**[W3] Khronos glTF 2.0 specification.** Source for the chosen interchange conventions and supported geometry/material/skin/animation subset. Reference: `https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html`.
+
+Do not freeze incidental dependency versions from this goal. Pin the versions actually selected and tested during execution, and preserve those versions in live and release evidence.
