@@ -224,6 +224,10 @@ export default function SceneViewport({ instances, camera, environment, selected
           if (disposed) { release(gltf.scene); return }
           loaded.set(instance.assetId ?? '', gltf.scene)
           sync(next, selected)
+          // The scene graph arrives before its textures finish decoding, and
+          // this viewport draws on demand, so without waiting for the upload a
+          // textured model would stay untextured until something else moved.
+          void renderer.compileAsync(scene, perspective).then(() => { if (!disposed) draw() })
         }, undefined, () => {
           if (disposed) return
           const marker = placeholder()

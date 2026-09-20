@@ -140,6 +140,11 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
         resize()
         frame()
         publishLoadedBounds()
+        // The loader reports the scene as soon as its graph is built, while the
+        // textures are still decoding. This viewer draws on demand rather than
+        // every frame, so that first draw was also the last one, and a textured
+        // model sat there white for ever. Wait for the upload, then draw again.
+        void renderer.compileAsync(scene, camera).then(() => { if (!disposed) draw() })
       },
       undefined,
       () => {
