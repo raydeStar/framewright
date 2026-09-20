@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** none. The open runway is finished: M00, M01, M04, M05, M06, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M07, M08, M09, M12, M14, M16, M17 and M18 are blocked or deferred on work outside this repository.  
+**Active milestone:** none yet; M07 is next. M00, M01, M04, M05, M06, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M07, M08, M09 and M14 became dependency-ready on 2026-09-20 when the Reference Asset Compiler was checked out, and M12, M16, M17 and M18 follow them.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -429,14 +429,14 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 ### Current execution state
 
 - **Repository commit / worktree:** `9ab9b68` on `main`; work continues on `feature/director-mode` branched from it. The artist's previously uncommitted working tree (YuE2 music composition, guided setup/worker scripts, release audit, `AGENTS.md`, `LICENSE`, docs, this goal file) was landed as `9ab9b68` at the user's instruction before M00 was recorded. No linked worktrees. Branches `challenge/webmcp-storyboard` (`f8540a0`) and `production-hardening` (`64998d0`) are untouched.
-- **Compiler revision and configured location:** Reference Asset Compiler is NOT checked out on this workstation and no configured location was found. Blocker for M09/M14; not required before then.
+- **Compiler revision and configured location:** Reference Asset Compiler is checked out on this workstation under the artist's own source tree (MIT, Python 3.11+, console script `rac`); the exact path is workstation state and is not recorded here. No revision is pinned here yet and Framewright has no configured location for it, so M09/M14 are dependency-ready rather than runnable. Read [../REFERENCE_ASSET_COMPILER.md](../REFERENCE_ASSET_COMPILER.md) before either; the contract itself is canonical in that repository at `docs/BROWSER_STUDIO_CONTRACT.md`.
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** none. Every milestone this repository can reach on its own is closed.
+- **Active milestone:** none yet. Every milestone this repository could reach without the compiler is closed; M07 is the next one to open.
 - **Last verified milestone:** M15. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
-- **External acceptance blockers:** (1) No Reference Asset Compiler checkout - blocks M09/M14. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
-- **Next action:** Nothing is dependency-ready. M07 and M08 wait on the user's existing generation pipeline; M09 and M14 wait on a Reference Asset Compiler checkout, and M12, M16, M17 and M18 depend on those. The four CONTRACT_VERIFIED milestones wait on an actual WebMCP-capable host, and M11 additionally on recorded human composition acceptance.
+- **External acceptance blockers:** (1) Resolved 2026-09-20: the Reference Asset Compiler is checked out, so M09/M14 are unblocked. Neither is runnable until Framewright can locate a pinned compiler and the browser payload export exists; both are engineering work, not an external blocker. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
+- **Next action:** The generation pipeline M07 and M08 were deferred for is the Reference Asset Compiler, and it is checked out, so M07, M08, M09 and M14 are all dependency-ready and M12, M16 and M17 follow them. The agreed order is: the browser payload export on the compiler side, then M07 (the adapter, capability preflight and durable owned-job progress, provable with controlled outputs and no GPU), then M08 (one live compiler-backed run, which needs hardware and human acceptance), then profiles and the skeleton fingerprint, then M09 and M14. The four CONTRACT_VERIFIED milestones wait on an actual WebMCP-capable host, and M11 additionally on recorded human composition acceptance. Rigging routes and clip synthesis, including for non-humanoid creatures, are the compiler's work rather than this repository's; M15 consumes what they produce.
 
 ### Milestone status
 
@@ -449,14 +449,14 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M04 | VERIFIED | M04 acceptance record below |
 | M05 | VERIFIED | M05 acceptance record below |
 | M06 | VERIFIED | M06 acceptance record below |
-| M07 | DEFERRED | User is supplying an existing generation pipeline; revisit with them |
-| M08 | DEFERRED | Depends on M07; revisit with the user's pipeline |
-| M09 | NOT_STARTED | None |
+| M07 | NOT_STARTED | Dependency-ready 2026-09-20: the user's pipeline is the Reference Asset Compiler |
+| M08 | NOT_STARTED | Depends on M07; the compiler-backed route M08 already names is now available |
+| M09 | NOT_STARTED | Dependency-ready; compiler checked out 2026-09-20 |
 | M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
 | M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
 | M12 | NOT_STARTED | None |
 | M13 | VERIFIED | M13 acceptance record below |
-| M14 | NOT_STARTED | None |
+| M14 | NOT_STARTED | Dependency-ready; compiler checked out 2026-09-20 |
 | M15 | VERIFIED | M15 acceptance record below |
 | M16 | NOT_STARTED | None |
 | M17 | NOT_STARTED | None |
