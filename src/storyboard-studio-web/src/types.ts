@@ -111,19 +111,41 @@ export interface ShotRevisionProposalSummary { id: string; shotId: string; baseV
 export interface ShotRevisionInstructions { proposal: ShotRevisionProposalSummary; instructions: { shotId: string; code: string; baseVersion: number; direction: string; rationale: string; desiredMediaType: 'Image' | 'Video'; preservedConstraints: string[]; targetedNotes: { id: string; x: number; y: number; body: string; authorityId?: string; authorityVersion?: number }[]; generationAuthorized: boolean; note: string } }
 /** What the artist currently has on screen in the Shot workspace. */
 export interface DirectorShotView { kind: 'shot'; shotId: string; displayedVersion: number; archived: boolean; directorMode?: boolean; tool?: string }
-/** What the artist has open in the Scene workspace, including which object is selected. */
-export interface DirectorSceneView { kind: 'scene'; sceneId: string; instanceId?: string; directorMode?: boolean }
+/** What the artist has open in the Scene workspace: which object is selected, and which reference is being read. */
+export interface DirectorSceneView { kind: 'scene'; sceneId: string; instanceId?: string; referenceAssetId?: string; directorMode?: boolean }
 export type DirectorViewQuery = DirectorShotView | DirectorSceneView
 /** Where a scene's inspection camera sits. Orbit values, so a saved view reopens exactly. */
 export interface SceneCameraSummary { yaw: number; pitch: number; distance: number; target: number[]; fieldOfView: number }
 /** A scene's basic lighting: one key direction plus ambient fill. */
 export interface SceneEnvironmentSummary { keyIntensity: number; keyYaw: number; keyPitch: number; ambientIntensity: number }
-/** One placed object, pinned to an exact model revision. */
+/** Simple geometry standing in for an object that has no library model yet. */
+export interface ScenePlaceholderSummary { shape: 'Box' | 'Cylinder' | 'Sphere' | 'Plane'; size: number[] }
+/** One placed object: either pinned to an exact model revision or drawn as a placeholder, never both. */
 export interface SceneInstanceSummary {
-  id: string; assetId: string; name: string
+  id: string; assetId: string | null; name: string
   position: number[]; rotation: number[]; scale: number[]
   assetName: string; revisionNumber: number; contentUrl: string | null
   available: boolean; archived: boolean; dimensions: number[]
+  placeholder?: ScenePlaceholderSummary | null
+  /** What this object is for, and the plan that put it here. Both server-owned. */
+  role?: string | null; planId?: string | null
+}
+/** One object in a construction plan read off a reference. */
+export interface SceneBlockoutItemSummary {
+  id: string; role: string; matchAssetId: string | null; matchAssetName: string | null
+  placeholder: ScenePlaceholderSummary | null
+  position: number[]; rotation: number[]; scale: number[]
+  motionIntent: string; confidence: 'Certain' | 'Approximate' | 'Occluded'; note: string
+  instanceId: string | null
+}
+/** A reviewable construction plan. It builds nothing until the artist approves it. */
+export interface SceneBlockoutPlanSummary {
+  id: string; referenceAssetId: string; referenceName: string; referenceContentHash: string
+  referenceUrl: string | null; referenceChanged: boolean
+  title: string; summary: string; state: 'Pending' | 'Rejected' | 'Applied'
+  camera: SceneCameraSummary; assumptions: string[]; uncertainties: string[]
+  items: SceneBlockoutItemSummary[]; sceneId: string | null; sceneName: string | null
+  createdAt: string; decidedAt?: string; appliedAt?: string
 }
 export interface SceneSummary { id: string; name: string; version: number; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: SceneInstanceSummary[]; updatedAt: string }
 export interface SceneListItem { id: string; name: string; version: number; instanceCount: number; updatedAt: string }

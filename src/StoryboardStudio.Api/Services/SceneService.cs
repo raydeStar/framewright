@@ -16,6 +16,8 @@ namespace StoryboardStudio.Api.Services;
 public sealed class SceneService(StudioDbContext db, AssetStore assets, IProjectScope projectScope, TimeProvider timeProvider)
 {
     private const int MaxInstances = 200;
+    /// <summary>Stand-in geometry the viewport can draw without loading anything.</summary>
+    internal static readonly string[] SupportedShapes = ["Box", "Cylinder", "Sphere", "Plane"];
     private const double MaxDistanceFromOrigin = 10_000;
 
     public async Task<IReadOnlyList<SceneListItem>> ListAsync(CancellationToken cancellationToken)
@@ -99,14 +101,15 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             if (Validate(instance) is { } instanceError) return RepositoryResult<SceneSummary>.Invalid(instanceError);
         }
 
-        // Every instance must point at a model revision this project really
-        // holds, so a scene can never cite another project's asset or a picture.
-        var assetIds = instances.Select(x => x.AssetId).Distinct().ToArray();
+        // Every modelled instance must point at a model revision this project
+        // really holds, so a scene can never cite another project's asset or a
+        // picture. Placeholders point at no asset at all.
+        var assetIds = instances.Where(x => x.AssetId is not null).Select(x => x.AssetId!.Value).Distinct().ToArray();
         var models = await db.Assets.AsNoTracking()
             .Where(x => assetIds.Contains(x.Id) && x.Kind == nameof(AssetKind.Model))
             .Select(x => x.Id).ToArrayAsync(cancellationToken);
         if (models.Length != assetIds.Length)
-            return RepositoryResult<SceneSummary>.Invalid("Every scene instance must reference a model in this project.");
+            return RepositoryResult<SceneSummary>.Invalid("Every modelled scene instance must reference a model in this project.");
 
         var now = timeProvider.GetUtcNow();
         var existing = await db.SceneInstances.Where(x => x.SceneId == scene.Id).ToListAsync(cancellationToken);
@@ -125,6 +128,12 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
                 db.SceneInstances.Add(record);
             }
             record.AssetId = instance.AssetId;
+            // Exactly one of these describes the object, checked before anything
+            // is written, so pinning a model clears the stand-in it replaces.
+            record.PlaceholderShape = instance.Placeholder?.Shape;
+            record.PlaceholderSizeX = instance.Placeholder?.Size[0] ?? 0;
+            record.PlaceholderSizeY = instance.Placeholder?.Size[1] ?? 0;
+            record.PlaceholderSizeZ = instance.Placeholder?.Size[2] ?? 0;
             record.Name = instance.Name.Trim();
             record.SortOrder = order++;
             record.PositionX = instance.Position[0]; record.PositionY = instance.Position[1]; record.PositionZ = instance.Position[2];
@@ -163,17 +172,32 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
     {
         var rows = await db.SceneInstances.AsNoTracking()
             .Where(x => x.SceneId == scene.Id).OrderBy(x => x.SortOrder).Take(MaxInstances).ToArrayAsync(cancellationToken);
-        var assetIds = rows.Select(x => x.AssetId).Distinct().ToArray();
+        var assetIds = rows.Where(x => x.AssetId is not null).Select(x => x.AssetId!.Value).Distinct().ToArray();
         var models = await db.Assets.AsNoTracking().Where(x => assetIds.Contains(x.Id)).ToArrayAsync(cancellationToken);
 
         var instances = new List<SceneInstanceSummary>(rows.Length);
         foreach (var row in rows)
         {
+            if (row.PlaceholderShape is { } shape)
+            {
+                // A placeholder is always drawable: it is the simple geometry
+                // itself, not a stand-in for a file that could go missing.
+                double[] size = [row.PlaceholderSizeX, row.PlaceholderSizeY, row.PlaceholderSizeZ];
+                instances.Add(new SceneInstanceSummary(
+                    row.Id, null, row.Name,
+                    [row.PositionX, row.PositionY, row.PositionZ],
+                    [row.RotationX, row.RotationY, row.RotationZ],
+                    [row.ScaleX, row.ScaleY, row.ScaleZ],
+                    "Placeholder", 1, null, true, false, size,
+                    new ScenePlaceholderSummary(shape, size), row.Role, row.SourcePlanId));
+                continue;
+            }
+
             var asset = models.FirstOrDefault(x => x.Id == row.AssetId);
             // An instance survives its model becoming unavailable. It reports
             // that honestly and keeps its identity, rather than disappearing.
             var available = asset is not null && assets.StoredFileExists(asset.StoragePath);
-            var dimensions = available ? await DimensionsAsync(row.AssetId, cancellationToken) : [0d, 0d, 0d];
+            var dimensions = available ? await DimensionsAsync(row.AssetId!.Value, cancellationToken) : [0d, 0d, 0d];
             instances.Add(new SceneInstanceSummary(
                 row.Id, row.AssetId, row.Name,
                 [row.PositionX, row.PositionY, row.PositionZ],
@@ -182,7 +206,8 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
                 asset?.DisplayName ?? "Unavailable model",
                 asset?.RevisionNumber ?? 1,
                 available ? $"/api/assets/{row.AssetId}/content" : null,
-                available, asset?.IsArchived ?? false, dimensions));
+                available, asset?.IsArchived ?? false, dimensions,
+                null, row.Role, row.SourcePlanId));
         }
 
         return new SceneSummary(
@@ -212,8 +237,28 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         return null;
     }
 
+    /// <summary>
+    /// Every scene object is either a model revision or a placeholder. Both at
+    /// once would leave two sources of truth for what is drawn; neither would
+    /// leave a transform with nothing under it.
+    /// </summary>
+    internal static string? ValidatePlaceholder(Guid? assetId, ScenePlaceholderSummary? placeholder)
+    {
+        if (assetId is not null && placeholder is not null)
+            return "A scene object is either a model revision or a placeholder, not both.";
+        if (assetId is null && placeholder is null)
+            return "Each scene object needs either a model revision or placeholder geometry.";
+        if (placeholder is null) return null;
+        if (!SupportedShapes.Contains(placeholder.Shape))
+            return "Placeholder geometry must be one of " + string.Join(", ", SupportedShapes) + ".";
+        if (placeholder.Size is not { Length: 3 } || placeholder.Size.Any(value => !double.IsFinite(value) || value is < 0.01 or > 1000))
+            return "Placeholder size must be three finite values between 0.01 and 1000 metres.";
+        return null;
+    }
+
     private static string? Validate(SaveSceneInstanceRequest instance)
     {
+        if (ValidatePlaceholder(instance.AssetId, instance.Placeholder) is { } placeholderError) return placeholderError;
         if (instance.Position is not { Length: 3 } || instance.Rotation is not { Length: 3 } || instance.Scale is not { Length: 3 })
             return "Each instance needs a three-axis position, rotation, and scale.";
         if (instance.Position.Any(value => !double.IsFinite(value) || Math.Abs(value) > MaxDistanceFromOrigin))

@@ -22,6 +22,7 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
     private const int DirectorContextVersion = 1;
     private static readonly string[] ReadOnlyActions = ["get_director_context"];
     private static readonly string[] SelectedActions = ["propose_scene_edit", "get_director_context"];
+    private static readonly string[] ReferenceActions = ["propose_scene_blockout", "get_director_context"];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<RepositoryResult<IReadOnlyList<SceneAnnotationSummary>>> ListAnnotationsAsync(Guid sceneId, CancellationToken cancellationToken)
@@ -54,8 +55,10 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
             Id = Guid.NewGuid(), ProjectId = projectScope.ProjectId, SceneId = sceneId,
             InstanceId = instance.Id,
             // The revision the anchor was measured against, so a later revision
-            // swap makes this note explicitly stale instead of moving it.
-            AssetId = instance.AssetId,
+            // swap makes this note explicitly stale instead of moving it. A note
+            // on a placeholder binds to no revision, so replacing that
+            // placeholder with a real model makes it stale in the same way.
+            AssetId = instance.AssetId ?? Guid.Empty,
             AnchorX = request.Anchor[0], AnchorY = request.Anchor[1], AnchorZ = request.Anchor[2],
             CameraYaw = request.Camera.Yaw, CameraPitch = request.Camera.Pitch, CameraDistance = request.Camera.Distance,
             CameraTargetX = request.Camera.Target[0], CameraTargetY = request.Camera.Target[1], CameraTargetZ = request.Camera.Target[2],
@@ -84,7 +87,8 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
     /// token bound to the scene version, the selected instance, its pinned
     /// revision, its transform, and its open notes.
     /// </summary>
-    public async Task<WebMcpEnvelope> ContextAsync(Guid sceneId, Guid? instanceId, bool directorMode, CancellationToken cancellationToken)
+    public async Task<WebMcpEnvelope> ContextAsync(
+        Guid sceneId, Guid? instanceId, Guid? referenceAssetId, bool directorMode, CancellationToken cancellationToken)
     {
         var scene = await db.Scenes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sceneId, cancellationToken);
         if (scene is null) return Failure("scene_not_found", "That scene is not part of the active project.");
@@ -95,12 +99,25 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
         if (instanceId is not null && selected is null)
             return Failure("instance_not_found", "That object is not part of this scene.");
 
+        // The reference the artist is reading from, when there is one. It carries
+        // its content hash so a blockout proposal can be bound to the exact
+        // picture it was read from rather than to whatever is there later.
+        var reference = referenceAssetId is null
+            ? null
+            : await db.Assets.AsNoTracking()
+                .Where(x => x.Id == referenceAssetId && x.Kind == nameof(AssetKind.Image))
+                .Select(x => new { x.Id, x.DisplayName, x.ContentHash }).SingleOrDefaultAsync(cancellationToken);
+        if (referenceAssetId is not null && reference is null)
+            return Failure("reference_not_found", "That reference is not an image in the active project.");
+
         var annotations = await DescribeAnnotationsAsync(sceneId, cancellationToken);
         var selectedNotes = selected is null
             ? []
             : annotations.Where(x => x.InstanceId == selected.Id && x.State == "Open").ToArray();
+        var pinnedAssetIds = instances.Where(instance => instance.AssetId is not null)
+            .Select(instance => instance.AssetId!.Value).Distinct().ToArray();
         var assetNames = await db.Assets.AsNoTracking()
-            .Where(x => instances.Select(instance => instance.AssetId).Contains(x.Id))
+            .Where(x => pinnedAssetIds.Contains(x.Id))
             .Select(x => new { x.Id, x.DisplayName, x.RevisionNumber }).ToArrayAsync(cancellationToken);
 
         return Success("scene_director_context",
@@ -127,7 +144,14 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
                     instanceId = selected.Id,
                     selected.Name,
                     assetId = selected.AssetId,
-                    assetName = assetNames.FirstOrDefault(x => x.Id == selected.AssetId)?.DisplayName ?? "Unavailable model",
+                    assetName = assetNames.FirstOrDefault(x => x.Id == selected.AssetId)?.DisplayName
+                        ?? (selected.PlaceholderShape is null ? "Unavailable model" : selected.PlaceholderShape + " placeholder"),
+                    placeholder = selected.PlaceholderShape is null ? null : new
+                    {
+                        shape = selected.PlaceholderShape,
+                        size = new[] { selected.PlaceholderSizeX, selected.PlaceholderSizeY, selected.PlaceholderSizeZ },
+                    },
+                    role = selected.Role,
                     revisionNumber = assetNames.FirstOrDefault(x => x.Id == selected.AssetId)?.RevisionNumber ?? 1,
                     position = new[] { selected.PositionX, selected.PositionY, selected.PositionZ },
                     rotation = new[] { selected.RotationX, selected.RotationY, selected.RotationZ },
@@ -144,7 +168,14 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
                 {
                     note.Id, note.Body, note.Anchor, note.Stale, boundToAssetId = note.AssetId,
                 }).ToArray(),
-                availableActions = selected is null ? ReadOnlyActions : SelectedActions,
+                reference = reference is null ? null : new
+                {
+                    assetId = reference.Id, name = reference.DisplayName, contentHash = reference.ContentHash,
+                    contentUrl = $"/api/assets/{reference.Id}/content",
+                },
+                availableActions = reference is null
+                    ? (selected is null ? ReadOnlyActions : SelectedActions)
+                    : (selected is null ? ReferenceActions : [.. SelectedActions, "propose_scene_blockout"]),
                 note = "Proposals name one instance. Applying one is the artist's action and changes nothing else in the scene.",
             });
     }
@@ -285,7 +316,7 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
                     annotation.Body, annotation.State,
                     // The geometry under this anchor changed if the instance now
                     // points at a different revision.
-                    Stale: instance is not null && instance.AssetId != annotation.AssetId,
+                    Stale: instance is not null && instance.AssetId.GetValueOrDefault() != annotation.AssetId,
                     Orphaned: instance is null,
                     annotation.CreatedAt);
             })];

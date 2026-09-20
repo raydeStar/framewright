@@ -17,6 +17,10 @@ const noSceneOpen: WebMcpEnvelope = {
   ok: false, status: 'error', code: 'no_scene_open',
   message: 'No scene is open in the workspace. Ask the artist to open one, then read the context again.', retryable: true,
 }
+const noReferenceSelected: WebMcpEnvelope = {
+  ok: false, status: 'error', code: 'no_reference_selected',
+  message: 'No reference is selected in the scene workspace. Ask the artist to choose one, then read the context again.', retryable: true,
+}
 const wrongSurface: WebMcpEnvelope = {
   ok: false, status: 'error', code: 'wrong_surface',
   message: 'That tool applies to a different workspace than the one the artist has open. Read the director context again.', retryable: true,
@@ -28,7 +32,7 @@ const shotIdSchema = {
 export const FRAMEWRIGHT_WEBMCP_TOOL_NAMES = [
   'get_storyboard_context', 'list_storyboard_shots', 'get_shot_details',
   'inspect_shot_continuity', 'get_director_context', 'observe_current_frame',
-  'propose_shot_revision', 'propose_scene_edit', 'get_generation_status',
+  'propose_shot_revision', 'propose_scene_edit', 'propose_scene_blockout', 'get_generation_status',
 ] as const
 
 export interface WebMcpBridgeOptions {
@@ -42,6 +46,8 @@ export interface WebMcpBridgeOptions {
   onProposal: (proposal?: ShotRevisionProposalSummary) => void
   /** A scene proposal landed; the open scene should show it. */
   onSceneProposal: () => void
+  /** A blockout plan landed; the open scene workspace should show it for review. */
+  onSceneBlockout: () => void
   onJobStatus: (jobId: string) => void
 }
 
@@ -104,7 +110,7 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
         // One tool, two surfaces: the packet describes whichever the artist has
         // open, so an agent never has to guess which workspace it is looking at.
         return view.kind === 'scene'
-          ? studioApi.webMcpSceneContext(view.sceneId, view.instanceId, view.directorMode ?? false, signal)
+          ? studioApi.webMcpSceneContext(view.sceneId, view.instanceId, view.referenceAssetId, view.directorMode ?? false, signal)
           : studioApi.webMcpDirectorContext(view, signal)
       }),
     },
@@ -166,6 +172,60 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
         if (view.kind !== 'scene') return wrongSurface
         const result = await studioApi.webMcpProposeSceneEdit({ ...input, sceneId: view.sceneId }, signal)
         if (result.ok) options.onSceneProposal()
+        return result
+      }),
+    },
+    {
+      name: 'propose_scene_blockout', title: 'Propose a scene blockout',
+      description: 'Read the reference the artist has selected and stage a construction plan for it: what objects the scene needs, which of them the library already has, what stands in for the rest, and what the reference does not show. It builds nothing until the artist approves it.',
+      inputSchema: {
+        type: 'object', properties: {
+          observedReferenceHash: { type: 'string', minLength: 1, maxLength: 128 },
+          title: { type: 'string', minLength: 1, maxLength: 120 },
+          summary: { type: 'string', minLength: 1, maxLength: 1000 },
+          camera: {
+            type: 'object', properties: {
+              yaw: { type: 'number' }, pitch: { type: 'number' }, distance: { type: 'number' },
+              target: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+              fieldOfView: { type: 'number' },
+            },
+            required: ['yaw', 'pitch', 'distance', 'target', 'fieldOfView'], additionalProperties: false,
+          },
+          assumptions: { type: 'array', maxItems: 10, items: { type: 'string', maxLength: 300 } },
+          uncertainties: { type: 'array', maxItems: 10, items: { type: 'string', maxLength: 300 } },
+          items: {
+            type: 'array', minItems: 1, maxItems: 12,
+            items: {
+              type: 'object', properties: {
+                role: { type: 'string', minLength: 1, maxLength: 80 },
+                matchAssetId: { type: 'string', format: 'uuid', maxLength: 36 },
+                shape: { type: 'string', enum: ['Box', 'Cylinder', 'Sphere', 'Plane'] },
+                size: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+                position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+                rotation: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+                scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+                motionIntent: { type: 'string', maxLength: 200 },
+                confidence: { type: 'string', enum: ['Certain', 'Approximate', 'Occluded'] },
+                note: { type: 'string', maxLength: 300 },
+              },
+              required: ['role'], additionalProperties: false,
+            },
+          },
+          idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+        },
+        required: ['observedReferenceHash', 'title', 'summary', 'items', 'idempotencyKey'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: false },
+      execute: run('propose_scene_blockout', async (input, signal) => {
+        const view = options.getDirectorView()
+        if (!view) return noSceneOpen
+        if (view.kind !== 'scene') return wrongSurface
+        // The plan is always about the reference the artist has selected, never
+        // one the agent chose for itself.
+        if (!view.referenceAssetId) return noReferenceSelected
+        const result = await studioApi.webMcpProposeSceneBlockout({ ...input, referenceAssetId: view.referenceAssetId }, signal)
+        if (result.ok) options.onSceneBlockout()
         return result
       }),
     },

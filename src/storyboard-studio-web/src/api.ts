@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorShotView, ModelProfileSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorShotView, ModelProfileSummary, SceneBlockoutPlanSummary, ScenePlaceholderSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -125,7 +125,7 @@ export const studioApi = {
   scenes: () => request<SceneListItem[]>('/api/scenes'),
   scene: (sceneId: string) => request<SceneSummary>(`/api/scenes/${sceneId}`),
   createScene: (name: string) => request<SceneSummary>('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) }),
-  saveScene: (sceneId: string, body: { expectedVersion: number; name: string; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: { id: string; assetId: string; name: string; position: number[]; rotation: number[]; scale: number[] }[] }) =>
+  saveScene: (sceneId: string, body: { expectedVersion: number; name: string; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: { id: string; assetId: string | null; name: string; position: number[]; rotation: number[]; scale: number[]; placeholder?: ScenePlaceholderSummary | null }[] }) =>
     request<SceneSummary>(`/api/scenes/${sceneId}`, { method: 'PUT', body: JSON.stringify(body) }),
   sceneAnnotations: (sceneId: string) => request<SceneAnnotationSummary[]>(`/api/scenes/${sceneId}/annotations`),
   addSceneAnnotation: (sceneId: string, body: { instanceId: string; anchor: number[]; camera: SceneCameraSummary; body: string }) =>
@@ -135,8 +135,16 @@ export const studioApi = {
   acceptSceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/accept`, { method: 'POST' }),
   rejectSceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/reject`, { method: 'POST' }),
   applySceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/apply`, { method: 'POST' }),
-  webMcpSceneContext: (sceneId: string, instanceId: string | undefined, directorMode: boolean, signal?: AbortSignal) =>
-    request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/scene-context?sceneId=${sceneId}${instanceId ? `&instanceId=${instanceId}` : ''}&directorMode=${directorMode}`, { signal }),
+  webMcpSceneContext: (sceneId: string, instanceId: string | undefined, referenceAssetId: string | undefined, directorMode: boolean, signal?: AbortSignal) =>
+    request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/scene-context?sceneId=${sceneId}${instanceId ? `&instanceId=${instanceId}` : ''}${referenceAssetId ? `&referenceAssetId=${referenceAssetId}` : ''}&directorMode=${directorMode}`, { signal }),
+  sceneBlockouts: (referenceAssetId?: string) =>
+    request<SceneBlockoutPlanSummary[]>(`/api/scene-blockouts${referenceAssetId ? `?referenceAssetId=${referenceAssetId}` : ''}`),
+  sceneBlockoutForScene: (sceneId: string) => request<SceneBlockoutPlanSummary>(`/api/scenes/${sceneId}/blockout`),
+  rejectSceneBlockout: (planId: string) => request<SceneBlockoutPlanSummary>(`/api/scene-blockouts/${planId}/reject`, { method: 'POST' }),
+  applySceneBlockout: (planId: string, sceneName?: string) =>
+    request<SceneSummary>(`/api/scene-blockouts/${planId}/apply`, { method: 'POST', body: JSON.stringify({ sceneName: sceneName ?? null }) }),
+  webMcpProposeSceneBlockout: (body: Record<string, unknown>, signal?: AbortSignal) =>
+    request<WebMcpEnvelope<SceneBlockoutPlanSummary>>('/api/webmcp/scene-blockouts', { method: 'POST', body: JSON.stringify(body), signal }),
   webMcpProposeSceneEdit: (body: Record<string, unknown>, signal?: AbortSignal) =>
     request<WebMcpEnvelope<SceneProposalSummary>>('/api/webmcp/scene-proposals', { method: 'POST', body: JSON.stringify(body), signal }),
   prepareManifest: (shotId: string, body: { expectedShotVersion: number; expectedSketchRevision: number; route: GenerationRoute; purpose: GenerationPurpose; compositionAssetId?: string; creativeBriefOverride?: string; markupRevision?: number; allowSketchCompositionFallback?: boolean; videoEndpointRole?: 'LastFrame'; videoEndpointSourceCandidateId?: string }) => request<GenerationManifestSummary>(`/api/shots/${shotId}/manifests/prepare`, { method: 'POST', body: JSON.stringify(body) }),

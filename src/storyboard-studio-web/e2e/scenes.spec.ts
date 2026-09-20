@@ -55,6 +55,9 @@ test('two instances of one model are placed, moved independently, and reopen aft
   // Place the same model twice.
   const objects = page.getByTestId('scene-objects')
   await objects.getByLabel('Add model to scene').selectOption({ label: modelName })
+  // Wait for the first object to land: the picker resets to its empty option
+  // between picks, and picking again before it has would be one pick, not two.
+  await expect(objects.getByRole('button', { name: new RegExp(modelName) })).toHaveCount(1)
   await objects.getByLabel('Add model to scene').selectOption({ label: modelName })
   await expect(objects.getByRole('button', { name: new RegExp(modelName) })).toHaveCount(2)
 
@@ -261,5 +264,179 @@ test('the scene stays fully usable without any browser agent', async ({ page }, 
   await page.getByTestId('scene-save').click()
   await expect(page.getByTestId('scene-version')).toContainText('Version 2')
   await expect(page.getByTestId('scene-proposals')).toContainText('No proposals yet')
+  verifyConsole()
+})
+
+/**
+ * A reference picture nobody else in this run is reading from. The asset store
+ * is content addressed, so identical bytes anywhere else in the suite would be
+ * the same asset; the label makes these bytes this journey's own.
+ */
+function ownReference(label: string) {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+  return Buffer.concat([png, Buffer.from(`scene-blockout-reference-${label}`, 'utf8')])
+}
+
+/** The shim the other agent journeys use. It proves the contract, not native host support. */
+async function withWebMcp(page: Page) {
+  await page.addInitScript(() => {
+    const tools = new Map<string, unknown>()
+    Object.defineProperty(window, '__framewrightTools', { value: tools })
+    Object.defineProperty(document, 'modelContext', { configurable: true, value: {
+      registerTool(tool: { name: string }, options: { signal: AbortSignal }) {
+        tools.set(tool.name, tool)
+        options.signal.addEventListener('abort', () => tools.delete(tool.name), { once: true })
+      },
+    } })
+  })
+}
+
+type Envelope = { ok: boolean; code: string; message: string; data?: Record<string, unknown> }
+
+const callTool = (page: Page, name: string, input: object) => page.evaluate(({ name, input }) => {
+  const tools = (window as unknown as { __framewrightTools: Map<string, { execute: (input: object, context: object) => Promise<unknown> }> }).__framewrightTools
+  return tools.get(name)!.execute(input, {}) as Promise<unknown>
+}, { name, input }) as Promise<Envelope>
+
+test('an agent reads a reference into a plan and the artist builds and corrects the blockout', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  const modelName = `blockout-chair-${label}`
+  const referenceName = `chain-court-${label}`
+
+  await withWebMcp(page)
+  await page.goto('/')
+
+  const upload = await page.request.post('/api/assets/images', {
+    headers: { 'X-Storyboard-Studio': '1' },
+    multipart: { file: { name: `${referenceName}.png`, mimeType: 'image/png', buffer: ownReference(label) } },
+  })
+  expect(upload.ok()).toBeTruthy()
+
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: `${modelName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, `blockout-${label}`),
+  })
+  await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
+  const models = await (await page.request.get('/api/assets')).json()
+  const modelId = models.find((asset: { displayName: string }) => asset.displayName === modelName).id
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+
+  // The artist chooses which reference is being read from. Until then the agent
+  // has nothing to propose against.
+  await expect.poll(async () => (await callTool(page, 'propose_scene_blockout', {
+    observedReferenceHash: 'nothing', title: 'Premature', summary: 'No reference is selected.',
+    items: [{ role: 'Figure', shape: 'Box', size: [1, 1, 1] }], idempotencyKey: `early-${label}`,
+  })).code).toBe('no_reference_selected')
+
+  await page.getByTestId('scene-reference').getByLabel('Scene reference').selectOption({ label: referenceName })
+
+  const context = await callTool(page, 'get_director_context', {})
+  const reference = context.data!.reference as { assetId: string; name: string; contentHash: string }
+  expect(reference.name).toBe(referenceName)
+
+  const proposed = await callTool(page, 'propose_scene_blockout', {
+    observedReferenceHash: reference.contentHash,
+    title: `Chain court ${label}`,
+    summary: 'A seat the library already has, a standing figure, and the floor.',
+    camera: { yaw: 1.1, pitch: 0.4, distance: 8, target: [0, 1, 0], fieldOfView: 35 },
+    assumptions: ['The floor is flat.'],
+    uncertainties: ['The right third of the reference is behind the chain.'],
+    items: [
+      { role: 'Magistrate chair', matchAssetId: modelId, position: [0, 0, -1.5], confidence: 'Certain', note: 'Matches the block in the library.' },
+      { role: 'Standing figure', shape: 'Cylinder', size: [0.5, 1.8, 0.5], position: [1.2, 0.9, 0], confidence: 'Approximate', motionIntent: 'Walks toward the chair.' },
+      { role: 'Court floor', shape: 'Plane', size: [12, 0.1, 12], confidence: 'Occluded', note: 'Far edge is not visible.' },
+    ],
+    idempotencyKey: `blockout-${label}-${Date.now()}`,
+  })
+  expect(proposed.ok).toBeTruthy()
+
+  // Proposing built nothing: the open scene is still empty and still version 1.
+  await expect(page.getByTestId('scene-object-count')).toContainText('0 objects')
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+
+  const staged = page.getByTestId('scene-blockouts')
+  await expect(staged.getByTestId('scene-blockout').first()).toContainText('Standing figure')
+  // What the plan could not see is on screen with the plan, not buried.
+  await expect(staged.getByTestId('scene-blockout-uncertainty').first()).toContainText('behind the chain')
+
+  await staged.getByRole('button', { name: 'Build blockout scene' }).first().click()
+  await expect(page.getByTestId('scene-object-count')).toContainText('3 objects')
+
+  // Three distinct objects: one real model and two different stand-ins.
+  const stage = page.getByTestId('scene-stage')
+  await expect.poll(async () => stage.evaluate(node => node.dataset.blockouts)).toBe('2')
+  const objects = page.getByTestId('scene-objects')
+  await expect(objects.getByRole('button', { name: /Standing figure/ })).toContainText('Cylinder stand-in')
+  await expect(objects.getByRole('button', { name: /Magistrate chair/ })).toContainText(modelName)
+
+  // The artist corrects one placement and the framing, independently.
+  await objects.getByRole('button', { name: /Magistrate chair/ }).click()
+  await page.getByTestId('scene-placement').getByLabel('position X').fill('2.75')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+
+  // Reopen the studio from cold: the correction, the stand-ins, and where this
+  // scene came from all survive.
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await expect(page.getByTestId('scene-object-count')).toContainText('3 objects')
+  await expect(page.getByTestId('scene-built-from')).toContainText(referenceName)
+
+  const scenes = await (await page.request.get('/api/scenes')).json()
+  const built = scenes.find((item: { name: string }) => item.name === `Chain court ${label}`)
+  const scene = await (await page.request.get(`/api/scenes/${built.id}`)).json()
+  const chair = scene.instances.find((instance: { name: string }) => instance.name === 'Magistrate chair')
+  const figure = scene.instances.find((instance: { name: string }) => instance.name === 'Standing figure')
+  expect(chair.position[0]).toBeCloseTo(2.75, 4)
+  expect(chair.assetId).toBe(modelId)
+  // The stand-in beside it kept its own geometry and never moved.
+  expect(figure.placeholder.shape).toBe('Cylinder')
+  expect(figure.position).toEqual([1.2, 0.9, 0])
+  verifyConsole()
+})
+
+test('a blockout plan the artist rejects builds nothing at all', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  const referenceName = `rejected-plan-${label}`
+
+  await withWebMcp(page)
+  await page.goto('/')
+  const upload = await page.request.post('/api/assets/images', {
+    headers: { 'X-Storyboard-Studio': '1' },
+    multipart: { file: { name: `${referenceName}.png`, mimeType: 'image/png', buffer: ownReference(`reject-${label}`) } },
+  })
+  expect(upload.ok()).toBeTruthy()
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  await page.getByTestId('scene-reference').getByLabel('Scene reference').selectOption({ label: referenceName })
+
+  const context = await callTool(page, 'get_director_context', {})
+  const reference = context.data!.reference as { contentHash: string }
+  const proposed = await callTool(page, 'propose_scene_blockout', {
+    observedReferenceHash: reference.contentHash,
+    title: `Unwanted ${label}`, summary: 'A reading of the reference the artist does not want.',
+    items: [{ role: 'Crate', shape: 'Box', size: [1, 1, 1], confidence: 'Approximate' }],
+    idempotencyKey: `rejected-${label}-${Date.now()}`,
+  })
+  expect(proposed.ok).toBeTruthy()
+
+  const scenesBefore = await (await page.request.get('/api/scenes')).json()
+  const staged = page.getByTestId('scene-blockouts')
+  await expect(staged.getByTestId('scene-blockout').first()).toContainText('Crate')
+  await staged.getByRole('button', { name: 'Reject' }).first().click()
+  await expect(staged.getByTestId('scene-blockout').first()).toContainText('Rejected')
+
+  // No scene appeared, and the open one is untouched.
+  const scenesAfter = await (await page.request.get('/api/scenes')).json()
+  expect(scenesAfter.length).toBe(scenesBefore.length)
+  await expect(page.getByTestId('scene-object-count')).toContainText('0 objects')
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
   verifyConsole()
 })

@@ -1850,4 +1850,20 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .scene-note-list small,.scene-proposal-list small{color:var(--quiet);font-size:var(--text-2xs)}
 .scene-note-list button,.scene-proposal-list button{justify-self:start;display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--muted);font-size:var(--text-2xs);font-weight:650;cursor:pointer}
 .scene-proposal-list li>div{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.scene-reference-frame{margin:8px 0 0;display:grid;gap:5px}
+.scene-reference-frame img{width:100%;max-height:160px;object-fit:contain;border:1px solid var(--line);border-radius:7px;background:var(--surface-2)}
+.scene-reference-frame figcaption{color:var(--quiet);font-size:var(--text-2xs);line-height:1.4}
+.scene-blockout-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px}
+.scene-blockout-list>li{display:grid;gap:4px;padding:10px;border:1px solid var(--line);border-radius:7px;background:var(--surface-2)}
+.scene-blockout-list>li[data-state="Applied"]{border-color:var(--accent)}
+.scene-blockout-list>li[data-state="Rejected"]{opacity:.62}
+.scene-blockout-list strong{font-size:var(--text-xs)}
+.scene-blockout-list p{margin:0;font-size:var(--text-xs);line-height:1.4}
+.scene-blockout-list>li>div{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.scene-blockout-list button{display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--muted);font-size:var(--text-2xs);font-weight:650;cursor:pointer}
+.scene-blockout-list .primary.compact{border-color:var(--accent);background:var(--accent);color:var(--ink-inverse)}
+.scene-blockout-items{list-style:none;margin:2px 0 0;padding:0;display:grid;gap:4px}
+.scene-blockout-items li{display:grid;gap:1px;padding-left:9px;border-left:2px solid var(--line)}
+.scene-blockout-items span{font-size:var(--text-2xs);font-weight:650}
+.scene-blockout-items small{color:var(--quiet);font-size:var(--text-2xs);line-height:1.35}
 .scene-proposal-list .primary.compact{border-color:var(--accent);background:var(--accent);color:var(--ink-inverse)}

@@ -21,6 +21,7 @@ public static class StudioDatabaseInitializer
     private const string DirectorProposalApplyMigration = "20260919-director-proposal-apply-v10";
     private const string ModelSceneMigration = "20260919-model-scenes-v11";
     private const string SceneDirectionMigration = "20260919-scene-direction-v12";
+    private const string SceneBlockoutMigration = "20260919-scene-blockout-v13";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -178,6 +179,17 @@ public static class StudioDatabaseInitializer
                 () => EnsureSceneDirectionTablesAsync(db, cancellationToken), cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, SceneBlockoutMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, SceneBlockoutMigration, cancellationToken);
+            }
+
+            await RunMigrationAsync(db, SceneBlockoutMigration,
+                () => EnsureSceneBlockoutSchemaAsync(db, cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -304,6 +316,7 @@ public static class StudioDatabaseInitializer
             DirectorProposalApplyMigration => "proposal-observed-context-token-preserved-constraints-and-single-apply-record",
             ModelSceneMigration => "project-scoped-editable-scenes-with-versioned-camera-lighting-and-model-revision-instances",
             SceneDirectionMigration => "revision-bound-scene-annotations-and-single-instance-human-gated-proposals",
+            SceneBlockoutMigration => "reference-bound-blockout-plans-and-placeholder-scene-objects",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
@@ -1127,6 +1140,120 @@ public static class StudioDatabaseInitializer
             );
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_SceneProposals_ProjectId_IdempotencyKey"
                 ON "SceneProposals" ("ProjectId", "IdempotencyKey");
+            """, cancellationToken);
+    }
+
+    /// <summary>
+    /// V13 adds construction plans read off a reference, and lets a scene object
+    /// be a placeholder rather than a model revision. Existing instances keep
+    /// their model, so a scene saved before this migration opens unchanged.
+    /// </summary>
+    private static async Task EnsureSceneBlockoutSchemaAsync(StudioDbContext db, CancellationToken cancellationToken)
+    {
+        // A placeholder has no model revision, so AssetId has to become nullable.
+        // SQLite cannot relax NOT NULL in place, so the table is rebuilt inside
+        // this migration transaction and every existing placement is copied over
+        // with its identity, model, and transform intact.
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE "SceneInstances_v13" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_SceneInstances" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "SceneId" TEXT NOT NULL,
+                "AssetId" TEXT NULL,
+                "Name" TEXT NOT NULL,
+                "SortOrder" INTEGER NOT NULL,
+                "PositionX" REAL NOT NULL,
+                "PositionY" REAL NOT NULL,
+                "PositionZ" REAL NOT NULL,
+                "RotationX" REAL NOT NULL,
+                "RotationY" REAL NOT NULL,
+                "RotationZ" REAL NOT NULL,
+                "ScaleX" REAL NOT NULL,
+                "ScaleY" REAL NOT NULL,
+                "ScaleZ" REAL NOT NULL,
+                "PlaceholderShape" TEXT NULL,
+                "PlaceholderSizeX" REAL NOT NULL DEFAULT 0,
+                "PlaceholderSizeY" REAL NOT NULL DEFAULT 0,
+                "PlaceholderSizeZ" REAL NOT NULL DEFAULT 0,
+                "Role" TEXT NULL,
+                "SourcePlanId" TEXT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            INSERT INTO "SceneInstances_v13" (
+                "Id", "ProjectId", "SceneId", "AssetId", "Name", "SortOrder",
+                "PositionX", "PositionY", "PositionZ",
+                "RotationX", "RotationY", "RotationZ",
+                "ScaleX", "ScaleY", "ScaleZ", "CreatedAt", "UpdatedAt")
+            SELECT
+                "Id", "ProjectId", "SceneId", "AssetId", "Name", "SortOrder",
+                "PositionX", "PositionY", "PositionZ",
+                "RotationX", "RotationY", "RotationZ",
+                "ScaleX", "ScaleY", "ScaleZ", "CreatedAt", "UpdatedAt"
+            FROM "SceneInstances";
+            DROP TABLE "SceneInstances";
+            ALTER TABLE "SceneInstances_v13" RENAME TO "SceneInstances";
+            CREATE INDEX IF NOT EXISTS "IX_SceneInstances_SceneId_SortOrder" ON "SceneInstances" ("SceneId", "SortOrder");
+            """, cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "SceneBlockoutPlans" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_SceneBlockoutPlans" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "ReferenceAssetId" TEXT NOT NULL,
+                "ReferenceContentHash" TEXT NOT NULL,
+                "Title" TEXT NOT NULL,
+                "Summary" TEXT NOT NULL,
+                "State" TEXT NOT NULL,
+                "CameraYaw" REAL NOT NULL,
+                "CameraPitch" REAL NOT NULL,
+                "CameraDistance" REAL NOT NULL,
+                "CameraTargetX" REAL NOT NULL,
+                "CameraTargetY" REAL NOT NULL,
+                "CameraTargetZ" REAL NOT NULL,
+                "CameraFieldOfView" REAL NOT NULL,
+                "AssumptionsJson" TEXT NOT NULL,
+                "UncertaintiesJson" TEXT NOT NULL,
+                "IdempotencyKey" TEXT NOT NULL,
+                "SceneId" TEXT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "CreatedAtUnixMs" INTEGER NOT NULL,
+                "UpdatedAt" TEXT NOT NULL,
+                "DecidedAt" TEXT NULL,
+                "AppliedAt" TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_SceneBlockoutPlans_ProjectId_IdempotencyKey"
+                ON "SceneBlockoutPlans" ("ProjectId", "IdempotencyKey");
+            CREATE INDEX IF NOT EXISTS "IX_SceneBlockoutPlans_ReferenceAssetId_CreatedAtUnixMs"
+                ON "SceneBlockoutPlans" ("ReferenceAssetId", "CreatedAtUnixMs");
+
+            CREATE TABLE IF NOT EXISTS "SceneBlockoutItems" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_SceneBlockoutItems" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "PlanId" TEXT NOT NULL,
+                "SortOrder" INTEGER NOT NULL,
+                "Role" TEXT NOT NULL,
+                "MatchAssetId" TEXT NULL,
+                "PlaceholderShape" TEXT NULL,
+                "PlaceholderSizeX" REAL NOT NULL,
+                "PlaceholderSizeY" REAL NOT NULL,
+                "PlaceholderSizeZ" REAL NOT NULL,
+                "PositionX" REAL NOT NULL,
+                "PositionY" REAL NOT NULL,
+                "PositionZ" REAL NOT NULL,
+                "RotationX" REAL NOT NULL,
+                "RotationY" REAL NOT NULL,
+                "RotationZ" REAL NOT NULL,
+                "ScaleX" REAL NOT NULL,
+                "ScaleY" REAL NOT NULL,
+                "ScaleZ" REAL NOT NULL,
+                "MotionIntent" TEXT NOT NULL,
+                "Confidence" TEXT NOT NULL,
+                "Note" TEXT NOT NULL,
+                "InstanceId" TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_SceneBlockoutItems_PlanId_SortOrder"
+                ON "SceneBlockoutItems" ("PlanId", "SortOrder");
             """, cancellationToken);
     }
 

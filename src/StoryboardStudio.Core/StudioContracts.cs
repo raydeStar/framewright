@@ -104,15 +104,24 @@ public sealed record SceneCameraSummary(double Yaw, double Pitch, double Distanc
 public sealed record SceneEnvironmentSummary(double KeyIntensity, double KeyYaw, double KeyPitch, double AmbientIntensity);
 
 /// <summary>
-/// One placed object. It is pinned to an exact model revision, and it reports
-/// whether that revision can still be loaded, so a scene opens honestly rather
-/// than silently dropping something it cannot draw.
+/// Simple geometry standing in for an object that has no library model yet. A
+/// placeholder is a real object in the scene with its own identity and
+/// transform, so replacing it later does not disturb anything around it.
+/// </summary>
+public sealed record ScenePlaceholderSummary(string Shape, double[] Size);
+
+/// <summary>
+/// One placed object. It is either pinned to an exact model revision or drawn
+/// as a placeholder, never both, and it reports whether that revision can still
+/// be loaded, so a scene opens honestly rather than silently dropping something
+/// it cannot draw.
 /// </summary>
 public sealed record SceneInstanceSummary(
-    Guid Id, Guid AssetId, string Name,
+    Guid Id, Guid? AssetId, string Name,
     double[] Position, double[] Rotation, double[] Scale,
     string AssetName, int RevisionNumber, string? ContentUrl,
-    bool Available, bool Archived, double[] Dimensions);
+    bool Available, bool Archived, double[] Dimensions,
+    ScenePlaceholderSummary? Placeholder = null, string? Role = null, Guid? PlanId = null);
 
 public sealed record SceneSummary(
     Guid Id, string Name, int Version,
@@ -123,12 +132,52 @@ public sealed record SceneListItem(Guid Id, string Name, int Version, int Instan
 
 public sealed record CreateSceneRequest(string Name);
 
-public sealed record SaveSceneInstanceRequest(Guid Id, Guid AssetId, string Name, double[] Position, double[] Rotation, double[] Scale);
+public sealed record SaveSceneInstanceRequest(
+    Guid Id, Guid? AssetId, string Name, double[] Position, double[] Rotation, double[] Scale,
+    ScenePlaceholderSummary? Placeholder = null);
 
 public sealed record SaveSceneRequest(
     int ExpectedVersion, string Name,
     SceneCameraSummary Camera, SceneEnvironmentSummary Environment,
     SaveSceneInstanceRequest[] Instances);
+
+/// <summary>
+/// One object in a construction plan: what it is for, what would stand in for
+/// it, roughly where it goes, and how sure the plan is about it. Confidence is
+/// carried per object because a reference shows some things plainly and hides
+/// others behind what is in front of them.
+/// </summary>
+public sealed record SceneBlockoutItemSummary(
+    Guid Id, string Role, Guid? MatchAssetId, string? MatchAssetName,
+    ScenePlaceholderSummary? Placeholder,
+    double[] Position, double[] Rotation, double[] Scale,
+    string MotionIntent, string Confidence, string Note, Guid? InstanceId);
+
+/// <summary>
+/// A reviewable construction plan read off one reference image. It builds
+/// nothing by itself: until the artist approves it there is no scene, and
+/// approving it generates no assets, only placeholders and library matches the
+/// project already holds.
+/// </summary>
+public sealed record SceneBlockoutPlanSummary(
+    Guid Id, Guid ReferenceAssetId, string ReferenceName, string ReferenceContentHash,
+    string? ReferenceUrl, bool ReferenceChanged,
+    string Title, string Summary, string State,
+    SceneCameraSummary Camera, string[] Assumptions, string[] Uncertainties,
+    SceneBlockoutItemSummary[] Items, Guid? SceneId, string? SceneName,
+    DateTimeOffset CreatedAt, DateTimeOffset? DecidedAt, DateTimeOffset? AppliedAt);
+
+public sealed record ProposeSceneBlockoutItemRequest(
+    string Role, Guid? MatchAssetId, string? Shape, double[]? Size,
+    double[]? Position, double[]? Rotation, double[]? Scale,
+    string? MotionIntent, string? Confidence, string? Note);
+
+public sealed record ProposeSceneBlockoutRequest(
+    Guid ReferenceAssetId, string ObservedReferenceHash, string Title, string Summary,
+    SceneCameraSummary? Camera, string[]? Assumptions, string[]? Uncertainties,
+    ProposeSceneBlockoutItemRequest[] Items, string IdempotencyKey);
+
+public sealed record ApplySceneBlockoutRequest(string? SceneName);
 
 /// <summary>One material as the model inspector reports it.</summary>
 public sealed record ModelMaterialSummary(string Name, bool Textured, string AlphaMode, bool DoubleSided);

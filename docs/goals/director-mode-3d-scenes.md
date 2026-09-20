@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M11. M00, M01, M04, M05 and M06 are VERIFIED; M02, M03 and M10 are CONTRACT_VERIFIED.  
+**Active milestone:** M13. M00, M01, M04, M05 and M06 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -433,10 +433,10 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** M11 (reference-to-scene blockout).
-- **Last verified milestone:** M06. M02, M03 and M10 are CONTRACT_VERIFIED pending an actual WebMCP host.
+- **Active milestone:** M13 (inspect a known rigged character).
+- **Last verified milestone:** M06. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
 - **External acceptance blockers:** (1) No Reference Asset Compiler checkout - blocks M09/M14. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
-- **Next action:** Implement M11 on `feature/director-mode`: turn a reference or sketch into an editable blockout proposal. M07 and M08 stay deferred until the user's generation pipeline is connected; M09 and M14 remain blocked by the absent compiler, and M12/M16/M17 depend on those, so the remaining open runway is M11, M13 and M15.
+- **Next action:** Implement M13 on `feature/director-mode`: inspect a known rigged character honestly, refusing what this build cannot support. M07 and M08 stay deferred until the user's generation pipeline is connected; M09 and M14 remain blocked by the absent compiler, and M12/M16/M17 depend on those, so the remaining open runway is M13 and M15.
 
 ### Milestone status
 
@@ -453,9 +453,9 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M08 | DEFERRED | Depends on M07; revisit with the user's pipeline |
 | M09 | NOT_STARTED | None |
 | M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
-| M11 | IN_PROGRESS | Active; depends on M10 |
+| M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
 | M12 | NOT_STARTED | None |
-| M13 | NOT_STARTED | None |
+| M13 | IN_PROGRESS | Active; depends on M04 |
 | M14 | NOT_STARTED | None |
 | M15 | NOT_STARTED | None |
 | M16 | NOT_STARTED | None |
@@ -1037,6 +1037,97 @@ Two defects the browser journeys found, both fixed: staging a scene proposal ope
   objects.
 Checkpoint: see the M10 commits on feature/director-mode.
 Next dependency-ready milestone: M11.
+```
+
+### M11 acceptance record
+
+```text
+Milestone / status / date: M11 / CONTRACT_VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M11 commits
+Outcome and supported constraints: A reference picture now becomes a construction plan the artist
+  can argue with before anything is built. The plan names each object the reference seems to call
+  for, gives it a role, matches the ones the library already holds, describes simple stand-in
+  geometry for the rest, states a per-object confidence and motion intent, proposes a camera, and
+  lists what it assumed and what it could not see. It is bound to the exact reference bytes it was
+  read from, so a plan built on a picture the artist has since replaced is refused rather than
+  applied to something nobody looked at. Plans are bounded at twelve objects, and each object is
+  either a library match or a placeholder, never both and never neither. Approving is the artist's
+  move and the only thing that builds: it creates a new scene, so no existing work can be
+  overwritten, out of placeholders and models the project already holds. Approving twice hands back
+  the same scene. From there the blockout is an ordinary scene: one object's placement and the
+  camera framing are corrected independently through the ordinary validated save, and after
+  reopening every object still names the role and plan it came from, with the reference id and the
+  assumptions still readable. No provider job is created by proposing or by approving.
+  Status is CONTRACT_VERIFIED for two reasons, both stated ceilings: no actual WebMCP host exists
+  on this workstation, as for M02, M03 and M10; and this milestone additionally calls for recorded
+  human composition acceptance, which cannot be manufactured.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/SceneBlockoutService.cs: plans, their bounded items, the
+    reference binding, rejection, and the single approval that builds.
+  - src/StoryboardStudio.Api/Persistence: SceneBlockoutPlans and SceneBlockoutItems, and a
+    SceneInstances rebuild so an object can be a placeholder rather than a model revision, behind
+    migration 20260919-scene-blockout-v13.
+  - src/storyboard-studio-web: a reference picker and a plan review panel in the scene inspector,
+    stand-in geometry drawn as itself in the viewport, and a tenth browser tool
+    (propose_scene_blockout). The scene director context now names the selected reference and its
+    content hash.
+  - Reused unchanged: the M06 scene save as the only edit path, the M10 notes and proposals, the
+    existing WebMCP envelope, registration lifecycle and activity log, and project query filters.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check (exit code checked directly)
+  - npx playwright test scenes.spec.ts (desktop and tablet)
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 184 backend tests passed, 0 failed (179 before this milestone plus five blockout tests).
+     Frontend typecheck, lint, and format checks clean.
+  A: 114 browser journeys passed, 0 failed, 6 intentionally skipped (120 discovered) against the
+     real service and real persistence in a disposable temp data root. The new journeys have an
+     agent read the selected reference into a three-object plan, confirm the open scene is still
+     empty and still version 1, build the blockout, confirm two of the three objects are stand-ins
+     and the third is the library model, correct one placement, save, reopen the studio cold, and
+     find the correction, the stand-in geometry, and the plan the scene came from still there; and
+     confirm a rejected plan builds nothing at all.
+  H: NOT RUN, and this is one of the milestone's two ceilings, inherited from M02, M03 and M10. No
+     WebMCP-capable browser build or agent host is installed on this workstation.
+  L: NOT RUN. No provider is involved, which is asserted rather than assumed: proposing and
+     approving leave the job and manifest tables empty.
+  V: NOT RUN, and this is the milestone's second ceiling. M11 asks for recorded human composition
+     acceptance; no human has accepted a composition, and that cannot be simulated.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: A plan whose observed reference hash does not match the stored
+  bytes is refused as stale_reference. An empty plan, a thirteen-object plan, an object with both a
+  library match and a stand-in, an object with neither, an unknown shape, a collapsed size, a match
+  that is not a model in this project, and an unstated confidence are each refused, and none of
+  them leave a plan or a scene behind. Replaying an idempotency key returns the same plan rather
+  than a second one. Approving twice returns the one scene already built; a rejected plan cannot be
+  approved, and an approved plan cannot be withdrawn. Another project can neither read nor approve
+  this project's plan. The blockout and its corrections survive closing and reopening the
+  application on the same data root.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the M01 director-mode journeys, the M02/M03 shot agent journeys, and the M06 and M10
+  scene journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually). Actual-host discovery (no such host available). Human composition
+  acceptance (requires the artist).
+Human approvals actually recorded, where required: None. The approvals in the journeys are
+  simulated artist clicks in an isolated test workspace and are recorded as such, not as
+  composition acceptance.
+Known defects and dependency impact: None found. Placeholders are the four simple shapes the
+  viewport can draw without loading anything; exact reconstruction of hidden geometry and automatic
+  physical inference stay out of scope, as the milestone permits.
+Permitted deferrals: Exact reconstruction of hidden geometry, automatic physical inference, and
+  unlimited object batches, all explicitly deferred by M11.
+Bug-detection check: With the save dropping each object's stand-in geometry, the blockout journey
+  failed as intended and passed again once that was reverted.
+Three defects the browser journeys found, all fixed: the shell assembled the agent's context packet
+  while it rendered, not when a tool asked, so an agent could be told about the selection before
+  last, which M10 had got away with by luck; opening any ordinary scene asked the service for a
+  construction plan it had never had, logging a 404 for a perfectly normal scene; and a reference
+  fixture shared its bytes with another journey's upload, which the content-addressed store
+  correctly treated as the same asset.
+Checkpoint: see the M11 commits on feature/director-mode.
+Next dependency-ready milestone: M13.
 ```
 
 ### Acceptance record template

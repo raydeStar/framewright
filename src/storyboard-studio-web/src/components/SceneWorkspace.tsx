@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { Box, Check, Copy, LoaderCircle, MessageCirclePlus, Plus, Save, Trash2, X } from 'lucide-react'
+import { Box, Check, Copy, Image, LoaderCircle, MessageCirclePlus, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
-import type { AssetSummary, SceneAnnotationSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneSummary } from '../types'
+import type { AssetSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneSummary } from '../types'
 
 // three.js loads only when a scene is actually opened.
 const SceneViewport = lazy(() => import('./SceneViewport'))
@@ -17,12 +17,14 @@ const axes = ['X', 'Y', 'Z'] as const
  * is refused by the service and surfaced here, so newer work is never silently
  * overwritten.
  */
-export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView }: {
+export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal, onDirectorView }: {
   onToast: (message: string) => void
   /** Bumped when a browser agent stages a scene proposal. */
   proposalSignal?: number
+  /** Bumped when a browser agent stages a blockout plan. */
+  blockoutSignal?: number
   /** Publishes what is open so browser tools describe this exact selection. */
-  onDirectorView?: (view: { sceneId: string; instanceId?: string } | undefined) => void
+  onDirectorView?: (view: { sceneId: string; instanceId?: string; referenceAssetId?: string } | undefined) => void
 }) {
   const [list, setList] = useState<SceneListItem[]>([])
   const [scene, setScene] = useState<SceneSummary>()
@@ -37,12 +39,31 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
   const [noteMode, setNoteMode] = useState(false)
   const [pendingNote, setPendingNote] = useState<{ instanceId: string; anchor: number[] }>()
   const [noteText, setNoteText] = useState('')
+  const [references, setReferences] = useState<AssetSummary[]>([])
+  const [referenceId, setReferenceId] = useState<string>()
+  const [plans, setPlans] = useState<SceneBlockoutPlanSummary[]>([])
+  /** The plan this scene was built from, when it was built from one. */
+  const [builtFrom, setBuiltFrom] = useState<SceneBlockoutPlanSummary>()
 
   const loadDirection = useCallback(async (sceneId: string) => {
     try {
       const [notes, staged] = await Promise.all([studioApi.sceneAnnotations(sceneId), studioApi.sceneProposals(sceneId)])
       setAnnotations(notes); setProposals(staged)
     } catch { setAnnotations([]); setProposals([]) }
+  }, [])
+
+  // Plans are read per reference, because a plan only means anything against
+  // the picture it was read from.
+  const loadPlans = useCallback(async (assetId: string | undefined) => {
+    if (!assetId) { setPlans([]); return }
+    try { setPlans(await studioApi.sceneBlockouts(assetId)) } catch { setPlans([]) }
+  }, [])
+
+  // Only a scene whose objects came from a plan has one to read, so an ordinary
+  // scene never asks the service for something that is not there.
+  const loadProvenance = useCallback(async (opened: SceneSummary) => {
+    if (!opened.instances.some(instance => instance.planId)) { setBuiltFrom(undefined); return }
+    try { setBuiltFrom(await studioApi.sceneBlockoutForScene(opened.id)) } catch { setBuiltFrom(undefined) }
   }, [])
 
   const refreshList = useCallback(async () => {
@@ -57,16 +78,17 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
         if (!live) return
         setList(scenes)
         setModels(assets.filter(asset => asset.kind === 'Model' && !asset.isArchived))
+        setReferences(assets.filter(asset => asset.kind === 'Image' && !asset.isArchived))
         if (scenes.length > 0) {
           const opened = await studioApi.scene(scenes[0].id)
-          if (live) { setScene(opened); setDirty(false); await loadDirection(opened.id) }
+          if (live) { setScene(opened); setDirty(false); await loadDirection(opened.id); await loadProvenance(opened) }
         }
       } catch (reason) {
         if (live) setError(reason instanceof Error ? reason.message : 'The scene list could not be opened.')
       } finally { if (live) setLoading(false) }
     })()
     return () => { live = false }
-  }, [loadDirection])
+  }, [loadDirection, loadProvenance])
 
   const open = async (sceneId: string) => {
     setError(undefined)
@@ -74,6 +96,7 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
       const opened = await studioApi.scene(sceneId)
       setScene(opened); setSelectedId(undefined); setDirty(false)
       await loadDirection(sceneId)
+      await loadProvenance(opened)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'That scene could not be opened.') }
   }
 
@@ -82,9 +105,11 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
     try {
       const created = await studioApi.createScene(`Scene ${list.length + 1}`)
       setScene(created); setSelectedId(undefined); setDirty(false)
-      // A new scene starts with no notes and no proposals; keeping the previous
-      // scene's would show one scene's direction against another's objects.
+      // A new scene starts with no notes, proposals, or provenance; keeping the
+      // previous scene's would show one scene's direction against another's
+      // objects.
       await loadDirection(created.id)
+      setBuiltFrom(undefined)
       await refreshList()
       onToast(`${created.name} created.`)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'That scene could not be created.') }
@@ -135,6 +160,9 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
         instances: scene.instances.map(instance => ({
           id: instance.id, assetId: instance.assetId, name: instance.name,
           position: instance.position, rotation: instance.rotation, scale: instance.scale,
+          // A stand-in is saved as itself; dropping this would leave an object
+          // with a transform and nothing under it.
+          placeholder: instance.placeholder ?? null,
         })),
       })
       setScene(saved); setDirty(false)
@@ -147,9 +175,16 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
 
   // Tell the shell what is open, so an agent reading context sees this object.
   useEffect(() => {
-    onDirectorView?.(scene ? { sceneId: scene.id, instanceId: selectedId } : undefined)
+    onDirectorView?.(scene ? { sceneId: scene.id, instanceId: selectedId, referenceAssetId: referenceId } : undefined)
     return () => onDirectorView?.(undefined)
-  }, [onDirectorView, scene, selectedId])
+  }, [onDirectorView, scene, selectedId, referenceId])
+
+  useEffect(() => { void loadPlans(referenceId) }, [referenceId, loadPlans])
+
+  useEffect(() => {
+    if (!blockoutSignal) return
+    void loadPlans(referenceId)
+  }, [blockoutSignal, referenceId, loadPlans])
 
   useEffect(() => {
     if (!scene || !proposalSignal) return
@@ -157,6 +192,7 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
   }, [proposalSignal, scene, loadDirection])
 
   const selected = useMemo(() => scene?.instances.find(item => item.id === selectedId), [scene, selectedId])
+  const reference = useMemo(() => references.find(asset => asset.id === referenceId), [references, referenceId])
   const selectedNotes = useMemo(
     () => annotations.filter(note => note.instanceId === selectedId && note.state === 'Open'),
     [annotations, selectedId])
@@ -213,6 +249,30 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
       await loadDirection(scene.id)
       onToast(`${applied.instanceName} updated in the working scene. Save to keep it.`)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'That proposal could not be applied.') }
+    finally { setBusy(false) }
+  }
+
+  // Approving a plan is the artist's move and the only thing that builds. It
+  // creates a new scene out of placeholders and library models, so nothing that
+  // already exists can be overwritten, and no generation is started.
+  const buildBlockout = async (plan: SceneBlockoutPlanSummary) => {
+    setBusy(true); setError(undefined)
+    try {
+      const built = await studioApi.applySceneBlockout(plan.id, plan.title)
+      setScene(built); setSelectedId(undefined); setDirty(false)
+      await loadDirection(built.id)
+      await loadProvenance(built)
+      await loadPlans(referenceId)
+      await refreshList()
+      onToast(`${built.name} built from the plan. Nothing was generated.`)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'That plan could not be built.') }
+    finally { setBusy(false) }
+  }
+
+  const rejectBlockout = async (plan: SceneBlockoutPlanSummary) => {
+    setBusy(true)
+    try { await studioApi.rejectSceneBlockout(plan.id); await loadPlans(referenceId) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'That plan could not be rejected.') }
     finally { setBusy(false) }
   }
 
@@ -275,7 +335,9 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
                     className={instance.id === selectedId ? 'active' : ''}
                     onClick={() => setSelectedId(instance.id)}>
                     <strong>{instance.name}</strong>
-                    <small>{instance.assetName} · v{instance.revisionNumber}{instance.available ? '' : ' · unavailable'}</small>
+                    <small>{instance.placeholder
+                      ? `${instance.placeholder.shape} stand-in`
+                      : `${instance.assetName} · v${instance.revisionNumber}${instance.available ? '' : ' · unavailable'}`}</small>
                   </button>
                 </li>)}
               </ul>
@@ -293,7 +355,9 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
               <h2>Placement</h2>
               <label>Name<input aria-label="Object name" value={selected.name} maxLength={120}
                 onChange={event => editInstance(selected.id, item => ({ ...item, name: event.target.value }))} /></label>
-              <p className="model-note">{selected.assetName} · revision {selected.revisionNumber}{selected.available ? '' : ' · model unavailable, shown as a placeholder'}</p>
+              <p className="model-note">{selected.placeholder
+                ? `${selected.placeholder.shape} stand-in · ${selected.placeholder.size.map(value => value.toFixed(2)).join(' × ')} m${selected.role ? ` · planned as ${selected.role}` : ''}`
+                : `${selected.assetName} · revision ${selected.revisionNumber}${selected.available ? '' : ' · model unavailable, shown as a placeholder'}`}</p>
 
               {(['position', 'rotation', 'scale'] as const).map(field => <div className="scene-vector" key={field}>
                 <span>{field === 'rotation' ? 'Rotation (radians)' : field === 'scale' ? 'Scale' : 'Position (metres)'}</span>
@@ -321,6 +385,59 @@ export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView
                 <button type="button" className="danger-text" onClick={() => remove(selected.id)}><Trash2 size={15} />Remove from scene</button>
               </div>
               <p className="model-note">Removing an object takes it out of this scene only. The model stays in the library.</p>
+            </section>}
+
+            <section data-testid="scene-reference">
+              <h2>Reference</h2>
+              <label>Read a blockout from<select aria-label="Scene reference" value={referenceId ?? ''}
+                disabled={references.length === 0}
+                onChange={event => setReferenceId(event.target.value || undefined)}>
+                <option value="">{references.length === 0 ? 'No reference images yet' : 'No reference selected'}</option>
+                {references.map(asset => <option key={asset.id} value={asset.id}>{asset.displayName}</option>)}
+              </select></label>
+              {reference && <figure className="scene-reference-frame">
+                <img src={reference.contentUrl} alt={`Reference ${reference.displayName}`} />
+                <figcaption>An agent can read this reference and propose a plan. Nothing is built until you approve it.</figcaption>
+              </figure>}
+              {!reference && <p className="model-note"><Image size={14} /> Choose a reference to read a blockout from.</p>}
+              {builtFrom && <p className="model-note" data-testid="scene-built-from">
+                Built from “{builtFrom.title}”, read from {builtFrom.referenceName}
+                {builtFrom.referenceChanged ? ' · that reference has changed since' : ''}.
+              </p>}
+            </section>
+
+            {reference && <section data-testid="scene-blockouts">
+              <h2>Blockout plans <span>{plans.filter(plan => plan.state === 'Pending').length}</span></h2>
+              {plans.length === 0 && <p className="model-note">No plans for this reference yet.</p>}
+              <ul className="scene-blockout-list">
+                {plans.slice(0, 6).map(plan => <li key={plan.id} data-testid="scene-blockout" data-state={plan.state}>
+                  <strong>{plan.title}</strong>
+                  <p>{plan.summary}</p>
+                  <ol className="scene-blockout-items">
+                    {plan.items.map(item => <li key={item.id}>
+                      <span>{item.role}</span>
+                      <small>
+                        {item.matchAssetName
+                          ? `matches ${item.matchAssetName}`
+                          : `${item.placeholder?.shape ?? 'Box'} stand-in ${(item.placeholder?.size ?? []).map(value => value.toFixed(2)).join(' × ')} m`}
+                        {' · '}{item.confidence.toLowerCase()}
+                        {item.motionIntent ? ` · ${item.motionIntent}` : ''}
+                      </small>
+                    </li>)}
+                  </ol>
+                  {plan.assumptions.length > 0 && <p className="model-note">Assumes: {plan.assumptions.join(' ')}</p>}
+                  {plan.uncertainties.length > 0 && <p className="model-note" data-testid="scene-blockout-uncertainty">
+                    Could not see: {plan.uncertainties.join(' ')}
+                  </p>}
+                  {plan.referenceChanged && <p className="model-note">This reference changed after the plan was read.</p>}
+                  {plan.state === 'Pending'
+                    ? <div>
+                        <button type="button" disabled={busy} onClick={() => void rejectBlockout(plan)}>Reject</button>
+                        <button type="button" className="primary compact" disabled={busy} onClick={() => void buildBlockout(plan)}>Build blockout scene</button>
+                      </div>
+                    : <small>{plan.state === 'Applied' ? `Built as ${plan.sceneName ?? 'a scene'}` : 'Rejected'}</small>}
+                </li>)}
+              </ul>
             </section>}
 
             <section data-testid="scene-notes">

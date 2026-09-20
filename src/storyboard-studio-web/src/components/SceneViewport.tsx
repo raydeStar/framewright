@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { AmbientLight, Box3, BoxGeometry, Color, DirectionalLight, GridHelper, Mesh, MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type Object3D } from 'three'
+import { AmbientLight, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, Mesh, MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type BufferGeometry, type Object3D } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import type { SceneCameraSummary, SceneEnvironmentSummary, SceneInstanceSummary } from '../types'
+import type { SceneCameraSummary, SceneEnvironmentSummary, SceneInstanceSummary, ScenePlaceholderSummary } from '../types'
 
 /**
  * Draws a scene's instances and lets the artist orbit and click to select.
@@ -14,6 +14,11 @@ import type { SceneCameraSummary, SceneEnvironmentSummary, SceneInstanceSummary 
  * An instance whose model is unavailable is drawn as a labelled placeholder box
  * at its real transform rather than skipped, so a scene never silently loses an
  * object it cannot load.
+ *
+ * A blockout placeholder is different: it is not a failure but the object
+ * itself, simple geometry at a stated size. It is drawn solid and tinted by
+ * name so two stand-ins are never mistaken for one another, and never with the
+ * wireframe that means "this model would not load".
  */
 export interface SceneViewportProps {
   instances: SceneInstanceSummary[]
@@ -28,6 +33,9 @@ export interface SceneViewportProps {
 }
 
 type ViewportState = 'loading' | 'ready' | 'unsupported'
+
+/** Identifies one stand-in's geometry, so a resized placeholder is rebuilt. */
+const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}`
 
 export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, onSelect, onCameraChange, onPlaceNote }: SceneViewportProps) {
   const host = useRef<HTMLDivElement>(null)
@@ -106,6 +114,31 @@ export default function SceneViewport({ instances, camera, environment, selected
       return mesh
     }
 
+    // Distinct stand-ins, so a blockout reads as separate objects rather than a
+    // pile of identical boxes. The hue comes from the object's own name.
+    const hue = (name: string) => {
+      let total = 0
+      for (let index = 0; index < name.length; index += 1) total = (total * 31 + name.charCodeAt(index)) % 360
+      return total
+    }
+
+    const blockout = (shape: ScenePlaceholderSummary, name: string) => {
+      const [width, height, depth] = shape.size
+      let geometry: BufferGeometry
+      if (shape.shape === 'Cylinder') geometry = new CylinderGeometry(width / 2, width / 2, height, 24)
+      else if (shape.shape === 'Sphere') geometry = new SphereGeometry(Math.max(width, height, depth) / 2, 24, 16)
+      // A ground plane is drawn as a thin slab, so it can still be picked
+      // and lit from both sides like every other object.
+      else if (shape.shape === 'Plane') geometry = new BoxGeometry(width, Math.max(height, 0.01), depth)
+      else geometry = new BoxGeometry(width, height, depth)
+      const mesh = new Mesh(geometry, new MeshStandardMaterial({
+        color: new Color(`hsl(${hue(name)}, 42%, 52%)`), roughness: 0.85, transparent: true, opacity: 0.86,
+      }))
+      mesh.userData.placeholder = true
+      mesh.userData.blockout = shapeKey(shape)
+      return mesh
+    }
+
     const applyTransform = (object: Object3D, instance: SceneInstanceSummary) => {
       object.position.set(instance.position[0], instance.position[1], instance.position[2])
       object.rotation.set(instance.rotation[0], instance.rotation[1], instance.rotation[2])
@@ -132,11 +165,25 @@ export default function SceneViewport({ instances, camera, environment, selected
         const existing = placed.get(instance.id)
         const wantsPlaceholder = !instance.available
         const isPlaceholder = existing?.userData.placeholder === true
-        if (existing && (wantsPlaceholder === isPlaceholder) && existing.userData.assetId === instance.assetId) {
+        const wantedBlockout = instance.placeholder ? shapeKey(instance.placeholder) : undefined
+        if (existing && (wantsPlaceholder === isPlaceholder)
+          && existing.userData.assetId === instance.assetId
+          && existing.userData.blockout === wantedBlockout) {
           applyTransform(existing, instance)
           continue
         }
         if (existing) { scene.remove(existing); if (isPlaceholder) release(existing); placed.delete(instance.id) }
+
+        // Stand-in geometry the plan asked for, drawn as itself.
+        if (instance.placeholder) {
+          const marker = blockout(instance.placeholder, instance.name)
+          marker.userData.instanceId = instance.id
+          marker.userData.assetId = instance.assetId
+          applyTransform(marker, instance)
+          scene.add(marker)
+          placed.set(instance.id, marker)
+          continue
+        }
 
         if (wantsPlaceholder || !instance.contentUrl) {
           const marker = placeholder()
@@ -148,7 +195,7 @@ export default function SceneViewport({ instances, camera, environment, selected
           continue
         }
 
-        const template = loaded.get(instance.assetId)
+        const template = loaded.get(instance.assetId ?? '')
         if (template) {
           const copy = template.clone(true)
           copy.userData.instanceId = instance.id
@@ -162,7 +209,7 @@ export default function SceneViewport({ instances, camera, environment, selected
         // One load per model revision; every instance of it is a clone.
         new GLTFLoader().load(instance.contentUrl, gltf => {
           if (disposed) { release(gltf.scene); return }
-          loaded.set(instance.assetId, gltf.scene)
+          loaded.set(instance.assetId ?? '', gltf.scene)
           sync(next, selected)
         }, undefined, () => {
           if (disposed) return
@@ -187,6 +234,7 @@ export default function SceneViewport({ instances, camera, environment, selected
         })
       }
       container.dataset.objects = String(placed.size)
+      container.dataset.blockouts = String([...placed.values()].filter(object => object.userData.blockout).length)
       setState('ready')
       draw()
     }

@@ -44,6 +44,8 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
     public DbSet<SceneInstanceRecord> SceneInstances => Set<SceneInstanceRecord>();
     public DbSet<SceneAnnotationRecord> SceneAnnotations => Set<SceneAnnotationRecord>();
     public DbSet<SceneProposalRecord> SceneProposals => Set<SceneProposalRecord>();
+    public DbSet<SceneBlockoutPlanRecord> SceneBlockoutPlans => Set<SceneBlockoutPlanRecord>();
+    public DbSet<SceneBlockoutItemRecord> SceneBlockoutItems => Set<SceneBlockoutItemRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -124,6 +126,10 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<SceneAnnotationRecord>().HasIndex(x => new { x.SceneId, x.InstanceId, x.State });
         modelBuilder.Entity<SceneProposalRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<SceneProposalRecord>().HasIndex(x => new { x.ProjectId, x.IdempotencyKey }).IsUnique();
+        modelBuilder.Entity<SceneBlockoutPlanRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SceneBlockoutPlanRecord>().HasIndex(x => new { x.ProjectId, x.IdempotencyKey }).IsUnique();
+        modelBuilder.Entity<SceneBlockoutItemRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SceneBlockoutItemRecord>().HasIndex(x => new { x.PlanId, x.SortOrder });
 
         ApplyProjectScope(modelBuilder);
     }
@@ -174,6 +180,8 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<SceneInstanceRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<SceneAnnotationRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<SceneProposalRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
+        modelBuilder.Entity<SceneBlockoutPlanRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
+        modelBuilder.Entity<SceneBlockoutItemRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
     }
 
     /// <summary>
@@ -685,8 +693,17 @@ public sealed class SceneInstanceRecord
     public Guid Id { get; set; }
     public Guid ProjectId { get; set; }
     public Guid SceneId { get; set; }
-    /// <summary>The exact model revision this instance is pinned to.</summary>
-    public Guid AssetId { get; set; }
+    /// <summary>The exact model revision this instance is pinned to, or null while it is a placeholder.</summary>
+    public Guid? AssetId { get; set; }
+    /// <summary>Simple geometry drawn in place of a model. Null once a model is pinned.</summary>
+    public string? PlaceholderShape { get; set; }
+    public double PlaceholderSizeX { get; set; }
+    public double PlaceholderSizeY { get; set; }
+    public double PlaceholderSizeZ { get; set; }
+    /// <summary>What this object is for, when a blockout plan put it here.</summary>
+    public string? Role { get; set; }
+    /// <summary>The construction plan this object came from, so its reasoning stays inspectable.</summary>
+    public Guid? SourcePlanId { get; set; }
     public required string Name { get; set; }
     public int SortOrder { get; set; }
     public double PositionX { get; set; }
@@ -761,6 +778,76 @@ public sealed class SceneProposalRecord
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
     public DateTimeOffset? AppliedAt { get; set; }
+}
+
+/// <summary>
+/// A construction plan read off one reference image: what objects the scene
+/// needs, which of them the library already has, what stands in for the rest,
+/// and what the plan is unsure about. It creates nothing until the artist
+/// approves it, and approving it never dispatches a provider.
+/// </summary>
+public sealed class SceneBlockoutPlanRecord
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid ReferenceAssetId { get; set; }
+    /// <summary>The exact reference bytes the plan was read from.</summary>
+    public required string ReferenceContentHash { get; set; }
+    public required string Title { get; set; }
+    public required string Summary { get; set; }
+    public required string State { get; set; }
+    public double CameraYaw { get; set; }
+    public double CameraPitch { get; set; }
+    public double CameraDistance { get; set; }
+    public double CameraTargetX { get; set; }
+    public double CameraTargetY { get; set; }
+    public double CameraTargetZ { get; set; }
+    public double CameraFieldOfView { get; set; }
+    /// <summary>What the plan took for granted, kept verbatim so it can be argued with.</summary>
+    public required string AssumptionsJson { get; set; }
+    /// <summary>What the reference did not show: occlusions, guesses, and unreadable areas.</summary>
+    public required string UncertaintiesJson { get; set; }
+    public required string IdempotencyKey { get; set; }
+    /// <summary>The scene this plan built, once the artist approved it.</summary>
+    public Guid? SceneId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public long CreatedAtUnixMs { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
+    public DateTimeOffset? AppliedAt { get; set; }
+}
+
+/// <summary>
+/// One object in a construction plan. It either matches a model the project
+/// already holds or describes simple geometry to stand in for one, never both,
+/// and it records which scene object it became.
+/// </summary>
+public sealed class SceneBlockoutItemRecord
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid PlanId { get; set; }
+    public int SortOrder { get; set; }
+    public required string Role { get; set; }
+    public Guid? MatchAssetId { get; set; }
+    public string? PlaceholderShape { get; set; }
+    public double PlaceholderSizeX { get; set; }
+    public double PlaceholderSizeY { get; set; }
+    public double PlaceholderSizeZ { get; set; }
+    public double PositionX { get; set; }
+    public double PositionY { get; set; }
+    public double PositionZ { get; set; }
+    public double RotationX { get; set; }
+    public double RotationY { get; set; }
+    public double RotationZ { get; set; }
+    public double ScaleX { get; set; }
+    public double ScaleY { get; set; }
+    public double ScaleZ { get; set; }
+    public required string MotionIntent { get; set; }
+    public required string Confidence { get; set; }
+    public required string Note { get; set; }
+    /// <summary>The scene object this item became, once the plan was applied.</summary>
+    public Guid? InstanceId { get; set; }
 }
 
 public sealed class MusicCompositionRecord
