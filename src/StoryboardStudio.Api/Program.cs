@@ -30,6 +30,17 @@ if (!string.Equals(Path.TrimEndingDirectorySeparator(builder.Environment.Content
         .Build();
     builder.Configuration.Sources.Insert(0, new Microsoft.Extensions.Configuration.ChainedConfigurationSource { Configuration = beside });
 }
+// One workstation's own answers: where its Blender lives, which studio tree
+// holds the generation weights, and whether its owner has commissioned a route.
+// None of that belongs in a tracked file — the paths name somebody's machine,
+// and a commissioned route committed to a repository would arrive switched on
+// for everyone who cloned it. Optional, and last, so it wins over the shipped
+// defaults while environment variables and the command line still win over it.
+builder.Configuration.AddJsonFile(
+    Path.Combine(AppContext.BaseDirectory, "appsettings.Local.json"), optional: true, reloadOnChange: true);
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+builder.Configuration.AddEnvironmentVariables();
+
 builder.WebHost.UseUrls(builder.Configuration["Urls"] ?? "http://127.0.0.1:5179");
 
 var dataRoot = StudioPaths.ResolveDataRoot(builder.Configuration, builder.Environment);

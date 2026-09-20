@@ -79,3 +79,6 @@ vae/
 Thumbs.db
 *.user
 *.suo
+
+# One workstation's own answers: local paths and commissioned routes.
+appsettings.Local.json
