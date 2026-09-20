@@ -21,7 +21,16 @@ public sealed record CompilerCapabilities(
         new(false, false, null, null, null, [], detail);
 }
 
-public sealed record CompilerStage(string Stage, string Runner, string Summary, string Produces, bool Available, string[] Missing);
+public sealed record CompilerStage(
+    string Stage, string Runner, string Summary, string Produces, bool Available, string[] Missing,
+    CompilerSize[]? Sizes = null, string OutputSuffix = ".glb");
+
+/// <summary>
+/// One size a stage will accept, as the compiler describes it. The vocabulary
+/// and the metres behind it belong to the compiler; this studio offers what it
+/// is told and keeps no list of its own.
+/// </summary>
+public sealed record CompilerSize(string Size, string Description, double Metres);
 
 /// <summary>What one stage run produced, or why it did not.</summary>
 public sealed record CompilerStageRun(
@@ -43,7 +52,8 @@ public interface ICompilerGateway
     Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken);
 
     Task<CompilerStageRun> RunStageAsync(
-        string stage, string sourcePath, string outputPath, string reportPath, CancellationToken cancellationToken);
+        string stage, string sourcePath, string outputPath, string reportPath,
+        CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? options = null);
 }
 
 /// <summary>
@@ -115,7 +125,13 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
                     stage.TryGetProperty("available", out var available) && available.ValueKind == JsonValueKind.True,
                     stage.TryGetProperty("missing", out var missing) && missing.ValueKind == JsonValueKind.Array
                         ? [.. missing.EnumerateArray().Select(item => item.GetString() ?? "")]
-                        : [])).ToArray()
+                        : [],
+                    stage.TryGetProperty("sizes", out var sizes) && sizes.ValueKind == JsonValueKind.Array
+                        ? [.. sizes.EnumerateArray().Select(size => new CompilerSize(
+                            Text(size, "size") ?? "", Text(size, "description") ?? "",
+                            size.TryGetProperty("metres", out var metres) ? metres.GetDouble() : 0))]
+                        : null,
+                    Text(stage, "output_suffix") ?? ".glb")).ToArray()
                 : [];
 
             return new CompilerCapabilities(
@@ -134,13 +150,23 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
     }
 
     public async Task<CompilerStageRun> RunStageAsync(
-        string stage, string sourcePath, string outputPath, string reportPath, CancellationToken cancellationToken)
+        string stage, string sourcePath, string outputPath, string reportPath,
+        CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? options = null)
     {
         var arguments = new List<string>
         {
             "run-stage", stage,
             "--source", sourcePath, "--output", outputPath, "--report", reportPath,
         };
+        // Options are passed through by name rather than interpreted here. The
+        // compiler owns what a stage accepts and what each setting means; a
+        // studio that second-guessed either would be keeping a second copy of
+        // somebody else's contract.
+        foreach (var (name, value) in options ?? new Dictionary<string, string>())
+        {
+            arguments.Add("--" + name);
+            arguments.Add(value);
+        }
         if (Checkout is { } checkout) { arguments.Add("--repo-root"); arguments.Add(checkout); }
         if (Blender is { } blender) { arguments.Add("--blender"); arguments.Add(blender); }
         if (StudioTree is { } studio) { arguments.Add("--legacy-root"); arguments.Add(studio); }

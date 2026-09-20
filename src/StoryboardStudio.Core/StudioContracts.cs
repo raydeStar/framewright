@@ -233,7 +233,16 @@ public sealed record RigPoseSummary(
     Guid AssetId, string ContentHash, string ProfileId, RigJointPlacementSummary[] Joints);
 
 /// <summary>What the artist asks for: this reference image, made into a model.</summary>
-public sealed record CreateModelGenerationRequest(Guid SourceAssetId, string Name);
+/// <summary>
+/// A generator normalises: whatever it makes arrives about two metres tall, a
+/// lantern exactly as much as a person. Nothing downstream can fix that by
+/// measuring, so the artist says how big the thing is -- not in metres, which
+/// almost nobody can judge for a prop, but as a landmark on a person. A number
+/// invented to get past a prompt would be worse than none, because every
+/// measurement after it would be taken against a lie.
+/// </summary>
+public sealed record CreateModelGenerationRequest(
+    Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null);
 
 /// <summary>
 /// Whether model generation can run on this workstation, and whether it is
@@ -243,7 +252,15 @@ public sealed record CreateModelGenerationRequest(Guid SourceAssetId, string Nam
 public sealed record ModelGenerationReadiness(
     bool Installed, bool Commissioned, bool CanRun,
     string? CompilerVersion, string? Checkout, string? Blender,
-    string[] Missing, string Detail);
+    string[] Missing, string Detail, ModelSizeChoice[]? Sizes = null,
+    IReadOnlyDictionary<string, string>? Suffixes = null);
+
+/// <summary>
+/// How big a thing is, offered the way a person can judge it: where it comes
+/// up to on someone standing next to it. The compiler owns this vocabulary and
+/// the metres behind each landmark; this studio shows what it is told.
+/// </summary>
+public sealed record ModelSizeChoice(string Size, string Description, double Metres);
 
 /// <summary>One reusable clip a model carries, as the file declares it.</summary>
 public sealed record ModelClipSummary(

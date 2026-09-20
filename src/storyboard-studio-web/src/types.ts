@@ -200,8 +200,10 @@ export interface RigPoseSummary {
 export interface ModelGenerationReadiness {
   installed: boolean; commissioned: boolean; canRun: boolean
   compilerVersion: string | null; checkout: string | null; blender: string | null
-  missing: string[]; detail: string
+  missing: string[]; detail: string; sizes: ModelSizeChoice[] | null
 }
+/** How big a thing is, said as where it comes up to on a person. */
+export interface ModelSizeChoice { size: string; description: string; metres: number }
 /** One reusable clip a model carries, as its file declares it. */
 export interface ModelClipSummary {
   name: string; duration: number; channelCount: number

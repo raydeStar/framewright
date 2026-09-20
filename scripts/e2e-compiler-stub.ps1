@@ -59,6 +59,34 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
                     missing   = @()
                 },
                 [ordered]@{
+                    stage     = 'stage-mesh'
+                    runner    = 'blender'
+                    summary   = 'Give a generated mesh its real size, as a .blend a reviewed stage can open.'
+                    produces  = 'reference-asset-compiler.staged-mesh.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('size', 'size_adjust')
+                    available = $true
+                    missing   = @()
+                    # The vocabulary belongs to the compiler, so the studio
+                    # offers what it is told rather than keeping its own list.
+                    sizes     = @(
+                        [ordered]@{ size = 'ankle'; description = 'about ankle height'; metres = 0.068 },
+                        [ordered]@{ size = 'knee'; description = 'about knee height'; metres = 0.499 },
+                        [ordered]@{ size = 'waist'; description = 'about waist height'; metres = 1.05 },
+                        [ordered]@{ size = 'head'; description = 'about as tall as a person'; metres = 1.75 }
+                    )
+                },
+                [ordered]@{
+                    stage     = 'reduce-mesh'
+                    runner    = 'powershell'
+                    summary   = 'Collapse a staged mesh to a runtime budget, and measure what that cost.'
+                    produces  = 'reference-asset-compiler.production-retopology-candidate.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('triangle_budget')
+                    available = $true
+                    missing   = @()
+                },
+                [ordered]@{
                     stage     = 'browser-payload'
                     runner    = 'blender'
                     summary   = 'Export the staged asset as a self-contained browser GLB, +Y up and metric.'
@@ -75,7 +103,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     $stage = $arguments[1]
-    if ($stage -notin @('geometry', 'browser-payload')) {
+    if ($stage -notin @('geometry', 'stage-mesh', 'reduce-mesh', 'browser-payload')) {
         Write-Error "RAC_ERROR unknown stage: $stage"
         exit 2
     }
@@ -102,10 +130,11 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
 
     # Each step answers with its own schema, so a journey reading a receipt
     # sees which step produced it rather than one shape for the whole route.
-    $schema = if ($stage -eq 'geometry') {
-        'reference-asset-compiler.geometry-candidate.v1'
-    } else {
-        'reference-asset-compiler.browser-payload.v1'
+    $schema = switch ($stage) {
+        'geometry'    { 'reference-asset-compiler.geometry-candidate.v1' }
+        'stage-mesh'  { 'reference-asset-compiler.staged-mesh.v1' }
+        'reduce-mesh' { 'reference-asset-compiler.production-retopology-candidate.v1' }
+        default       { 'reference-asset-compiler.browser-payload.v1' }
     }
     $stageReceipt = [ordered]@{
         schema          = $schema
@@ -124,7 +153,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         ok        = $true
         schema    = 'reference-asset-compiler.stage-run.v1'
         stage     = $stage
-        runner    = $(if ($stage -eq 'geometry') { 'powershell' } else { 'blender' })
+        runner    = $(if ($stage -in @('geometry', 'reduce-mesh')) { 'powershell' } else { 'blender' })
         blender   = 'e2e-stand-in'
         exit_code = 0
         seconds   = 0.2

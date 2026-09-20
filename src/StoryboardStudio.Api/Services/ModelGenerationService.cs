@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using StoryboardStudio.Api.Persistence;
 using StoryboardStudio.Core;
@@ -29,29 +30,51 @@ public sealed class ModelGenerationService(
 {
     public const string ModelWorkType = "Model";
     public const string GeometryStage = "geometry";
+    public const string StageMeshStage = "stage-mesh";
+    public const string ReduceMeshStage = "reduce-mesh";
     public const string BrowserPayloadStage = "browser-payload";
 
     /// <summary>
-    /// What a reference image has to go through to become something a browser
-    /// can load. Two stages, not one: the generator makes a mesh from a
-    /// picture, and the payload export turns that mesh into a self-contained
-    /// GLB. Asking the payload export to read an image never worked -- it takes
-    /// a mesh -- so a route is the honest shape of this work.
+    /// What a reference image goes through to become something a browser can
+    /// load. Four stages, because four different things happen and each can
+    /// fail on its own terms.
+    ///
+    /// The generator makes a mesh from a picture, and that mesh is dense and
+    /// sizeless: the first real run produced 2.4 million triangles at roughly
+    /// two metres tall, whatever the subject. Staging gives it the size the
+    /// artist said it is, which is what makes the reduction gate's millimetres
+    /// mean anything. Reduction collapses it to a runtime budget and measures
+    /// what that cost. Only then is there a mesh worth exporting for a browser.
     /// </summary>
-    public static readonly string[] ReferenceToModelRoute = [GeometryStage, BrowserPayloadStage];
+    public static readonly string[] ReferenceToModelRoute =
+        [GeometryStage, StageMeshStage, ReduceMeshStage, BrowserPayloadStage];
 
     /// <summary>What each step is doing, in words an artist reading a queue would use.</summary>
     private static readonly Dictionary<string, string> StagePhase = new(StringComparer.Ordinal)
     {
         [GeometryStage] = "Making a mesh from the reference",
+        [StageMeshStage] = "Setting its real size",
+        [ReduceMeshStage] = "Bringing it down to a size a browser can carry",
         [BrowserPayloadStage] = "Preparing the mesh for the browser",
     };
+
+    /// <summary>
+    /// The generator's own default octree is a production one, and this is a
+    /// browser studio: 512 cost two minutes and 2.4 million triangles, 256
+    /// costs forty-seven seconds and 592,000, and both are reduced to the same
+    /// runtime budget afterwards. Asking for more detail than survives the
+    /// reduction is spending hardware on something nobody will ever see.
+    /// </summary>
+    private const string BrowserOctreeResolution = "256";
+
+    /// <summary>The V1 cohort contract's ceiling, which the library also enforces.</summary>
+    private const string RuntimeTriangleBudget = "20000";
 
     // Version 2 carries a route where version 1 carried one stage name. A
     // version 1 packet is not migrated, because the single stage it names is
     // the payload export reading an image, which could never have produced a
     // model. Failing it honestly beats rerunning work that cannot succeed.
-    private const int FrozenPacketVersion = 2;
+    private const int FrozenPacketVersion = 4;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>
@@ -61,13 +84,23 @@ public sealed class ModelGenerationService(
     /// </summary>
     private sealed record FrozenModelRequest(
         int PacketVersion, Guid SourceAssetId, string SourceContentHash, string SourceName,
-        int SourceRevisionNumber, string[] Route, string? CompilerVersion, DateTimeOffset FrozenAt);
+        int SourceRevisionNumber, RouteStep[] Route, string? CompilerVersion, DateTimeOffset FrozenAt,
+        string Size, double SizeAdjust);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
     /// which steps ran, which were adopted from an interrupted attempt, and
     /// which had to be run a second time.
     /// </summary>
+    /// <summary>
+    /// One step of a frozen route: which stage, and what it writes. The shape
+    /// is frozen with the route because a step's file has to be named before
+    /// the stage runs, and a restart must name the same file it named before —
+    /// otherwise a finished step looks unfinished and the expensive one is
+    /// paid for twice.
+    /// </summary>
+    private sealed record RouteStep(string Stage, string OutputSuffix);
+
     private sealed record StepOutcome(
         string Stage, string OutputPath, string? ReceiptJson, bool Adopted, bool RerunAfterPartial);
 
@@ -94,7 +127,15 @@ public sealed class ModelGenerationService(
             Checkout: capabilities.Checkout,
             Blender: capabilities.Blender,
             Missing: capabilities.Installed ? missing : ["compiler"],
-            Detail: Explain(capabilities, canRun));
+            Detail: Explain(capabilities, canRun),
+            Sizes: capabilities.Stages
+                .FirstOrDefault(candidate => candidate.Stage == StageMeshStage)?.Sizes
+                ?.Select(size => new ModelSizeChoice(size.Size, size.Description, size.Metres))
+                .ToArray(),
+            // What each stage writes, frozen into a request so a restart names
+            // the same files and a finished step is recognised as finished.
+            Suffixes: capabilities.Stages.ToDictionary(
+                stage => stage.Stage, stage => stage.OutputSuffix, StringComparer.Ordinal));
     }
 
     private static string Explain(CompilerCapabilities capabilities, bool canRun)
@@ -137,6 +178,17 @@ public sealed class ModelGenerationService(
         if (name.Length is 0 or > 120)
             return RepositoryResult<JobSummary>.Invalid("A generated model needs a name of 1 to 120 characters.");
 
+        // A size is not optional and is not guessed. Every measurement the
+        // reduction gate makes afterwards is taken against it, so a default
+        // here would quietly turn a real verdict into a meaningless one.
+        var size = (request.Size ?? "").Trim();
+        if (size.Length == 0)
+            return RepositoryResult<JobSummary>.Invalid(
+                "Say roughly how big this is, as a height on a person — for example knee height.");
+        if (request.SizeAdjust is { } adjust && (adjust < 0.25 || adjust > 4.0))
+            return RepositoryResult<JobSummary>.Invalid(
+                "A size adjustment that large means a different size entirely; pick the nearer one.");
+
         var readiness = await PreflightAsync(cancellationToken);
         if (!readiness.CanRun)
             return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
@@ -144,7 +196,11 @@ public sealed class ModelGenerationService(
         var now = timeProvider.GetUtcNow();
         var packet = new FrozenModelRequest(
             FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
-            source.RevisionNumber ?? 1, ReferenceToModelRoute, readiness.CompilerVersion, now);
+            source.RevisionNumber ?? 1,
+            [.. ReferenceToModelRoute.Select(stage => new RouteStep(
+                stage,
+                readiness.Suffixes?.GetValueOrDefault(stage) ?? ".glb"))],
+            readiness.CompilerVersion, now, size, request.SizeAdjust ?? 1.0);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -238,8 +294,8 @@ public sealed class ModelGenerationService(
 
         for (var index = 0; index < steps.Length; index++)
         {
-            var stage = steps[index];
-            var outputPath = Path.Combine(workspace, $"step-{index + 1}-{stage}.glb");
+            var stage = steps[index].Stage;
+            var outputPath = Path.Combine(workspace, $"step-{index + 1}-{stage}{steps[index].OutputSuffix}");
             var receiptPath = Path.Combine(workspace, $"step-{index + 1}-{stage}.json");
             var hasOutput = File.Exists(outputPath);
             var hasReceipt = File.Exists(receiptPath);
@@ -283,7 +339,9 @@ public sealed class ModelGenerationService(
                 await ProgressAsync(job, JobState.Running, progress,
                     partial ? $"{step} — running again: the previous attempt left an incomplete answer" : step,
                     cancellationToken);
-                run = await compiler.RunStageAsync(stage, stepSource, outputPath, receiptPath, cancellationToken);
+                run = await compiler.RunStageAsync(
+                    stage, stepSource, outputPath, receiptPath, cancellationToken,
+                    StageOptions(stage, packet, job));
                 if (!run.Ok)
                     return await FailAsync(job,
                         run.Error ?? $"The {stage} stage did not produce a result.", cancellationToken);
@@ -327,7 +385,9 @@ public sealed class ModelGenerationService(
             sourceHashAtDelivery = source.ContentHash,
             staleSource = stale,
             compilerVersion = packet.CompilerVersion,
-            route = packet.Route,
+            route = packet.Route.Select(step => step.Stage),
+            size = packet.Size,
+            sizeAdjust = packet.SizeAdjust,
             rerunAfterIncompleteAnswer = rerunAfterPartial,
             // Per step, because "the route succeeded" hides which half of it
             // actually ran on this attempt and which was picked up off disk.
@@ -346,6 +406,32 @@ public sealed class ModelGenerationService(
             stale ? "Delivered from an older reference" : "Delivered", cancellationToken);
         return RepositoryResult<JobSummary>.Ok(Map(job));
     }
+
+    /// <summary>
+    /// What each stage is told beyond its three paths.
+    ///
+    /// The compiler owns what a stage accepts and what each setting means.
+    /// What belongs here is only what this studio knows and the compiler
+    /// cannot: that it is a browser studio, and what the artist said.
+    /// </summary>
+    private static Dictionary<string, string> StageOptions(
+        string stage, FrozenModelRequest packet, JobRecord job) => stage switch
+    {
+        GeometryStage => new()
+        {
+            ["octree-resolution"] = BrowserOctreeResolution,
+            // Otherwise the workspace is named after the reference's content
+            // hash, which is what the stored file is called.
+            ["asset-name"] = job.ShotCode,
+        },
+        StageMeshStage => new()
+        {
+            ["size"] = packet.Size,
+            ["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture),
+        },
+        ReduceMeshStage => new() { ["triangle-budget"] = RuntimeTriangleBudget },
+        _ => [],
+    };
 
     /// <summary>
     /// Where this model came from, written where an artist will read it rather

@@ -122,8 +122,8 @@ export const studioApi = {
     return response.json() as Promise<AssetSummary>
   },
   modelGenerationReadiness: () => request<ModelGenerationReadiness>('/api/models/generation/readiness'),
-  generateModel: (sourceAssetId: string, name: string) =>
-    request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name }) }),
+  generateModel: (sourceAssetId: string, name: string, size: string) =>
+    request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, size }) }),
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
   rigPose: (assetId: string, pose: { bone: string; rotation: number[] }[]) =>
     request<RigPoseSummary>(`/api/assets/${assetId}/rig-pose`, { method: 'POST', body: JSON.stringify({ pose }) }),

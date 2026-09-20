@@ -46,22 +46,31 @@ public sealed class ModelGenerationApiTests
         public string? ReceiptThenDieStage { get; set; }
 
         public static CompilerStage Stage(string name) =>
-            new(name, name == "geometry" ? "powershell" : "blender", $"The {name} stage.",
-                $"reference-asset-compiler.{name}.v1", true, []);
+            new(name, name is "geometry" or "reduce-mesh" ? "powershell" : "blender",
+                $"The {name} stage.", $"reference-asset-compiler.{name}.v1", true, [],
+                // A staged mesh is a .blend where everything else is a .glb,
+                // and the stage that reads it refuses anything else.
+                OutputSuffix: name == "stage-mesh" ? ".blend" : ".glb");
 
         public static CompilerCapabilities Ready => new(
             Installed: true, Commissioned: true, Version: "reference-asset-compiler 0.1.2",
             Checkout: "C:/checkout", Blender: "C:/blender.exe",
-            Stages: [Stage("geometry"), Stage("browser-payload")]);
+            Stages: [Stage("geometry"), Stage("stage-mesh"), Stage("reduce-mesh"),
+                     Stage("browser-payload")]);
 
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
 
+        /// <summary>Per stage, what it was told beyond its three paths.</summary>
+        public Dictionary<string, IReadOnlyDictionary<string, string>> Options { get; } = [];
+
         public async Task<CompilerStageRun> RunStageAsync(
-            string stage, string sourcePath, string outputPath, string reportPath, CancellationToken cancellationToken)
+            string stage, string sourcePath, string outputPath, string reportPath,
+            CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? options = null)
         {
             Runs += 1;
             Calls.Add((stage, Path.GetFileName(sourcePath)));
+            Options[stage] = options ?? new Dictionary<string, string>();
             if (ReceiptThenDieStage == stage)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
@@ -113,7 +122,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "figure-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Field scout" });
+            new { sourceAssetId = reference.Id, name = "Field scout", size = "knee" });
         Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
@@ -163,7 +172,7 @@ public sealed class ModelGenerationApiTests
         Assert.False(readiness.RootElement.GetProperty("installed").GetBoolean());
 
         var refused = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Never built" });
+            new { sourceAssetId = reference.Id, name = "Never built", size = "knee" });
         Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
         Assert.Equal(0, compiler.Runs);
 
@@ -193,7 +202,7 @@ public sealed class ModelGenerationApiTests
         Assert.Contains("not commissioned", readiness.RootElement.GetProperty("detail").GetString()!, StringComparison.OrdinalIgnoreCase);
 
         var refused = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Not yet" });
+            new { sourceAssetId = reference.Id, name = "Not yet", size = "knee" });
         Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
         Assert.Equal(0, compiler.Runs);
     }
@@ -207,7 +216,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "broken-output-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Broken" });
+            new { sourceAssetId = reference.Id, name = "Broken", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
 
@@ -230,20 +239,21 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "interrupted-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Interrupted" });
+            new { sourceAssetId = reference.Id, name = "Interrupted", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
 
         var first = await RunAsync(factory, jobId);
         Assert.Equal(JobState.Completed, first.State);
-        // The whole route: a mesh from the picture, then a payload from the mesh.
-        Assert.Equal(2, compiler.Runs);
+        // The whole route: a mesh from the picture, its real size, a runtime
+        // budget, and only then a file a browser can load.
+        Assert.Equal(4, compiler.Runs);
 
         // The delivery arrives a second time. No stage is run again and no
         // second model appears.
         var again = await RunAsync(factory, jobId);
         Assert.Equal(first.OutputAssetId, again.OutputAssetId);
-        Assert.Equal(2, compiler.Runs);
+        Assert.Equal(4, compiler.Runs);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
@@ -267,7 +277,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "half-answer-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Half an answer" });
+            new { sourceAssetId = reference.Id, name = "Half an answer", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
 
@@ -283,7 +293,7 @@ public sealed class ModelGenerationApiTests
         // It is run again, because half an answer is not an answer, and the
         // rerun is on the record rather than hidden inside a phase that passed.
         Assert.Equal(JobState.Completed, finished.State);
-        Assert.Equal(2, compiler.Runs);
+        Assert.Equal(4, compiler.Runs);
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
         var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
@@ -305,7 +315,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "moving-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "From an older frame" });
+            new { sourceAssetId = reference.Id, name = "From an older frame", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
 
@@ -350,7 +360,7 @@ public sealed class ModelGenerationApiTests
             {
                 var reference = await ImportImageAsync(client, "restart-reference.png");
                 var queued = await client.PostAsJsonAsync("/api/models/generation",
-                    new { sourceAssetId = reference.Id, name = "Survives a restart" });
+                    new { sourceAssetId = reference.Id, name = "Survives a restart", size = "knee" });
                 using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
                 jobId = job.RootElement.GetProperty("id").GetGuid();
             }
@@ -383,7 +393,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "unattended-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Unattended" });
+            new { sourceAssetId = reference.Id, name = "Unattended", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
 
@@ -420,29 +430,46 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "two-stage-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Two stages" });
+            new { sourceAssetId = reference.Id, name = "Two stages", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
 
         var finished = await RunAsync(factory, jobId);
 
         Assert.Equal(JobState.Completed, finished.State);
-        Assert.Equal(["geometry", "browser-payload"], compiler.Calls.Select(call => call.Stage));
-        // The order is not the whole claim: the payload export must read the
-        // mesh the generator wrote, not the picture the generator read.
+        Assert.Equal(["geometry", "stage-mesh", "reduce-mesh", "browser-payload"],
+            compiler.Calls.Select(call => call.Stage));
+        // The order is not the whole claim: each step must read what the one
+        // before it wrote, not the picture the generator read.
         Assert.EndsWith(".png", compiler.Calls[0].Source, StringComparison.Ordinal);
         Assert.Equal("step-1-geometry.glb", compiler.Calls[1].Source);
+        // Each step is named for what the stage actually writes. Naming a
+        // staged mesh .glb produced a file the reducer refused to open, on a
+        // machine where every other part of the route had already worked.
+        Assert.Equal("step-2-stage-mesh.blend", compiler.Calls[2].Source);
+        Assert.Equal("step-3-reduce-mesh.glb", compiler.Calls[3].Source);
+
+        // The artist's size reaches the stage that applies it, and nothing
+        // else invents one: a guessed size would silently invalidate every
+        // measurement the reduction gate makes afterwards.
+        Assert.Equal("knee", compiler.Options["stage-mesh"]["size"]);
+        // A browser studio asks for browser-scale geometry rather than the
+        // generator's production default, which costs minutes and millions of
+        // triangles that the reduction throws away again.
+        Assert.Equal("256", compiler.Options["geometry"]["octree-resolution"]);
+        Assert.Equal("20000", compiler.Options["reduce-mesh"]["triangle-budget"]);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
         var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
         using var result = JsonDocument.Parse(record.ResultJson!);
-        Assert.Equal(["geometry", "browser-payload"],
+        Assert.Equal(["geometry", "stage-mesh", "reduce-mesh", "browser-payload"],
             result.RootElement.GetProperty("route").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal("knee", result.RootElement.GetProperty("size").GetString());
         // Each step's receipt is recorded, not just the last one's: "the route
         // succeeded" hides which half of it actually ran.
         var steps = result.RootElement.GetProperty("steps").EnumerateArray().ToArray();
-        Assert.Equal(2, steps.Length);
+        Assert.Equal(4, steps.Length);
         Assert.All(steps, step => Assert.False(string.IsNullOrWhiteSpace(
             step.GetProperty("receiptSha256").GetString())));
     }
@@ -456,7 +483,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "resume-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Resumed" });
+            new { sourceAssetId = reference.Id, name = "Resumed", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
 
@@ -473,9 +500,10 @@ public sealed class ModelGenerationApiTests
 
         Assert.Equal(JobState.Completed, finished.State);
         // The whole point of keeping a result per step: the generator is the
-        // expensive half, and asking a GPU to build the same mesh a second time
+        // expensive one, and asking a GPU to build the same mesh a second time
         // is the cost of resuming badly.
-        Assert.Equal(["browser-payload"], compiler.Calls.Select(call => call.Stage));
+        Assert.Equal(["stage-mesh", "reduce-mesh", "browser-payload"],
+            compiler.Calls.Select(call => call.Stage));
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
@@ -485,6 +513,7 @@ public sealed class ModelGenerationApiTests
         // Adopted rather than run, and the delivery says which it was.
         Assert.True(steps[0].GetProperty("adopted").GetBoolean());
         Assert.False(steps[1].GetProperty("adopted").GetBoolean());
+        Assert.Equal(4, steps.Length);
         Assert.False(result.RootElement.GetProperty("rerunAfterIncompleteAnswer").GetBoolean());
     }
 
@@ -506,7 +535,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "mismatched-pair-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Mismatched" });
+            new { sourceAssetId = reference.Id, name = "Mismatched", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
 
@@ -528,6 +557,47 @@ public sealed class ModelGenerationApiTests
         Assert.False(File.Exists(output), "the first attempt's output survived the rerun");
     }
 
+    /// <summary>
+    /// A generator normalises, so its output arrives about two metres tall
+    /// whatever the subject, and the reduction gate measures in millimetres.
+    /// The same lantern was rejected at 1.99 m and passed at 0.42 m. Defaulting
+    /// a size here would not be a convenience; it would turn every measurement
+    /// after it into a number about nothing.
+    /// </summary>
+    [Fact]
+    public async Task AModelWithNoSizeIsRefusedRatherThanGuessedAt()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "sizeless-reference.png");
+
+        var refused = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "No size given" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(0, compiler.Runs);
+        Assert.Contains("how big", await refused.Content.ReadAsStringAsync(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnAdjustmentThatMeansADifferentSizeIsRefused()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "over-adjusted-reference.png");
+
+        var refused = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Wildly adjusted", size = "knee", sizeAdjust = 40.0 });
+
+        // Accepting it would record "knee" against a height nothing like a
+        // knee, which is worse than refusing.
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(0, compiler.Runs);
+    }
+
     [Fact]
     public async Task AStageMissingFromTheCompilerRefusesTheWholeRouteAndNamesIt()
     {
@@ -541,6 +611,8 @@ public sealed class ModelGenerationApiTests
                 [
                     new CompilerStage("geometry", "powershell", "Needs a GPU.",
                         "reference-asset-compiler.geometry-candidate.v1", false, ["legacy-root"]),
+                    ControlledCompiler.Stage("stage-mesh"),
+                    ControlledCompiler.Stage("reduce-mesh"),
                     ControlledCompiler.Stage("browser-payload"),
                 ],
             },
@@ -562,7 +634,7 @@ public sealed class ModelGenerationApiTests
             readiness.RootElement.GetProperty("missing").EnumerateArray().Select(item => item.GetString()));
 
         var refused = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Never built" });
+            new { sourceAssetId = reference.Id, name = "Never built", size = "knee" });
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
         // Nothing ran, including the half of the route that could have.
@@ -578,7 +650,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "failing-first-reference.png");
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Stops early" });
+            new { sourceAssetId = reference.Id, name = "Stops early", size = "knee" });
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
 
         var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());

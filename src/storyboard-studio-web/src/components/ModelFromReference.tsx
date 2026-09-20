@@ -14,12 +14,20 @@ import type { AssetSummary, ModelGenerationReadiness } from '../types'
  * What cannot run says so before anything is queued, with the reason. A route
  * that could run but has not been commissioned is a different answer from a
  * compiler that is not installed, and the artist is told which.
+ *
+ * The one thing it asks for is size, because a generator normalises: whatever
+ * it makes comes back about two metres tall, a lantern exactly as much as a
+ * person. It asks in the only terms most people can answer — where does this
+ * come up to on someone standing next to it — rather than in metres, which
+ * almost nobody can judge for a prop. The list comes from the compiler, which
+ * owns both the vocabulary and the height behind each word.
  */
 export default function ModelFromReference({ asset, onQueued }: {
   asset: AssetSummary
   onQueued: (message: string) => void
 }) {
   const [readiness, setReadiness] = useState<ModelGenerationReadiness>()
+  const [size, setSize] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -34,7 +42,7 @@ export default function ModelFromReference({ asset, onQueued }: {
   const generate = async () => {
     setBusy(true); setError(undefined)
     try {
-      const job = await studioApi.generateModel(asset.id, asset.displayName)
+      const job = await studioApi.generateModel(asset.id, asset.displayName, size)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -49,8 +57,21 @@ export default function ModelFromReference({ asset, onQueued }: {
           <p className="model-note" data-testid="model-generation-readiness" data-can-run={readiness.canRun ? 'true' : 'false'}>
             {readiness.detail}
           </p>
+          {readiness.canRun && readiness.sizes && <label className="model-size">
+            <span>Roughly how big is it?</span>
+            <select value={size} onChange={event => setSize(event.target.value)}
+              data-testid="model-size">
+              <option value="">Pick a size…</option>
+              {readiness.sizes.map(choice => <option key={choice.size} value={choice.size}>
+                {choice.description}
+              </option>)}
+            </select>
+            <span className="model-note">
+              Standing next to it, where would it come up to?
+            </span>
+          </label>}
           <button type="button" className="secondary" data-testid="model-generate"
-            disabled={busy || !readiness.canRun} onClick={() => void generate()}>
+            disabled={busy || !readiness.canRun || size === ''} onClick={() => void generate()}>
             <Boxes size={15} />{busy ? 'Queuing…' : 'Generate from this reference'}
           </button>
         </>}

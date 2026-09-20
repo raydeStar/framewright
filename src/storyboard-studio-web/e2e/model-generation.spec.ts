@@ -42,6 +42,11 @@ test('a reference becomes a model candidate that names where it came from', asyn
   await expect(panel.getByTestId('model-generation-readiness')).toHaveAttribute('data-can-run', 'true')
   await expect(panel).toContainText('The compiler does this work, not this studio')
 
+  // A generator normalises, so it has to be told how big the thing is — in
+  // the only terms most people can answer, not in metres.
+  await expect(panel.getByTestId('model-generate')).toBeDisabled()
+  await panel.getByTestId('model-size').selectOption('knee')
+  await expect(panel.getByTestId('model-generate')).toBeEnabled()
   await panel.getByTestId('model-generate').click()
   await expect(page.getByText(/keeps going if you leave this screen/)).toBeVisible()
 
@@ -99,6 +104,7 @@ test('the work queue shows what is underway and survives leaving the screen', as
   await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
   await page.getByRole('button', { name: /^Images/ }).click()
   await page.getByRole('button', { name: `Open ${referenceName}` }).click()
+  await page.getByTestId('model-from-reference').getByTestId('model-size').selectOption('knee')
   await page.getByTestId('model-from-reference').getByTestId('model-generate').click()
 
   // Whatever the artist does next, the queue holds the work and says so.
