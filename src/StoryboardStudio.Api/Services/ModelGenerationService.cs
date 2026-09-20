@@ -28,8 +28,30 @@ public sealed class ModelGenerationService(
     IWebHostEnvironment environment)
 {
     public const string ModelWorkType = "Model";
+    public const string GeometryStage = "geometry";
     public const string BrowserPayloadStage = "browser-payload";
-    private const int FrozenPacketVersion = 1;
+
+    /// <summary>
+    /// What a reference image has to go through to become something a browser
+    /// can load. Two stages, not one: the generator makes a mesh from a
+    /// picture, and the payload export turns that mesh into a self-contained
+    /// GLB. Asking the payload export to read an image never worked -- it takes
+    /// a mesh -- so a route is the honest shape of this work.
+    /// </summary>
+    public static readonly string[] ReferenceToModelRoute = [GeometryStage, BrowserPayloadStage];
+
+    /// <summary>What each step is doing, in words an artist reading a queue would use.</summary>
+    private static readonly Dictionary<string, string> StagePhase = new(StringComparer.Ordinal)
+    {
+        [GeometryStage] = "Making a mesh from the reference",
+        [BrowserPayloadStage] = "Preparing the mesh for the browser",
+    };
+
+    // Version 2 carries a route where version 1 carried one stage name. A
+    // version 1 packet is not migrated, because the single stage it names is
+    // the payload export reading an image, which could never have produced a
+    // model. Failing it honestly beats rerunning work that cannot succeed.
+    private const int FrozenPacketVersion = 2;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>
@@ -39,14 +61,31 @@ public sealed class ModelGenerationService(
     /// </summary>
     private sealed record FrozenModelRequest(
         int PacketVersion, Guid SourceAssetId, string SourceContentHash, string SourceName,
-        int SourceRevisionNumber, string Stage, string? CompilerVersion, DateTimeOffset FrozenAt);
+        int SourceRevisionNumber, string[] Route, string? CompilerVersion, DateTimeOffset FrozenAt);
+
+    /// <summary>
+    /// What one step of the route actually did, kept so the delivery can say
+    /// which steps ran, which were adopted from an interrupted attempt, and
+    /// which had to be run a second time.
+    /// </summary>
+    private sealed record StepOutcome(
+        string Stage, string OutputPath, string? ReceiptJson, bool Adopted, bool RerunAfterPartial);
 
     /// <summary>Can this workstation do the work, and is it allowed to?</summary>
     public async Task<ModelGenerationReadiness> PreflightAsync(CancellationToken cancellationToken)
     {
         var capabilities = await compiler.DescribeAsync(cancellationToken);
-        var canRun = capabilities.CanRun(BrowserPayloadStage);
-        var stage = capabilities.Stages.FirstOrDefault(candidate => candidate.Stage == BrowserPayloadStage);
+        // Every step, not just the last one. A route whose first stage cannot
+        // run is a route that cannot run, and saying so now is the difference
+        // between a refusal and a job that dies partway.
+        var canRun = ReferenceToModelRoute.All(capabilities.CanRun);
+        var missing = ReferenceToModelRoute
+            .Select(name => capabilities.Stages.FirstOrDefault(candidate => candidate.Stage == name))
+            .SelectMany((found, index) => found is null
+                ? [$"{ReferenceToModelRoute[index]} stage"]
+                : found.Missing)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         return new ModelGenerationReadiness(
             Installed: capabilities.Installed,
             Commissioned: capabilities.Commissioned,
@@ -54,7 +93,7 @@ public sealed class ModelGenerationService(
             CompilerVersion: capabilities.Version,
             Checkout: capabilities.Checkout,
             Blender: capabilities.Blender,
-            Missing: stage?.Missing ?? (capabilities.Installed ? [] : ["compiler"]),
+            Missing: capabilities.Installed ? missing : ["compiler"],
             Detail: Explain(capabilities, canRun));
     }
 
@@ -63,10 +102,15 @@ public sealed class ModelGenerationService(
         if (!capabilities.Installed) return capabilities.Detail ?? "The Reference Asset Compiler is not available.";
         if (!canRun)
         {
-            var stage = capabilities.Stages.FirstOrDefault(candidate => candidate.Stage == BrowserPayloadStage);
-            return stage is null
-                ? "This compiler does not offer the browser payload stage."
-                : $"The compiler cannot run that stage yet: {string.Join(", ", stage.Missing)} missing.";
+            // Name the step that is the problem. "Something is missing" sends
+            // an artist looking at the wrong half of an install.
+            var blocked = ReferenceToModelRoute
+                .Select(name => (Name: name, Stage: capabilities.Stages.FirstOrDefault(s => s.Stage == name)))
+                .FirstOrDefault(step => step.Stage is null || !step.Stage.Available);
+            if (blocked.Name is null) return "The compiler cannot run this route yet.";
+            return blocked.Stage is null
+                ? $"This compiler does not offer the {blocked.Name} stage."
+                : $"The compiler cannot run the {blocked.Name} stage yet: {string.Join(", ", blocked.Stage.Missing)} missing.";
         }
         return capabilities.Commissioned
             ? "Ready. Model generation will run on this workstation."
@@ -100,7 +144,7 @@ public sealed class ModelGenerationService(
         var now = timeProvider.GetUtcNow();
         var packet = new FrozenModelRequest(
             FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
-            source.RevisionNumber ?? 1, BrowserPayloadStage, readiness.CompilerVersion, now);
+            source.RevisionNumber ?? 1, ReferenceToModelRoute, readiness.CompilerVersion, now);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -115,7 +159,7 @@ public sealed class ModelGenerationService(
             Progress = 0,
             Phase = "Frozen reference queued",
             Backend = "Reference Asset Compiler",
-            AdapterId = BrowserPayloadStage,
+            AdapterId = string.Join(" then ", ReferenceToModelRoute),
             RequestJson = requestJson,
             // The same frozen request queued twice is the same work, and the
             // job identity says so rather than two stages racing each other.
@@ -160,7 +204,11 @@ public sealed class ModelGenerationService(
         try { packet = JsonSerializer.Deserialize<FrozenModelRequest>(job.RequestJson, Json); }
         catch (JsonException) { packet = null; }
         if (packet is null || packet.PacketVersion != FrozenPacketVersion)
-            return await FailAsync(job, "This job's frozen request packet cannot be read by this build.", cancellationToken);
+            return await FailAsync(job,
+                "This job was frozen against a single-stage route that cannot produce a model from an image. "
+                + "Ask for the model again to queue it against the current route.", cancellationToken);
+        if (packet.Route is not { Length: > 0 })
+            return await FailAsync(job, "This job's frozen request names no stages to run.", cancellationToken);
 
         var source = await db.Assets.AsNoTracking()
             .SingleOrDefaultAsync(asset => asset.Id == packet.SourceAssetId, cancellationToken);
@@ -172,50 +220,83 @@ public sealed class ModelGenerationService(
 
         var workspace = Workspace(job.Id);
         Directory.CreateDirectory(workspace);
-        var payloadPath = Path.Combine(workspace, "payload.glb");
-        var receiptPath = Path.Combine(workspace, "receipt.json");
 
         // Percentages here are stage boundaries, not a clock. A bar that
-        // interpolates against a guessed duration is a lie, and this stage's
-        // duration is genuinely unknown.
+        // interpolates against a guessed duration is a lie, and these stages'
+        // durations are genuinely unknown.
         await ProgressAsync(job, JobState.Running, 10, "Reading the frozen reference", cancellationToken);
 
-        CompilerStageRun run;
-        var hasPayload = File.Exists(payloadPath);
-        var hasReceipt = File.Exists(receiptPath);
+        // Each step reads what the one before it wrote, starting from the
+        // frozen reference image. Every step keeps its own output and receipt,
+        // which is what lets an interrupted job resume at the step it reached
+        // instead of starting over -- and starting over here would mean asking
+        // a GPU to build the same mesh a second time.
+        var steps = packet.Route;
+        var stepSource = sourcePath;
+        var completed = new List<StepOutcome>(steps.Length);
         var rerunAfterPartial = false;
-        if (hasPayload && hasReceipt)
+
+        for (var index = 0; index < steps.Length; index++)
         {
-            // The ambiguous window: this job was interrupted after the stage
-            // wrote its answer but before the answer was recorded. Adopt what
-            // is already on disk rather than silently running it again.
-            await ProgressAsync(job, JobState.Running, 70, "Reconciling an interrupted run", cancellationToken);
-            run = new CompilerStageRun(true, packet.Stage, 0, 0, payloadPath,
-                await File.ReadAllTextAsync(receiptPath, cancellationToken), null, ["Adopted an existing payload."]);
-        }
-        else
-        {
-            // Half an answer is not an answer, and running the stage again is a
-            // decision rather than a detail: it is announced, the remains of the
-            // interrupted attempt are cleared so they cannot be adopted later as
-            // if they were whole, and the rerun is recorded on the delivery.
-            rerunAfterPartial = hasPayload || hasReceipt;
-            if (rerunAfterPartial)
+            var stage = steps[index];
+            var outputPath = Path.Combine(workspace, $"step-{index + 1}-{stage}.glb");
+            var receiptPath = Path.Combine(workspace, $"step-{index + 1}-{stage}.json");
+            var hasOutput = File.Exists(outputPath);
+            var hasReceipt = File.Exists(receiptPath);
+            // Each step gets an equal share of the span between reading the
+            // reference and validating the result. Equal because the studio has
+            // no honest basis for claiming one step is a given fraction of the
+            // whole; a weighting invented here would be a guess wearing a number.
+            var progress = 10 + (index * 70 / steps.Length);
+            var describe = StagePhase.TryGetValue(stage, out var phrase) ? phrase : $"Running {stage}";
+            var step = steps.Length > 1 ? $"Step {index + 1} of {steps.Length}: {describe}" : describe;
+
+            CompilerStageRun run;
+            if (hasOutput && hasReceipt)
             {
-                foreach (var leftover in (string[])[payloadPath, receiptPath])
-                    if (File.Exists(leftover)) File.Delete(leftover);
+                // The ambiguous window: this job was interrupted after the step
+                // wrote its answer but before the answer was recorded. Adopt
+                // what is on disk rather than silently running it again.
+                await ProgressAsync(job, JobState.Running, progress,
+                    $"{step} — reconciling an interrupted run", cancellationToken);
+                run = new CompilerStageRun(true, stage, 0, 0, outputPath,
+                    await File.ReadAllTextAsync(receiptPath, cancellationToken), null,
+                    ["Adopted an existing result."]);
+                completed.Add(new StepOutcome(stage, outputPath, run.ReceiptJson, true, false));
+            }
+            else
+            {
+                // Half an answer is not an answer, and running a step again is
+                // a decision rather than a detail: it is announced, the remains
+                // of the interrupted attempt are cleared so they cannot later
+                // be adopted as if they were whole, and it is recorded on the
+                // delivery. Only this step is redone; steps already finished
+                // keep their answers.
+                var partial = hasOutput || hasReceipt;
+                rerunAfterPartial |= partial;
+                if (partial)
+                {
+                    foreach (var leftover in (string[])[outputPath, receiptPath])
+                        if (File.Exists(leftover)) File.Delete(leftover);
+                }
+
+                await ProgressAsync(job, JobState.Running, progress,
+                    partial ? $"{step} — running again: the previous attempt left an incomplete answer" : step,
+                    cancellationToken);
+                run = await compiler.RunStageAsync(stage, stepSource, outputPath, receiptPath, cancellationToken);
+                if (!run.Ok)
+                    return await FailAsync(job,
+                        run.Error ?? $"The {stage} stage did not produce a result.", cancellationToken);
+                if (!File.Exists(outputPath))
+                    return await FailAsync(job,
+                        $"The {stage} stage reported success but wrote nothing.", cancellationToken);
+                completed.Add(new StepOutcome(stage, outputPath, run.ReceiptJson, false, partial));
             }
 
-            await ProgressAsync(job, JobState.Running, 40,
-                rerunAfterPartial
-                    ? "Running again: the previous attempt left an incomplete answer"
-                    : "Compiling the model",
-                cancellationToken);
-            run = await compiler.RunStageAsync(packet.Stage, sourcePath, payloadPath, receiptPath, cancellationToken);
-            if (!run.Ok)
-                return await FailAsync(job, run.Error ?? "The compiler stage did not produce a model.", cancellationToken);
+            stepSource = outputPath;
         }
 
+        var payloadPath = completed[^1].OutputPath;
         await ProgressAsync(job, JobState.Running, 85, "Validating the candidate", cancellationToken);
         if (!File.Exists(payloadPath))
             return await FailAsync(job, "The compiler reported success but wrote no model.", cancellationToken);
@@ -246,9 +327,18 @@ public sealed class ModelGenerationService(
             sourceHashAtDelivery = source.ContentHash,
             staleSource = stale,
             compilerVersion = packet.CompilerVersion,
-            stage = packet.Stage,
+            route = packet.Route,
             rerunAfterIncompleteAnswer = rerunAfterPartial,
-            receiptSha256 = run.ReceiptJson is null ? null : Sha256(run.ReceiptJson),
+            // Per step, because "the route succeeded" hides which half of it
+            // actually ran on this attempt and which was picked up off disk.
+            steps = completed.Select(step => new
+            {
+                stage = step.Stage,
+                adopted = step.Adopted,
+                rerunAfterIncompleteAnswer = step.RerunAfterPartial,
+                receiptSha256 = step.ReceiptJson is null ? null : Sha256(step.ReceiptJson),
+            }).ToArray(),
+            receiptSha256 = completed[^1].ReceiptJson is null ? null : Sha256(completed[^1].ReceiptJson!),
             payloadAssetId = imported.Value.Id,
             payloadContentHash = imported.Value.ContentHash,
         }, Json);

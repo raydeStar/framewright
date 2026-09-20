@@ -44,13 +44,27 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
             ok       = $true
             checkout = $repoRoot
             blender  = 'e2e-stand-in'
+            legacy_root = 'e2e-stand-in'
             stages   = @(
+                # Both steps of the route a reference image takes, because a
+                # studio that can only do half of it cannot do any of it.
+                [ordered]@{
+                    stage     = 'geometry'
+                    runner    = 'powershell'
+                    summary   = 'Turn one reference image into a candidate mesh with Hunyuan3D. Needs a GPU.'
+                    produces  = 'reference-asset-compiler.geometry-candidate.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('asset_name', 'seed', 'steps', 'octree_resolution', 'chunks')
+                    available = $true
+                    missing   = @()
+                },
                 [ordered]@{
                     stage     = 'browser-payload'
                     runner    = 'blender'
                     summary   = 'Export the staged asset as a self-contained browser GLB, +Y up and metric.'
                     produces  = 'reference-asset-compiler.browser-payload.v1'
                     arguments = @('source', 'output', 'report')
+                    options   = @('textures')
                     available = $true
                     missing   = @()
                 }
@@ -60,6 +74,11 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         exit 0
     }
 
+    $stage = $arguments[1]
+    if ($stage -notin @('geometry', 'browser-payload')) {
+        Write-Error "RAC_ERROR unknown stage: $stage"
+        exit 2
+    }
     $source = Read-Option '--source'
     $output = Read-Option '--output'
     $receipt = Read-Option '--report'
@@ -81,8 +100,15 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     $payloadHash = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
     $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
 
+    # Each step answers with its own schema, so a journey reading a receipt
+    # sees which step produced it rather than one shape for the whole route.
+    $schema = if ($stage -eq 'geometry') {
+        'reference-asset-compiler.geometry-candidate.v1'
+    } else {
+        'reference-asset-compiler.browser-payload.v1'
+    }
     $stageReceipt = [ordered]@{
-        schema          = 'reference-asset-compiler.browser-payload.v1'
+        schema          = $schema
         blender_version = 'e2e stand-in'
         source          = $source
         source_sha256   = $sourceHash
@@ -97,8 +123,8 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     $payload = [ordered]@{
         ok        = $true
         schema    = 'reference-asset-compiler.stage-run.v1'
-        stage     = 'browser-payload'
-        runner    = 'blender'
+        stage     = $stage
+        runner    = $(if ($stage -eq 'geometry') { 'powershell' } else { 'blender' })
         blender   = 'e2e-stand-in'
         exit_code = 0
         seconds   = 0.2

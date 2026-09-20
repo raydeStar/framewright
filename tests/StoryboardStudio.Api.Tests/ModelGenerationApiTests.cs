@@ -28,11 +28,31 @@ public sealed class ModelGenerationApiTests
         public string? Failure { get; set; }
         public int Runs { get; private set; }
 
+        /// <summary>
+        /// Every stage asked for and what it was told to read, in order. A
+        /// count alone cannot tell a route that ran twice from one that ran
+        /// two different steps, which is the distinction these tests turn on.
+        /// </summary>
+        public List<(string Stage, string Source)> Calls { get; } = [];
+
+        /// <summary>A stage that refuses, while the rest of the route works.</summary>
+        public string? FailingStage { get; set; }
+
+        /// <summary>
+        /// A stage that writes its receipt and then dies before its output —
+        /// the other order of the same interruption, and the one that can pair
+        /// a new receipt with an old output if the remains were never cleared.
+        /// </summary>
+        public string? ReceiptThenDieStage { get; set; }
+
+        public static CompilerStage Stage(string name) =>
+            new(name, name == "geometry" ? "powershell" : "blender", $"The {name} stage.",
+                $"reference-asset-compiler.{name}.v1", true, []);
+
         public static CompilerCapabilities Ready => new(
             Installed: true, Commissioned: true, Version: "reference-asset-compiler 0.1.2",
             Checkout: "C:/checkout", Blender: "C:/blender.exe",
-            Stages: [new CompilerStage("browser-payload", "blender", "Export a browser GLB.",
-                "reference-asset-compiler.browser-payload.v1", true, [])]);
+            Stages: [Stage("geometry"), Stage("browser-payload")]);
 
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
@@ -41,14 +61,30 @@ public sealed class ModelGenerationApiTests
             string stage, string sourcePath, string outputPath, string reportPath, CancellationToken cancellationToken)
         {
             Runs += 1;
-            if (Failure is not null)
-                return new CompilerStageRun(false, stage, 1, 0.1, null, null, Failure, ["refused"]);
+            Calls.Add((stage, Path.GetFileName(sourcePath)));
+            if (ReceiptThenDieStage == stage)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
+                await File.WriteAllTextAsync(reportPath, "{\"schema\":\"from-the-second-attempt\"}", cancellationToken);
+                return new CompilerStageRun(false, stage, 1, 0.1, null, null,
+                    $"The {stage} stage died after writing its receipt.", ["died"]);
+            }
+            if (Failure is not null || FailingStage == stage)
+            {
+                // A stage that dies partway leaves a truncated file behind, as
+                // a real exporter does. Whether that counts as an answer is
+                // decided by the run's own verdict, not by the file existing.
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                await File.WriteAllBytesAsync(outputPath, "truncated"u8.ToArray(), cancellationToken);
+                return new CompilerStageRun(false, stage, 1, 0.1, null, null,
+                    Failure ?? $"The {stage} stage refused.", ["refused"]);
+            }
 
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             await File.WriteAllBytesAsync(outputPath, Payload!, cancellationToken);
             var receipt = JsonSerializer.Serialize(new
             {
-                schema = "reference-asset-compiler.browser-payload.v1",
+                schema = $"reference-asset-compiler.{stage}.v1",
                 payload = outputPath,
                 payload_sha256 = "stand-in",
             });
@@ -200,13 +236,14 @@ public sealed class ModelGenerationApiTests
 
         var first = await RunAsync(factory, jobId);
         Assert.Equal(JobState.Completed, first.State);
-        Assert.Equal(1, compiler.Runs);
+        // The whole route: a mesh from the picture, then a payload from the mesh.
+        Assert.Equal(2, compiler.Runs);
 
-        // The delivery arrives a second time. The stage is not run again and no
+        // The delivery arrives a second time. No stage is run again and no
         // second model appears.
         var again = await RunAsync(factory, jobId);
         Assert.Equal(first.OutputAssetId, again.OutputAssetId);
-        Assert.Equal(1, compiler.Runs);
+        Assert.Equal(2, compiler.Runs);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
@@ -234,18 +271,19 @@ public sealed class ModelGenerationApiTests
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var jobId = job.RootElement.GetProperty("id").GetGuid();
 
-        // A stage that died between writing its payload and writing its receipt
-        // leaves exactly this behind.
+        // A stage that died between writing its output and writing its receipt
+        // leaves exactly this behind, for the step it was on.
         var workspace = Path.Combine(factory.DataRoot, "generated-models", jobId.ToString("N"));
         Directory.CreateDirectory(workspace);
-        await File.WriteAllBytesAsync(Path.Combine(workspace, "payload.glb"), "half written"u8.ToArray());
+        await File.WriteAllBytesAsync(
+            Path.Combine(workspace, "step-1-geometry.glb"), "half written"u8.ToArray());
 
         var finished = await RunAsync(factory, jobId);
 
         // It is run again, because half an answer is not an answer, and the
         // rerun is on the record rather than hidden inside a phase that passed.
         Assert.Equal(JobState.Completed, finished.State);
-        Assert.Equal(1, compiler.Runs);
+        Assert.Equal(2, compiler.Runs);
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
         var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
@@ -366,6 +404,199 @@ public sealed class ModelGenerationApiTests
         Assert.Equal("Completed", finished!.State);
         Assert.NotNull(finished.OutputAssetId);
         Assert.Equal(100, finished.Progress);
+    }
+
+    /// <summary>
+    /// A picture is not a mesh and a mesh is not a payload. The payload export
+    /// reads a mesh, so asking it to read an image was never going to work; the
+    /// route is two stages, and the second reads what the first wrote.
+    /// </summary>
+    [Fact]
+    public async Task TheRouteMakesAMeshFromThePictureAndAPayloadFromTheMesh()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "two-stage-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Two stages" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var jobId = job.RootElement.GetProperty("id").GetGuid();
+
+        var finished = await RunAsync(factory, jobId);
+
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.Equal(["geometry", "browser-payload"], compiler.Calls.Select(call => call.Stage));
+        // The order is not the whole claim: the payload export must read the
+        // mesh the generator wrote, not the picture the generator read.
+        Assert.EndsWith(".png", compiler.Calls[0].Source, StringComparison.Ordinal);
+        Assert.Equal("step-1-geometry.glb", compiler.Calls[1].Source);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.Equal(["geometry", "browser-payload"],
+            result.RootElement.GetProperty("route").EnumerateArray().Select(item => item.GetString()));
+        // Each step's receipt is recorded, not just the last one's: "the route
+        // succeeded" hides which half of it actually ran.
+        var steps = result.RootElement.GetProperty("steps").EnumerateArray().ToArray();
+        Assert.Equal(2, steps.Length);
+        Assert.All(steps, step => Assert.False(string.IsNullOrWhiteSpace(
+            step.GetProperty("receiptSha256").GetString())));
+    }
+
+    [Fact]
+    public async Task AStepAlreadyFinishedIsNotRunAgainAfterAnInterruption()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "resume-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Resumed" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var jobId = job.RootElement.GetProperty("id").GetGuid();
+
+        // The job reached the end of the first step and died before the second.
+        // Both halves of that step's answer are on disk, so it is whole.
+        var workspace = Path.Combine(factory.DataRoot, "generated-models", jobId.ToString("N"));
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllBytesAsync(
+            Path.Combine(workspace, "step-1-geometry.glb"), ModelFixtures.RiggedFigure());
+        await File.WriteAllTextAsync(
+            Path.Combine(workspace, "step-1-geometry.json"), "{\"schema\":\"stand-in\"}");
+
+        var finished = await RunAsync(factory, jobId);
+
+        Assert.Equal(JobState.Completed, finished.State);
+        // The whole point of keeping a result per step: the generator is the
+        // expensive half, and asking a GPU to build the same mesh a second time
+        // is the cost of resuming badly.
+        Assert.Equal(["browser-payload"], compiler.Calls.Select(call => call.Stage));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        var steps = result.RootElement.GetProperty("steps").EnumerateArray().ToArray();
+        // Adopted rather than run, and the delivery says which it was.
+        Assert.True(steps[0].GetProperty("adopted").GetBoolean());
+        Assert.False(steps[1].GetProperty("adopted").GetBoolean());
+        Assert.False(result.RootElement.GetProperty("rerunAfterIncompleteAnswer").GetBoolean());
+    }
+
+    /// <summary>
+    /// The reason a half-answer is cleared rather than merely rerun over.
+    ///
+    /// Two interruptions in a row can leave an output from one attempt beside a
+    /// receipt from the next. Both files exist, so the reconcile path would
+    /// read them as one whole answer and adopt them — a mesh and a receipt that
+    /// describe different runs, agreeing with nothing. Clearing the remains
+    /// before the rerun is what makes that pair impossible to assemble.
+    /// </summary>
+    [Fact]
+    public async Task AnOutputFromOneAttemptCannotPairWithAReceiptFromTheNext()
+    {
+        var compiler = new ControlledCompiler { ReceiptThenDieStage = "geometry" };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "mismatched-pair-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Mismatched" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var jobId = job.RootElement.GetProperty("id").GetGuid();
+
+        // What the first interruption left: an output and no receipt.
+        var workspace = Path.Combine(factory.DataRoot, "generated-models", jobId.ToString("N"));
+        var output = Path.Combine(workspace, "step-1-geometry.glb");
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllBytesAsync(output, "from the first attempt"u8.ToArray());
+
+        // The second attempt writes its receipt and then dies.
+        var finished = await RunAsync(factory, jobId);
+        Assert.Equal(JobState.Failed, finished.State);
+
+        // The first attempt's output must not still be sitting there beside the
+        // second attempt's receipt, because the next run would adopt the two of
+        // them together and never notice they came from different runs.
+        var receipt = Path.Combine(workspace, "step-1-geometry.json");
+        Assert.True(File.Exists(receipt), "the second attempt wrote its receipt");
+        Assert.False(File.Exists(output), "the first attempt's output survived the rerun");
+    }
+
+    [Fact]
+    public async Task AStageMissingFromTheCompilerRefusesTheWholeRouteAndNamesIt()
+    {
+        var compiler = new ControlledCompiler
+        {
+            // A machine with Blender but no geometry weights: the common case,
+            // and the second half of the route would work perfectly on it.
+            Capabilities = ControlledCompiler.Ready with
+            {
+                Stages =
+                [
+                    new CompilerStage("geometry", "powershell", "Needs a GPU.",
+                        "reference-asset-compiler.geometry-candidate.v1", false, ["legacy-root"]),
+                    ControlledCompiler.Stage("browser-payload"),
+                ],
+            },
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "no-weights-reference.png");
+
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/generation/readiness")
+            ?? throw new InvalidOperationException();
+
+        Assert.False(readiness.RootElement.GetProperty("canRun").GetBoolean());
+        // Name the step that is the problem: "something is missing" sends an
+        // artist looking at the wrong half of an install.
+        var detail = readiness.RootElement.GetProperty("detail").GetString()!;
+        Assert.Contains("geometry", detail, StringComparison.Ordinal);
+        Assert.Contains("legacy-root", detail, StringComparison.Ordinal);
+        Assert.Equal(["legacy-root"],
+            readiness.RootElement.GetProperty("missing").EnumerateArray().Select(item => item.GetString()));
+
+        var refused = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Never built" });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
+        // Nothing ran, including the half of the route that could have.
+        Assert.Equal(0, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task AFailedFirstStepNeverReachesTheSecond()
+    {
+        var compiler = new ControlledCompiler { FailingStage = "geometry" };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "failing-first-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Stops early" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+
+        Assert.Equal(JobState.Failed, finished.State);
+        Assert.Null(finished.OutputAssetId);
+        // Feeding the next step the truncated file the failed stage left behind
+        // would turn one honest failure into a confusing one.
+        Assert.Equal(["geometry"], compiler.Calls.Select(call => call.Stage));
+        // The compiler's own reason, not a guess made from the file system.
+        // A stage that dies partway does leave a file, so the run's verdict is
+        // what decides whether there is an answer — the file's existence is not.
+        Assert.Contains("refused", finished.Error!, StringComparison.Ordinal);
+        Assert.Contains("geometry", finished.Error!, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        Assert.Empty(await db.Assets.Where(asset => asset.Kind == "Model").ToArrayAsync());
     }
 
     private static async Task<JobSummary> RunAsync(StudioApiFactory factory, Guid jobId)
