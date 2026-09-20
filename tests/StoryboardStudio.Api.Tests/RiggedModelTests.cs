@@ -39,6 +39,12 @@ public sealed class RiggedModelTests
         Assert.Empty(rig.Findings);
         Assert.True(rig.AnimationReady);
 
+        // The skeleton's own identity, computed the way the Reference Asset
+        // Compiler computes it. The compiler's Python asserts the same string
+        // for this same file; that agreement is what lets a clip bind to a rig
+        // that matches no documented profile.
+        Assert.Equal("123be375436770f873a157e54ca00299d417bbb08a79a0abe6d39e0ace223ea7", rig.Fingerprint);
+
         // The hierarchy is read from the file, not guessed from the names.
         var head = rig.Bones.Single(bone => bone.Name == "Head");
         Assert.Equal("Neck", head.Parent);
@@ -53,6 +59,35 @@ public sealed class RiggedModelTests
         var rightHand = rig.Bones.Single(bone => bone.Name == "RightHand");
         Assert.Equal(0.71, leftHand.RestWorldPosition[0], 4);
         Assert.Equal(-0.67, rightHand.RestWorldPosition[0], 4);
+    }
+
+    [Fact]
+    public void TheFingerprintReadsTheValuesTheFileStoresRatherThanTheRoundedOnes()
+    {
+        // The bone summaries round to four decimals for display. A fingerprint
+        // taken from those would agree with itself and disagree with the
+        // compiler, so this moves one bone below that rounding and requires the
+        // fingerprint to notice. The fixture's own transforms are exact at four
+        // decimals, which is why this case has to be made deliberately.
+        var base_ = GlbModelInspector.Inspect(ModelFixtures.RiggedFigure());
+        var nudged = GlbModelInspector.Inspect(MutateRig(document =>
+        {
+            var node = document["nodes"]![6]!;
+            var translation = node["translation"]!.AsArray();
+            translation[0] = translation[0]!.GetValue<double>() + 0.00001;
+        }));
+
+        Assert.True(nudged.Ok, nudged.Error);
+        Assert.NotNull(base_.Profile!.Rig.Fingerprint);
+        Assert.NotEqual(base_.Profile!.Rig.Fingerprint, nudged.Profile!.Rig.Fingerprint);
+        // A tenth of that is below the quantization step and is the same rig.
+        var imperceptible = GlbModelInspector.Inspect(MutateRig(document =>
+        {
+            var node = document["nodes"]![6]!;
+            var translation = node["translation"]!.AsArray();
+            translation[0] = translation[0]!.GetValue<double>() + 0.0000001;
+        }));
+        Assert.Equal(base_.Profile!.Rig.Fingerprint, imperceptible.Profile!.Rig.Fingerprint);
     }
 
     [Fact]

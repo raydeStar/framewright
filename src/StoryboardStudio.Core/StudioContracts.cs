@@ -210,7 +210,13 @@ public sealed record ModelRigSummary(
     int SkinCount, int BoneCount, int SkinnedVertexCount, int MaxInfluencesPerVertex,
     ModelBoneSummary[] Bones,
     bool TransformsFinite, bool BindPoseValid, bool SkinWeightsValid, int SkinWeightsChecked,
-    string[] Findings, bool AnimationReady);
+    string[] Findings, bool AnimationReady,
+    /// <summary>
+    /// This exact skeleton's identity, agreed with the compiler that produced
+    /// it. A clip authored against a matching fingerprint belongs to this rig;
+    /// it is not a claim that anything retargets.
+    /// </summary>
+    string? Fingerprint = null);
 
 /// <summary>A rotation in radians applied to one named bone, on top of its rest pose.</summary>
 public sealed record RigBonePoseRequest(string Bone, double[] Rotation);

@@ -46,7 +46,13 @@ public sealed record GlbRigProfile(
     int SkinCount, int BoneCount, int SkinnedVertexCount, int MaxInfluencesPerVertex,
     GlbBoneSummary[] Bones,
     bool TransformsFinite, bool BindPoseValid, bool SkinWeightsValid, int SkinWeightsChecked,
-    string[] Findings, bool AnimationReady);
+    string[] Findings, bool AnimationReady,
+    /// <summary>
+    /// This exact skeleton's identity, computed the way the compiler computes
+    /// it, from the values the file stores rather than the rounded ones the
+    /// bone summaries display. Null when the skeleton cannot be fingerprinted.
+    /// </summary>
+    string? Fingerprint = null);
 
 /// <summary>
 /// Reads a GLB's skin, skeleton, and bind data and says plainly what is sound.
@@ -116,6 +122,10 @@ public static class GlbRigInspector
             names[joint] = Name(nodes[joint], joint);
 
         var bones = new List<GlbBoneSummary>(joints.Length);
+        // The fingerprint reads the values the file stores. The summaries below
+        // round for display, and a fingerprint taken from rounded values would
+        // not match the compiler's.
+        var identity = new List<SkeletonFingerprint.Joint>(joints.Length);
         // Rest transforms compose down the hierarchy, so a bone under a rotated
         // or scaled parent reports where it actually rests, not where its own
         // translation alone would put it.
@@ -134,6 +144,9 @@ public static class GlbRigInspector
             var placed = parent is { } known && world.TryGetValue(known, out var parentWorld) ? local * parentWorld : local;
             world[joint] = placed;
             var position = placed.Translation;
+            identity.Add(new SkeletonFingerprint.Joint(
+                names[joint], parent is { } identityParent ? names[identityParent] : null,
+                translation, quaternion, scale));
             bones.Add(new GlbBoneSummary(
                 names[joint], parent is { } above ? names[above] : null, Depth(joint, parentOf, joints),
                 [Round(translation.X), Round(translation.Y), Round(translation.Z)],
@@ -159,6 +172,9 @@ public static class GlbRigInspector
         if (!ready && matched)
             findings.Add("This rig matches the profile but did not pass every check, so it is not animation-ready.");
 
+        var fingerprint = SkeletonFingerprint.Compute(identity);
+        if (!fingerprint.Ok && fingerprint.Error is { } fingerprintError) findings.Add(fingerprintError);
+
         return new GlbRigProfile(
             HasSkeleton: true,
             ProfileId: matched ? expected.Id : "unknown",
@@ -170,7 +186,8 @@ public static class GlbRigInspector
             Bones: [.. bones],
             TransformsFinite: transformsFinite, BindPoseValid: bindPoseValid,
             SkinWeightsValid: weightsValid, SkinWeightsChecked: checkedVertices,
-            Findings: [.. findings], AnimationReady: ready);
+            Findings: [.. findings], AnimationReady: ready,
+            Fingerprint: fingerprint.Fingerprint);
     }
 
     private static GlbRigProfile Unknown(int skinCount, List<string> findings) => new(

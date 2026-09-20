@@ -273,7 +273,7 @@ public sealed class AssetStore
             bone.Name, bone.Parent, bone.Depth,
             bone.RestTranslation, bone.RestRotation, bone.RestScale, bone.RestWorldPosition))],
         rig.TransformsFinite, rig.BindPoseValid, rig.SkinWeightsValid, rig.SkinWeightsChecked,
-        rig.Findings, rig.AnimationReady);
+        rig.Findings, rig.AnimationReady, rig.Fingerprint);
 
     /// <summary>
     /// Where this exact model revision's bones land under one pose. Nothing is
