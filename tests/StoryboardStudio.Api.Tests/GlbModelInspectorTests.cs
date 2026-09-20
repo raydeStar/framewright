@@ -145,17 +145,18 @@ public static class ModelFixtures
     private const uint JsonChunk = 0x4E4F534A;
 
     public static byte[] AsymmetricBlock() => File.ReadAllBytes(Path());
+    public static byte[] AsymmetricPost() => File.ReadAllBytes(Path("asymmetric-post.glb"));
 
-    public static string Path()
+    public static string Path(string fileName = "asymmetric-block.glb")
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = System.IO.Path.Combine(directory.FullName, "fixtures", "glb", "asymmetric-block.glb");
+            var candidate = System.IO.Path.Combine(directory.FullName, "fixtures", "glb", fileName);
             if (File.Exists(candidate)) return candidate;
             directory = directory.Parent;
         }
-        throw new FileNotFoundException("The asymmetric-block.glb fixture was not found above the test output directory.");
+        throw new FileNotFoundException($"The {fileName} fixture was not found above the test output directory.");
     }
 
     public static byte[] Mutate(Action<JsonObject> edit)

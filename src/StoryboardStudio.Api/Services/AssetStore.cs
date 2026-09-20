@@ -373,7 +373,10 @@ public sealed class AssetStore
     {
         var asset = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == assetId, cancellationToken);
         if (asset is null) return RepositoryResult<IReadOnlyList<AssetSummary>>.NotFound();
-        if (asset.Kind != AssetKind.Image.ToString()) return RepositoryResult<IReadOnlyList<AssetSummary>>.Invalid("Only image assets have visual revision stacks.");
+        // Images and models both have reusable revision stacks. Audio and video
+        // takes do not: their versions live on the shot, not on the media.
+        if (asset.Kind != nameof(AssetKind.Image) && asset.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<IReadOnlyList<AssetSummary>>.Invalid("Only image and model assets have revision stacks.");
         if (asset.RevisionFamilyId is null) return RepositoryResult<IReadOnlyList<AssetSummary>>.Ok([Map(asset)]);
         var family = await db.Assets.AsNoTracking()
             .Where(x => x.RevisionFamilyId == asset.RevisionFamilyId)
@@ -387,8 +390,12 @@ public sealed class AssetStore
         var parent = await db.Assets.SingleOrDefaultAsync(x => x.Id == parentAssetId, cancellationToken);
         var next = await db.Assets.SingleOrDefaultAsync(x => x.Id == request.AssetId, cancellationToken);
         if (parent is null || next is null) return RepositoryResult<AssetSummary>.NotFound();
-        if (parent.Kind != AssetKind.Image.ToString() || next.Kind != AssetKind.Image.ToString())
-            return RepositoryResult<AssetSummary>.Invalid("Revision stacks accept image assets only.");
+        if (parent.Kind != nameof(AssetKind.Image) && parent.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<AssetSummary>.Invalid("Revision stacks accept image and model assets only.");
+        // A revision has to be the same kind of thing it revises, or a stack
+        // could quietly mix a picture into a model's history.
+        if (parent.Kind != next.Kind)
+            return RepositoryResult<AssetSummary>.Invalid($"A {parent.Kind.ToLowerInvariant()} revision must itself be a {parent.Kind.ToLowerInvariant()} asset.");
         if (parent.Id == next.Id) return RepositoryResult<AssetSummary>.Invalid("Choose a different image for the new revision.");
         var familyId = parent.RevisionFamilyId ?? Guid.NewGuid();
         if (next.RevisionFamilyId == familyId)
@@ -426,7 +433,7 @@ public sealed class AssetStore
     {
         var asset = await db.Assets.SingleOrDefaultAsync(x => x.Id == assetId, cancellationToken);
         if (asset is null) return RepositoryResult<AssetSummary>.NotFound();
-        if (asset.RevisionFamilyId is null) return RepositoryResult<AssetSummary>.Invalid("This image does not have a revision stack yet.");
+        if (asset.RevisionFamilyId is null) return RepositoryResult<AssetSummary>.Invalid("This asset does not have a revision stack yet.");
         var family = await db.Assets.Where(x => x.RevisionFamilyId == asset.RevisionFamilyId).ToListAsync(cancellationToken);
         foreach (var member in family) member.IsCurrentRevision = member.Id == asset.Id;
         asset.IsArchived = false;

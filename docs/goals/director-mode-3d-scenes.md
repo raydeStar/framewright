@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M05. M00, M01 and M04 are VERIFIED; M02 and M03 are CONTRACT_VERIFIED.  
+**Active milestone:** M06. M00, M01, M04 and M05 are VERIFIED; M02 and M03 are CONTRACT_VERIFIED.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -433,10 +433,10 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** M05 (durable model library and revisions).
-- **Last verified milestone:** M04. M02 and M03 remain CONTRACT_VERIFIED pending an actual WebMCP host.
+- **Active milestone:** M06 (a small persistent scene).
+- **Last verified milestone:** M05. M02 and M03 remain CONTRACT_VERIFIED pending an actual WebMCP host.
 - **External acceptance blockers:** (1) No Reference Asset Compiler checkout - blocks M09/M14. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
-- **Next action:** Implement M05 on `feature/director-mode`: reusable model library records, revision selection, provenance, and non-destructive archive on top of the M04 import.
+- **Next action:** Implement M06 on `feature/director-mode`: a scene with distinct instances of library model revisions, basic lighting and camera, and save/reopen. M07 and M08 (generation) are deferred at the user's request until their existing pipeline is connected.
 
 ### Milestone status
 
@@ -447,10 +447,10 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M02 | CONTRACT_VERIFIED | M02 acceptance record below; no actual agent host available |
 | M03 | CONTRACT_VERIFIED | M03 acceptance record below; no actual agent host available |
 | M04 | VERIFIED | M04 acceptance record below |
-| M05 | IN_PROGRESS | Active; depends on M04 |
-| M06 | NOT_STARTED | None |
-| M07 | NOT_STARTED | None |
-| M08 | NOT_STARTED | None |
+| M05 | VERIFIED | M05 acceptance record below |
+| M06 | IN_PROGRESS | Active; depends on M05 |
+| M07 | DEFERRED | User is supplying an existing generation pipeline; revisit with them |
+| M08 | DEFERRED | Depends on M07; revisit with the user's pipeline |
 | M09 | NOT_STARTED | None |
 | M10 | NOT_STARTED | None |
 | M11 | NOT_STARTED | None |
@@ -826,6 +826,71 @@ Bug-detection check: With the inspector ignoring node transforms, the fixture te
   bounds, then both passed again once the sabotage was reverted.
 Checkpoint: see the M04 commit on feature/director-mode.
 Next dependency-ready milestone: M05.
+```
+
+### M05 acceptance record
+
+```text
+Milestone / status / date: M05 / VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M05 commit
+Outcome and supported constraints: A model is a reusable library record rather than a one-off
+  upload. It carries a revision stack, editable organisation (name, tags, notes, collection),
+  provenance, and a non-destructive archive, and every one of those survives the application
+  closing and reopening. Revisions never overwrite each other: each keeps its own stored file,
+  measurements, and materials, and selecting an earlier revision as current is an ordinary
+  reversible move. A revision must be the same kind of asset it revises, so a picture cannot enter
+  a model's history. Identical bytes are stored once on disk but never shared across projects: a
+  second project importing the same model gets its own record and cannot reach the first
+  project's.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/AssetStore.cs: ListRevisionsAsync and AddRevisionAsync now
+    accept models, with a kind-match guard; PromoteRevisionAsync was already kind-agnostic.
+  - src/storyboard-studio-web/src/components/ModelInspectionWorkspace.tsx: revision stack with
+    per-revision inspection, add-revision import, make-current, editable library details, and
+    archive/restore.
+  - Reused unchanged: the existing asset revision machinery built for images, the content-
+    addressed store, project query filters, the metadata and archive endpoints, and the M04
+    import and profile routes.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check (exit code checked directly, not through a pipe)
+  - npx playwright test models.spec.ts --project=desktop
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 168 backend tests passed, 0 failed (164 before this milestone plus four model-library tests).
+     Frontend typecheck, lint, and format checks clean.
+  A: 102 browser journeys passed, 0 failed, 6 intentionally skipped (108 discovered) against the
+     real service and real persistence in a disposable temp data root. The new journey imports a
+     model of its own, renames and tags it, adds a second revision, moves between revisions and
+     confirms each reports its own geometry, makes the earlier one current, reloads the page and
+     confirms the saved state reopens, then archives and restores it.
+  H: NOT REQUIRED for M05. No agent host is involved in library organisation.
+  L: NOT RUN. No provider is involved.
+  V: NOT RUN. No human visual acceptance was required for M05.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: The restart check is the centrepiece - a model is imported,
+  renamed and tagged, given a second revision, and then the whole service is disposed and
+  reconstructed on the same data root, where the exact revision, its metadata, its provenance
+  note, and its own geometry and materials all reopen unchanged. Adding an image as a revision of
+  a model is refused and leaves the stack untouched. An archived model still resolves its bytes
+  and its profile. Another project cannot read the model's profile or its revision stack.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the existing image revision stacks, which share this machinery.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually). Human visual acceptance (not required). A real WebGL-less browser.
+Human approvals actually recorded, where required: None required. No provider, no ratification,
+  no destructive action; archive is reversible by design.
+Known defects and dependency impact: None found. Models still have no scene placement, which is
+  what M06 adds.
+Permitted deferrals: Bulk import, automated tagging, and elaborate thumbnails, all explicitly
+  deferred by M05.
+Bug-detection check: With the model profile resolving the family's current revision instead of the
+  requested one, the restart test failed as intended (expected [2, 1, 0.75], got [1, 2, 0.45]) and
+  passed again once the sabotage was reverted.
+Checkpoint: see the M05 commit on feature/director-mode.
+Next dependency-ready milestone: M06. M07 and M08 are deferred at the user's request: they intend
+  to supply an existing generation pipeline, so the image-to-model route will be designed against
+  that rather than invented here.
 ```
 
 ### Acceptance record template

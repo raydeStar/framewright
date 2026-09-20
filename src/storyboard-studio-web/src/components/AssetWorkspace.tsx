@@ -122,7 +122,7 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     })
   }, [rawGenerationReferences])
 
-  if (selected?.kind === 'Model') return <ModelInspectionWorkspace asset={selected} onBack={() => setSelectedId(undefined)} onError={setError} />
+  if (selected?.kind === 'Model') return <ModelInspectionWorkspace asset={selected} onBack={() => setSelectedId(undefined)} onError={setError} onChanged={async message => { await refresh(); onToast(message) }} />
   if (selected?.kind === 'Image') return <ImageRevisionWorkspace asset={selected} collections={collections} shots={studio.shots} references={generationReferences} onBack={() => setSelectedId(undefined)} onOpenGeneration={onOpenGeneration} onChanged={async message => { await refresh(); onToast(message) }} onEditAuthority={onEditAuthority} />
 
   return <main className="workspace asset-workspace">
