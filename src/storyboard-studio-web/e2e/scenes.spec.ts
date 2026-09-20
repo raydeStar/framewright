@@ -147,3 +147,119 @@ test('removing an object leaves the model in the library and a stale save is ref
   expect(profile.ok()).toBe(true)
   verifyConsole()
 })
+
+test('an agent directs one of two identical props and leaves the other alone', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  const modelName = `scene-direct-${label}`
+
+  // A WebMCP-capable browser, simulated by the same shim the other agent
+  // journeys use. This proves the contract, not native host support.
+  await page.addInitScript(() => {
+    const tools = new Map<string, unknown>()
+    Object.defineProperty(window, '__framewrightTools', { value: tools })
+    Object.defineProperty(document, 'modelContext', { configurable: true, value: {
+      registerTool(tool: { name: string }, options: { signal: AbortSignal }) {
+        tools.set(tool.name, tool)
+        options.signal.addEventListener('abort', () => tools.delete(tool.name), { once: true })
+      },
+    } })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: `${modelName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, `direct-${label}`),
+  })
+  await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+
+  // Two instances of one model.
+  const objects = page.getByTestId('scene-objects')
+  await objects.getByLabel('Add model to scene').selectOption({ label: modelName })
+  await page.getByTestId('scene-placement').getByLabel('Object name').fill('Left prop')
+  await page.getByTestId('scene-placement').getByLabel('position X').fill('-3')
+  await objects.getByLabel('Add model to scene').selectOption({ label: modelName })
+  await page.getByTestId('scene-placement').getByLabel('Object name').fill('Right prop')
+  await page.getByTestId('scene-placement').getByLabel('position X').fill('3')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+
+  // Select the left prop, so that is what the agent is looking at.
+  await objects.getByRole('button', { name: /Left prop/ }).click()
+  await expect(page.getByTestId('scene-placement').getByLabel('Object name')).toHaveValue('Left prop')
+
+  type Envelope = { ok: boolean; code: string; data?: { stateToken?: string; selectedObject?: { instanceId: string; name: string }; scene?: { version: number }; objects?: unknown[] } }
+  const call = (name: string, input: object) => page.evaluate(({ name, input }) => {
+    const tools = (window as unknown as { __framewrightTools: Map<string, { execute: (input: object, context: object) => Promise<unknown> }> }).__framewrightTools
+    return tools.get(name)!.execute(input, {}) as Promise<unknown>
+  }, { name, input }) as Promise<Envelope>
+
+  await expect.poll(async () => (await call('get_director_context', {})).code).toBe('scene_director_context')
+  const context = await call('get_director_context', {})
+  expect(context.data!.selectedObject!.name).toBe('Left prop')
+  expect(context.data!.objects).toHaveLength(2)
+
+  const proposal = await call('propose_scene_edit', {
+    instanceId: context.data!.selectedObject!.instanceId,
+    expectedSceneVersion: context.data!.scene!.version,
+    observedStateToken: context.data!.stateToken,
+    direction: 'Turn the left prop to face the gate.',
+    rationale: 'It reads as facing away from camera.',
+    rotation: [0, 1.2, 0],
+    idempotencyKey: `scene-${Date.now()}-${Math.random()}`,
+  })
+  expect(proposal.ok).toBe(true)
+
+  // Staging changed nothing: the scene is still at the saved version.
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+
+  const staged = page.getByTestId('scene-proposals')
+  await expect(staged.getByTestId('scene-proposal').first()).toContainText('Left prop')
+  await staged.getByRole('button', { name: 'Apply to this object' }).first().click()
+
+  // Applying puts the change in working state for that one object; saving is
+  // still the artist's move.
+  await expect(page.getByTestId('scene-placement').getByLabel('rotation Y')).toHaveValue('1.2')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 3')
+
+  const scenes = await (await page.request.get('/api/scenes')).json()
+  const scene = await (await page.request.get(`/api/scenes/${scenes[0].id}`)).json()
+  const left = scene.instances.find((instance: { name: string }) => instance.name === 'Left prop')
+  const right = scene.instances.find((instance: { name: string }) => instance.name === 'Right prop')
+  expect(left.rotation[1]).toBeCloseTo(1.2, 4)
+  // The identical prop beside it never moved.
+  expect(right.rotation[1]).toBe(0)
+  expect(right.position[0]).toBe(3)
+  verifyConsole()
+})
+
+test('the scene stays fully usable without any browser agent', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  const modelName = `scene-manual-${label}`
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: `${modelName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, `manual-${label}`),
+  })
+  await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
+
+  // No WebMCP in this browser at all.
+  expect(await page.evaluate(() => 'modelContext' in document)).toBe(false)
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  await page.getByTestId('scene-objects').getByLabel('Add model to scene').selectOption({ label: modelName })
+  await page.getByTestId('scene-placement').getByLabel('position Y').fill('1.5')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+  await expect(page.getByTestId('scene-proposals')).toContainText('No proposals yet')
+  verifyConsole()
+})

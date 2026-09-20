@@ -13,6 +13,14 @@ const noShotOpen: WebMcpEnvelope = {
   ok: false, status: 'error', code: 'no_shot_open',
   message: 'No shot is open in the workspace. Ask the artist to open one, then read the context again.', retryable: true,
 }
+const noSceneOpen: WebMcpEnvelope = {
+  ok: false, status: 'error', code: 'no_scene_open',
+  message: 'No scene is open in the workspace. Ask the artist to open one, then read the context again.', retryable: true,
+}
+const wrongSurface: WebMcpEnvelope = {
+  ok: false, status: 'error', code: 'wrong_surface',
+  message: 'That tool applies to a different workspace than the one the artist has open. Read the director context again.', retryable: true,
+}
 const shotIdSchema = {
   type: 'object', properties: { shotId: { type: 'string', format: 'uuid', maxLength: 36 } }, required: ['shotId'], additionalProperties: false,
 } as const
@@ -20,7 +28,7 @@ const shotIdSchema = {
 export const FRAMEWRIGHT_WEBMCP_TOOL_NAMES = [
   'get_storyboard_context', 'list_storyboard_shots', 'get_shot_details',
   'inspect_shot_continuity', 'get_director_context', 'observe_current_frame',
-  'propose_shot_revision', 'get_generation_status',
+  'propose_shot_revision', 'propose_scene_edit', 'get_generation_status',
 ] as const
 
 export interface WebMcpBridgeOptions {
@@ -32,6 +40,8 @@ export interface WebMcpBridgeOptions {
   onActivity: (tool: string, state: 'Running' | 'Succeeded' | 'Failed' | 'Cancelled', message: string) => void
   onInspectShot: (shotId: string, continuity: boolean) => void
   onProposal: (proposal?: ShotRevisionProposalSummary) => void
+  /** A scene proposal landed; the open scene should show it. */
+  onSceneProposal: () => void
   onJobStatus: (jobId: string) => void
 }
 
@@ -90,7 +100,12 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
       inputSchema: emptySchema, annotations: read,
       execute: run('get_director_context', (_input, signal) => {
         const view = options.getDirectorView()
-        return view ? studioApi.webMcpDirectorContext(view, signal) : Promise.resolve(noShotOpen)
+        if (!view) return Promise.resolve(noShotOpen)
+        // One tool, two surfaces: the packet describes whichever the artist has
+        // open, so an agent never has to guess which workspace it is looking at.
+        return view.kind === 'scene'
+          ? studioApi.webMcpSceneContext(view.sceneId, view.instanceId, view.directorMode ?? false, signal)
+          : studioApi.webMcpDirectorContext(view, signal)
       }),
     },
     {
@@ -101,7 +116,9 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
       }, annotations: read,
       execute: run('observe_current_frame', (input, signal) => {
         const view = options.getDirectorView()
-        return view ? studioApi.webMcpDirectorObservation(view, String(input.stateToken), signal) : Promise.resolve(noShotOpen)
+        if (!view) return Promise.resolve(noShotOpen)
+        if (view.kind !== 'shot') return Promise.resolve(wrongSurface)
+        return studioApi.webMcpDirectorObservation(view, String(input.stateToken), signal)
       }),
     },
     {
@@ -121,6 +138,34 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
       execute: run('propose_shot_revision', async (input, signal) => {
         const result = await studioApi.webMcpPropose(input as Parameters<typeof studioApi.webMcpPropose>[0], signal)
         if (result.ok) options.onProposal(result.data)
+        return result
+      }),
+    },
+    {
+      name: 'propose_scene_edit', title: 'Propose a scene edit',
+      description: 'Stage a reversible change to one named scene object, bound to a scene director context you have read. It moves nothing until the artist applies it and saves.',
+      inputSchema: {
+        type: 'object', properties: {
+          instanceId: { type: 'string', format: 'uuid', maxLength: 36 },
+          expectedSceneVersion: { type: 'integer', minimum: 1, maximum: 1000000 },
+          observedStateToken: { type: 'string', minLength: 64, maxLength: 64 },
+          direction: { type: 'string', minLength: 1, maxLength: 1000 },
+          rationale: { type: 'string', maxLength: 600 },
+          position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+          rotation: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+          scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+          idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+        },
+        required: ['instanceId', 'expectedSceneVersion', 'observedStateToken', 'direction', 'rationale', 'idempotencyKey'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: false },
+      execute: run('propose_scene_edit', async (input, signal) => {
+        const view = options.getDirectorView()
+        if (!view) return noSceneOpen
+        if (view.kind !== 'scene') return wrongSurface
+        const result = await studioApi.webMcpProposeSceneEdit({ ...input, sceneId: view.sceneId }, signal)
+        if (result.ok) options.onSceneProposal()
         return result
       }),
     },

@@ -73,6 +73,30 @@ public enum ManifestState
     Cancelled
 }
 
+/// <summary>
+/// A note on one scene object. It reports whether the revision it was anchored
+/// to is still the one in the scene, so a note never silently describes
+/// geometry that has changed underneath it.
+/// </summary>
+public sealed record SceneAnnotationSummary(
+    Guid Id, Guid SceneId, Guid InstanceId, Guid AssetId, string InstanceName,
+    double[] Anchor, SceneCameraSummary Camera, string Body, string State,
+    bool Stale, bool Orphaned, DateTimeOffset CreatedAt);
+
+public sealed record CreateSceneAnnotationRequest(Guid InstanceId, double[] Anchor, SceneCameraSummary Camera, string Body);
+
+/// <summary>A staged change to exactly one instance. Applying it is the artist's move.</summary>
+public sealed record SceneProposalSummary(
+    Guid Id, Guid SceneId, Guid InstanceId, string InstanceName, int BaseSceneVersion,
+    string Direction, string Rationale,
+    double[]? Position, double[]? Rotation, double[]? Scale,
+    string State, DateTimeOffset CreatedAt, DateTimeOffset? DecidedAt, DateTimeOffset? AppliedAt);
+
+public sealed record CreateSceneProposalRequest(
+    Guid SceneId, Guid InstanceId, int ExpectedSceneVersion, string ObservedStateToken,
+    string Direction, string Rationale,
+    double[]? Position, double[]? Rotation, double[]? Scale, string IdempotencyKey);
+
 /// <summary>Where the scene's inspection camera sits. Orbit values, not a matrix, so a saved view reopens exactly.</summary>
 public sealed record SceneCameraSummary(double Yaw, double Pitch, double Distance, double[] Target, double FieldOfView);
 

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { Box, Copy, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react'
+import { Box, Check, Copy, LoaderCircle, MessageCirclePlus, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
-import type { AssetSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneSummary } from '../types'
+import type { AssetSummary, SceneAnnotationSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneSummary } from '../types'
 
 // three.js loads only when a scene is actually opened.
 const SceneViewport = lazy(() => import('./SceneViewport'))
@@ -17,7 +17,13 @@ const axes = ['X', 'Y', 'Z'] as const
  * is refused by the service and surfaced here, so newer work is never silently
  * overwritten.
  */
-export default function SceneWorkspace({ onToast }: { onToast: (message: string) => void }) {
+export default function SceneWorkspace({ onToast, proposalSignal, onDirectorView }: {
+  onToast: (message: string) => void
+  /** Bumped when a browser agent stages a scene proposal. */
+  proposalSignal?: number
+  /** Publishes what is open so browser tools describe this exact selection. */
+  onDirectorView?: (view: { sceneId: string; instanceId?: string } | undefined) => void
+}) {
   const [list, setList] = useState<SceneListItem[]>([])
   const [scene, setScene] = useState<SceneSummary>()
   const [models, setModels] = useState<AssetSummary[]>([])
@@ -26,6 +32,18 @@ export default function SceneWorkspace({ onToast }: { onToast: (message: string)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
+  const [annotations, setAnnotations] = useState<SceneAnnotationSummary[]>([])
+  const [proposals, setProposals] = useState<SceneProposalSummary[]>([])
+  const [noteMode, setNoteMode] = useState(false)
+  const [pendingNote, setPendingNote] = useState<{ instanceId: string; anchor: number[] }>()
+  const [noteText, setNoteText] = useState('')
+
+  const loadDirection = useCallback(async (sceneId: string) => {
+    try {
+      const [notes, staged] = await Promise.all([studioApi.sceneAnnotations(sceneId), studioApi.sceneProposals(sceneId)])
+      setAnnotations(notes); setProposals(staged)
+    } catch { setAnnotations([]); setProposals([]) }
+  }, [])
 
   const refreshList = useCallback(async () => {
     try { setList(await studioApi.scenes()) } catch { setList([]) }
@@ -41,20 +59,21 @@ export default function SceneWorkspace({ onToast }: { onToast: (message: string)
         setModels(assets.filter(asset => asset.kind === 'Model' && !asset.isArchived))
         if (scenes.length > 0) {
           const opened = await studioApi.scene(scenes[0].id)
-          if (live) { setScene(opened); setDirty(false) }
+          if (live) { setScene(opened); setDirty(false); await loadDirection(opened.id) }
         }
       } catch (reason) {
         if (live) setError(reason instanceof Error ? reason.message : 'The scene list could not be opened.')
       } finally { if (live) setLoading(false) }
     })()
     return () => { live = false }
-  }, [])
+  }, [loadDirection])
 
   const open = async (sceneId: string) => {
     setError(undefined)
     try {
       const opened = await studioApi.scene(sceneId)
       setScene(opened); setSelectedId(undefined); setDirty(false)
+      await loadDirection(sceneId)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'That scene could not be opened.') }
   }
 
@@ -63,6 +82,9 @@ export default function SceneWorkspace({ onToast }: { onToast: (message: string)
     try {
       const created = await studioApi.createScene(`Scene ${list.length + 1}`)
       setScene(created); setSelectedId(undefined); setDirty(false)
+      // A new scene starts with no notes and no proposals; keeping the previous
+      // scene's would show one scene's direction against another's objects.
+      await loadDirection(created.id)
       await refreshList()
       onToast(`${created.name} created.`)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'That scene could not be created.') }
@@ -123,7 +145,84 @@ export default function SceneWorkspace({ onToast }: { onToast: (message: string)
     } finally { setBusy(false) }
   }
 
+  // Tell the shell what is open, so an agent reading context sees this object.
+  useEffect(() => {
+    onDirectorView?.(scene ? { sceneId: scene.id, instanceId: selectedId } : undefined)
+    return () => onDirectorView?.(undefined)
+  }, [onDirectorView, scene, selectedId])
+
+  useEffect(() => {
+    if (!scene || !proposalSignal) return
+    void loadDirection(scene.id)
+  }, [proposalSignal, scene, loadDirection])
+
   const selected = useMemo(() => scene?.instances.find(item => item.id === selectedId), [scene, selectedId])
+  const selectedNotes = useMemo(
+    () => annotations.filter(note => note.instanceId === selectedId && note.state === 'Open'),
+    [annotations, selectedId])
+
+  // A note is placed on the object under the pointer and anchored in that
+  // object's own space, so it keeps meaning the same spot when the object moves.
+  const placeNote = (instanceId: string, anchor: [number, number, number]) => {
+    setSelectedId(instanceId)
+    setPendingNote({ instanceId, anchor })
+    setNoteText('')
+    setNoteMode(false)
+  }
+
+  const saveNote = async () => {
+    if (!scene || !pendingNote || !noteText.trim()) return
+    setBusy(true); setError(undefined)
+    try {
+      await studioApi.addSceneAnnotation(scene.id, {
+        instanceId: pendingNote.instanceId, anchor: pendingNote.anchor, camera: scene.camera, body: noteText.trim(),
+      })
+      setPendingNote(undefined); setNoteText('')
+      await loadDirection(scene.id)
+      onToast('Note pinned to that object.')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'That note could not be saved.') }
+    finally { setBusy(false) }
+  }
+
+  const resolveNote = async (annotationId: string) => {
+    if (!scene) return
+    setBusy(true)
+    try { await studioApi.resolveSceneAnnotation(annotationId); await loadDirection(scene.id) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'That note could not be resolved.') }
+    finally { setBusy(false) }
+  }
+
+  // Applying a proposal moves its one instance into working state. The artist
+  // still presses Save, which is the only thing that writes to the scene.
+  const applyProposal = async (proposal: SceneProposalSummary) => {
+    if (!scene) return
+    setBusy(true); setError(undefined)
+    try {
+      await studioApi.acceptSceneProposal(proposal.id)
+      const applied = await studioApi.applySceneProposal(proposal.id)
+      edit(current => ({
+        ...current,
+        instances: current.instances.map(instance => instance.id === applied.instanceId ? {
+          ...instance,
+          position: applied.position ?? instance.position,
+          rotation: applied.rotation ?? instance.rotation,
+          scale: applied.scale ?? instance.scale,
+        } : instance),
+      }))
+      setSelectedId(applied.instanceId)
+      await loadDirection(scene.id)
+      onToast(`${applied.instanceName} updated in the working scene. Save to keep it.`)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'That proposal could not be applied.') }
+    finally { setBusy(false) }
+  }
+
+  const rejectProposal = async (proposal: SceneProposalSummary) => {
+    if (!scene) return
+    setBusy(true)
+    try { await studioApi.rejectSceneProposal(proposal.id); await loadDirection(scene.id) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'That proposal could not be rejected.') }
+    finally { setBusy(false) }
+  }
 
   if (loading) return <main className="workspace workspace-loading" role="status"><LoaderCircle className="spin" /><p>Opening scenes</p></main>
 
@@ -159,7 +258,9 @@ export default function SceneWorkspace({ onToast }: { onToast: (message: string)
                 camera={scene.camera}
                 environment={scene.environment}
                 selectedId={selectedId}
+                noteMode={noteMode}
                 onSelect={setSelectedId}
+                onPlaceNote={placeNote}
                 onCameraChange={(camera: SceneCameraSummary) => edit(current => ({ ...current, camera }))}
               />
             </Suspense>
@@ -221,6 +322,53 @@ export default function SceneWorkspace({ onToast }: { onToast: (message: string)
               </div>
               <p className="model-note">Removing an object takes it out of this scene only. The model stays in the library.</p>
             </section>}
+
+            <section data-testid="scene-notes">
+              <h2>Notes <span>{selectedNotes.length}</span></h2>
+              {!selected && <p className="model-note">Select an object to see or add its notes.</p>}
+              {selected && <>
+                <button type="button" className={noteMode ? 'primary compact' : ''} data-testid="scene-note-mode"
+                  onClick={() => { setNoteMode(value => !value); setPendingNote(undefined) }}>
+                  {noteMode ? <X size={15} /> : <MessageCirclePlus size={15} />}{noteMode ? 'Cancel note' : 'Add note'}
+                </button>
+                {noteMode && <p className="model-note">Click the exact spot on the object in the view.</p>}
+                {pendingNote && <div className="scene-note-composer">
+                  <label>What needs work here?<textarea aria-label="Scene note" maxLength={2000} value={noteText}
+                    onChange={event => setNoteText(event.target.value)} /></label>
+                  <div>
+                    <button type="button" onClick={() => { setPendingNote(undefined); setNoteText('') }}>Cancel</button>
+                    <button type="button" className="primary compact" disabled={busy || !noteText.trim()} onClick={() => void saveNote()}>Pin note</button>
+                  </div>
+                </div>}
+                <ul className="scene-note-list">
+                  {selectedNotes.map(note => <li key={note.id} data-stale={note.stale ? 'true' : 'false'}>
+                    <p>{note.body}</p>
+                    <small>
+                      anchored at ({note.anchor.map(value => value.toFixed(2)).join(', ')})
+                      {note.stale ? ' · the model revision changed under this note' : ''}
+                    </small>
+                    <button type="button" disabled={busy} onClick={() => void resolveNote(note.id)}><Check size={14} />Resolve</button>
+                  </li>)}
+                </ul>
+                {selectedNotes.length === 0 && !pendingNote && <p className="model-note">No open notes on this object.</p>}
+              </>}
+            </section>
+
+            <section data-testid="scene-proposals">
+              <h2>Agent proposals <span>{proposals.filter(item => item.state === 'Pending').length}</span></h2>
+              {proposals.length === 0 && <p className="model-note">No proposals yet. Your scene is untouched.</p>}
+              <ul className="scene-proposal-list">
+                {proposals.slice(0, 8).map(proposal => <li key={proposal.id} data-testid="scene-proposal">
+                  <strong>{proposal.instanceName}</strong>
+                  <p>{proposal.direction}</p>
+                  <small>{proposal.state} · base v{proposal.baseSceneVersion}</small>
+                  {proposal.state === 'Pending' && <div>
+                    <button type="button" disabled={busy} onClick={() => void rejectProposal(proposal)}>Reject</button>
+                    <button type="button" className="primary compact" disabled={busy} onClick={() => void applyProposal(proposal)}>Apply to this object</button>
+                  </div>}
+                </li>)}
+              </ul>
+            </section>
 
             <section data-testid="scene-environment">
               <h2>Lighting</h2>

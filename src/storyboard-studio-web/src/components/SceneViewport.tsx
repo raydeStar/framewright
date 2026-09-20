@@ -20,13 +20,16 @@ export interface SceneViewportProps {
   camera: SceneCameraSummary
   environment: SceneEnvironmentSummary
   selectedId?: string
+  /** When placing a note, a click reports the point in the object's own local space. */
+  noteMode?: boolean
   onSelect: (instanceId: string | undefined) => void
   onCameraChange: (camera: SceneCameraSummary) => void
+  onPlaceNote?: (instanceId: string, localAnchor: [number, number, number]) => void
 }
 
 type ViewportState = 'loading' | 'ready' | 'unsupported'
 
-export default function SceneViewport({ instances, camera, environment, selectedId, onSelect, onCameraChange }: SceneViewportProps) {
+export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, onSelect, onCameraChange, onPlaceNote }: SceneViewportProps) {
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewportState>('loading')
   const surface = useRef<{
@@ -42,6 +45,10 @@ export default function SceneViewport({ instances, camera, environment, selected
   report.current = onCameraChange
   const select = useRef(onSelect)
   select.current = onSelect
+  const placeNote = useRef(onPlaceNote)
+  placeNote.current = onPlaceNote
+  const placing = useRef(noteMode)
+  placing.current = noteMode
 
   useEffect(() => {
     const container = host.current
@@ -234,9 +241,19 @@ export default function SceneViewport({ instances, camera, environment, selected
       for (const hit of hits) {
         let node: Object3D | null = hit.object
         while (node && !node.userData.instanceId) node = node.parent
-        if (node?.userData.instanceId) { select.current(node.userData.instanceId as string); return }
+        if (!node?.userData.instanceId) continue
+        const instanceId = node.userData.instanceId as string
+        if (placing.current && placeNote.current) {
+          // The anchor is stored in the object's own space, so it keeps meaning
+          // the same spot on the model when the object is moved or rescaled.
+          const local = node.worldToLocal(hit.point.clone())
+          placeNote.current(instanceId, [local.x, local.y, local.z])
+          return
+        }
+        select.current(instanceId)
+        return
       }
-      select.current(undefined)
+      if (!placing.current) select.current(undefined)
     }
 
     surface.current = { place, sync, light, pick, frame }
@@ -313,7 +330,9 @@ export default function SceneViewport({ instances, camera, environment, selected
       className="scene-stage"
       data-testid="scene-stage"
       role="img"
-      aria-label="Scene view. Drag or use the arrow keys to orbit the inspection camera; objects are moved with the placement controls."
+      aria-label={noteMode
+        ? 'Scene view. Placing a note: click the exact spot on an object.'
+        : 'Scene view. Drag or use the arrow keys to orbit the inspection camera; objects are moved with the placement controls.'}
       tabIndex={0}
       onKeyDown={nudge}
       onPointerDown={pointerDown}

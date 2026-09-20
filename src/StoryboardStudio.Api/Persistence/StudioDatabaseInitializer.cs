@@ -20,6 +20,7 @@ public static class StudioDatabaseInitializer
     private const string YuE2ArtifactManifestMigration = "20260918-yue2-artifact-manifests-v9";
     private const string DirectorProposalApplyMigration = "20260919-director-proposal-apply-v10";
     private const string ModelSceneMigration = "20260919-model-scenes-v11";
+    private const string SceneDirectionMigration = "20260919-scene-direction-v12";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -166,6 +167,17 @@ public static class StudioDatabaseInitializer
                 () => EnsureModelSceneTablesAsync(db, cancellationToken), cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, SceneDirectionMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, SceneDirectionMigration, cancellationToken);
+            }
+
+            await RunMigrationAsync(db, SceneDirectionMigration,
+                () => EnsureSceneDirectionTablesAsync(db, cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -291,6 +303,7 @@ public static class StudioDatabaseInitializer
             WebMcpProposalMigration => "durable-project-scoped-human-gated-shot-revision-proposals-with-sort-key",
             DirectorProposalApplyMigration => "proposal-observed-context-token-preserved-constraints-and-single-apply-record",
             ModelSceneMigration => "project-scoped-editable-scenes-with-versioned-camera-lighting-and-model-revision-instances",
+            SceneDirectionMigration => "revision-bound-scene-annotations-and-single-instance-human-gated-proposals",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
@@ -1058,6 +1071,62 @@ public static class StudioDatabaseInitializer
                 "UpdatedAt" TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS "IX_SceneInstances_SceneId_SortOrder" ON "SceneInstances" ("SceneId", "SortOrder");
+            """, cancellationToken);
+    }
+
+    /// <summary>
+    /// V12 adds scene direction: notes anchored in an instance's local space
+    /// against the exact revision they were measured on, and proposals that
+    /// target one instance and remember which view they were built from.
+    /// </summary>
+    private static async Task EnsureSceneDirectionTablesAsync(StudioDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "SceneAnnotations" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_SceneAnnotations" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "SceneId" TEXT NOT NULL,
+                "InstanceId" TEXT NOT NULL,
+                "AssetId" TEXT NOT NULL,
+                "AnchorX" REAL NOT NULL,
+                "AnchorY" REAL NOT NULL,
+                "AnchorZ" REAL NOT NULL,
+                "CameraYaw" REAL NOT NULL,
+                "CameraPitch" REAL NOT NULL,
+                "CameraDistance" REAL NOT NULL,
+                "CameraTargetX" REAL NOT NULL,
+                "CameraTargetY" REAL NOT NULL,
+                "CameraTargetZ" REAL NOT NULL,
+                "Body" TEXT NOT NULL,
+                "State" TEXT NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_SceneAnnotations_SceneId_InstanceId_State"
+                ON "SceneAnnotations" ("SceneId", "InstanceId", "State");
+
+            CREATE TABLE IF NOT EXISTS "SceneProposals" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_SceneProposals" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "SceneId" TEXT NOT NULL,
+                "InstanceId" TEXT NOT NULL,
+                "BaseSceneVersion" INTEGER NOT NULL,
+                "ObservedStateToken" TEXT NOT NULL,
+                "Direction" TEXT NOT NULL,
+                "Rationale" TEXT NOT NULL,
+                "PositionJson" TEXT NULL,
+                "RotationJson" TEXT NULL,
+                "ScaleJson" TEXT NULL,
+                "State" TEXT NOT NULL,
+                "IdempotencyKey" TEXT NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "CreatedAtUnixMs" INTEGER NOT NULL,
+                "UpdatedAt" TEXT NOT NULL,
+                "DecidedAt" TEXT NULL,
+                "AppliedAt" TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_SceneProposals_ProjectId_IdempotencyKey"
+                ON "SceneProposals" ("ProjectId", "IdempotencyKey");
             """, cancellationToken);
     }
 

@@ -56,6 +56,7 @@ builder.Services.AddScoped<AuthorityLibraryService>();
 builder.Services.AddScoped<ContinuityService>();
 builder.Services.AddScoped<WebMcpStoryboardService>();
 builder.Services.AddScoped<SceneService>();
+builder.Services.AddScoped<SceneDirectionService>();
 builder.Services.AddScoped<VisualConsistencyService>();
 builder.Services.AddScoped<TimelineService>();
 builder.Services.AddScoped<QwenVoiceService>();
@@ -444,6 +445,24 @@ app.MapGet("/api/scenes/{sceneId:guid}", async Task<IResult> (Guid sceneId, Scen
     => ToHttpResult(await scenes.GetAsync(sceneId, cancellationToken)));
 app.MapPut("/api/scenes/{sceneId:guid}", async Task<IResult> (Guid sceneId, SaveSceneRequest request, SceneService scenes, CancellationToken cancellationToken)
     => ToHttpResult(await scenes.SaveAsync(sceneId, request, cancellationToken)));
+app.MapGet("/api/scenes/{sceneId:guid}/annotations", async Task<IResult> (Guid sceneId, SceneDirectionService direction, CancellationToken cancellationToken)
+    => ToHttpResult(await direction.ListAnnotationsAsync(sceneId, cancellationToken)));
+app.MapPost("/api/scenes/{sceneId:guid}/annotations", async Task<IResult> (Guid sceneId, CreateSceneAnnotationRequest request, SceneDirectionService direction, CancellationToken cancellationToken)
+    => ToHttpResult(await direction.AddAnnotationAsync(sceneId, request, cancellationToken)));
+app.MapPost("/api/scene-annotations/{annotationId:guid}/resolve", async Task<IResult> (Guid annotationId, SceneDirectionService direction, CancellationToken cancellationToken)
+    => ToHttpResult(await direction.ResolveAnnotationAsync(annotationId, cancellationToken)));
+app.MapGet("/api/webmcp/director/scene-context", async (Guid sceneId, Guid? instanceId, bool? directorMode, SceneDirectionService direction, CancellationToken cancellationToken)
+    => Results.Ok(await direction.ContextAsync(sceneId, instanceId, directorMode ?? false, cancellationToken)));
+app.MapPost("/api/webmcp/scene-proposals", async (CreateSceneProposalRequest request, SceneDirectionService direction, CancellationToken cancellationToken)
+    => Results.Ok(await direction.ProposeAsync(request, cancellationToken)));
+app.MapGet("/api/scenes/{sceneId:guid}/proposals", async Task<IResult> (Guid sceneId, SceneDirectionService direction, CancellationToken cancellationToken)
+    => ToHttpResult(await direction.ListProposalsAsync(sceneId, cancellationToken)));
+app.MapPost("/api/scene-proposals/{proposalId:guid}/accept", async Task<IResult> (Guid proposalId, SceneDirectionService direction, CancellationToken cancellationToken)
+    => ToHttpResult(await direction.AcceptAsync(proposalId, cancellationToken)));
+app.MapPost("/api/scene-proposals/{proposalId:guid}/reject", async Task<IResult> (Guid proposalId, SceneDirectionService direction, CancellationToken cancellationToken)
+    => ToHttpResult(await direction.RejectAsync(proposalId, cancellationToken)));
+app.MapPost("/api/scene-proposals/{proposalId:guid}/apply", async Task<IResult> (Guid proposalId, SceneDirectionService direction, CancellationToken cancellationToken)
+    => ToHttpResult(await direction.ApplyAsync(proposalId, cancellationToken)));
 app.MapGet("/api/webmcp/director/context", async (Guid shotId, int? displayedVersion, bool? archivedPreview, bool? directorMode, string? tool, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.DirectorContextAsync(shotId, displayedVersion, archivedPreview ?? false, directorMode ?? false, tool, cancellationToken)));
 app.MapGet("/api/webmcp/director/observation", async (Guid shotId, int? displayedVersion, bool? archivedPreview, string? stateToken, WebMcpStoryboardService service, CancellationToken cancellationToken)

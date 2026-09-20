@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M10. M00, M01, M04, M05 and M06 are VERIFIED; M02 and M03 are CONTRACT_VERIFIED.  
+**Active milestone:** M11. M00, M01, M04, M05 and M06 are VERIFIED; M02, M03 and M10 are CONTRACT_VERIFIED.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -433,10 +433,10 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** M10 (direct the selected 3D object).
-- **Last verified milestone:** M06. M02 and M03 remain CONTRACT_VERIFIED pending an actual WebMCP host.
+- **Active milestone:** M11 (reference-to-scene blockout).
+- **Last verified milestone:** M06. M02, M03 and M10 are CONTRACT_VERIFIED pending an actual WebMCP host.
 - **External acceptance blockers:** (1) No Reference Asset Compiler checkout - blocks M09/M14. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
-- **Next action:** Implement M10 on `feature/director-mode`: extend Director Mode to the scene so an agent can read and propose against one selected instance. M07 and M08 stay deferred until the user's generation pipeline is connected; M09 and M14 remain blocked by the absent compiler, and M12/M16/M17 depend on those, so the open runway is M10, M11, M13 and M15.
+- **Next action:** Implement M11 on `feature/director-mode`: turn a reference or sketch into an editable blockout proposal. M07 and M08 stay deferred until the user's generation pipeline is connected; M09 and M14 remain blocked by the absent compiler, and M12/M16/M17 depend on those, so the remaining open runway is M11, M13 and M15.
 
 ### Milestone status
 
@@ -452,8 +452,8 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M07 | DEFERRED | User is supplying an existing generation pipeline; revisit with them |
 | M08 | DEFERRED | Depends on M07; revisit with the user's pipeline |
 | M09 | NOT_STARTED | None |
-| M10 | IN_PROGRESS | Active; depends on the M03 contract and M06 |
-| M11 | NOT_STARTED | None |
+| M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
+| M11 | IN_PROGRESS | Active; depends on M10 |
 | M12 | NOT_STARTED | None |
 | M13 | NOT_STARTED | None |
 | M14 | NOT_STARTED | None |
@@ -964,6 +964,79 @@ Checkpoint: see the M06 commits on feature/director-mode.
 Next dependency-ready milestone: M10. M07 and M08 remain deferred pending the user's generation
   pipeline, and M09/M14 remain blocked by the absent Reference Asset Compiler, so the open runway
   is M10, M11, M13 and M15.
+```
+
+### M10 acceptance record
+
+```text
+Milestone / status / date: M10 / CONTRACT_VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M10 commits
+Outcome and supported constraints: Director Mode now reaches inside a scene, where two identical
+  props are two different objects. A note is anchored in one instance's own local space against
+  the exact model revision it was measured on, together with the view it was placed from; pinning
+  that instance to a different revision makes the note explicitly stale rather than moving it or
+  deleting it. The scene director context names the selected object, its revision and transform,
+  the camera, its open notes, and every other object by identity, with a state token bound to all
+  of it. A proposal must carry that token, must name one instance, and must name at least one of
+  position, rotation, or scale; one built on a view that has since moved is refused, as is one
+  applied after the scene changed. Applying is the artist's action and writes nothing: it puts the
+  change into working state for that one object, and the transform reaches the scene only through
+  the ordinary validated save. Status is CONTRACT_VERIFIED, not VERIFIED, for the same reason as
+  M02 and M03: no actual WebMCP-capable host exists on this workstation, so the only client
+  exercised was the repository's synthetic shim.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/SceneDirectionService.cs: annotations, the scene context
+    packet and its token, and single-instance proposals with accept, reject, and a single apply.
+  - src/StoryboardStudio.Api/Persistence: SceneAnnotations and SceneProposals behind migration
+    20260919-scene-direction-v12.
+  - src/storyboard-studio-web: note placement by raycast into an object's local space, a notes and
+    proposals panel in the scene inspector, and a ninth browser tool (propose_scene_edit).
+    get_director_context now covers both the shot and the scene surface.
+  - Reused unchanged: the M06 scene save as the only write path, the existing WebMCP envelope,
+    registration lifecycle and activity log, and project query filters.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check (exit code checked directly)
+  - npx playwright test scenes.spec.ts --project=desktop
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 179 backend tests passed, 0 failed (174 before this milestone plus five scene direction
+     tests). Frontend typecheck, lint, and format checks clean.
+  A: 110 browser journeys passed, 0 failed, 6 intentionally skipped (116 discovered) against the
+     real service and real persistence in a disposable temp data root. The new journeys have an
+     agent read the context for one of two identical props, stage a rotation for that instance,
+     and confirm after the artist applies and saves that the other prop never moved; and confirm
+     the scene is fully usable in a browser with no WebMCP at all.
+  H: NOT RUN, and this is the milestone's ceiling, inherited from M02 and M03. No WebMCP-capable
+     browser build or agent host is installed on this workstation.
+  L: NOT RUN. No provider is involved; proposals create no jobs.
+  V: NOT RUN as human acceptance.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: A proposal with a token from a view that has since moved is
+  refused as stale_scene and nothing is staged. A blind token, an empty proposal, a collapsed
+  scale, and an object from another scene are each refused. Applying before accepting, and
+  applying a rejected proposal, are refused; applying twice replays the single application.
+  Annotations survive and report staleness after a revision swap.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the M01 director-mode journeys, the M02/M03 shot agent journeys, and the M06 scene
+  journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually). Actual-host discovery (no such host available). Human visual acceptance.
+Human approvals actually recorded, where required: None required. Accept and apply are simulated
+  artist clicks in an isolated test workspace, not artistic ratification.
+Known defects and dependency impact: None found. Notes are anchored to a point rather than to a
+  named surface feature, which is what the milestone permits; arbitrary screen-to-geometry
+  reconstruction stays out of scope.
+Permitted deferrals: Arbitrary screen-to-geometry reconstruction and free-form mesh editing, both
+  explicitly deferred by M10.
+Bug-detection check: With notes reporting Stale: false unconditionally, the revision-binding test
+  failed as intended and passed again once the sabotage was reverted.
+Two defects the browser journeys found, both fixed: staging a scene proposal opened the agent
+  panel directly over the scene controls the artist needs in order to act on it; and creating a
+  new scene left the previous scene's notes and proposals on screen against the new scene's
+  objects.
+Checkpoint: see the M10 commits on feature/director-mode.
+Next dependency-ready milestone: M11.
 ```
 
 ### Acceptance record template

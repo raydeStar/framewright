@@ -18,7 +18,7 @@ test.describe('browser WebMCP collaboration', () => {
     })
   })
 
-  test('registers exactly the eight closed-schema tools without duplicates', async ({ page }) => {
+  test('registers exactly the nine closed-schema tools without duplicates', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByTestId('agent-activity-button')).toBeVisible()
     const registration = await page.evaluate(() => {
@@ -26,7 +26,7 @@ test.describe('browser WebMCP collaboration', () => {
       const signals = (window as unknown as { __framewrightRegistrationSignals: AbortSignal[] }).__framewrightRegistrationSignals
       return { names: tools.map(([name]) => name), closed: tools.every(([, tool]) => tool.inputSchema.additionalProperties === false), oneLifecycle: new Set(signals).size === 1, signalActive: signals.every(signal => !signal.aborted) }
     })
-    expect(registration.names).toEqual(['get_storyboard_context', 'list_storyboard_shots', 'get_shot_details', 'inspect_shot_continuity', 'get_director_context', 'observe_current_frame', 'propose_shot_revision', 'get_generation_status'])
+    expect(registration.names).toEqual(['get_storyboard_context', 'list_storyboard_shots', 'get_shot_details', 'inspect_shot_continuity', 'get_director_context', 'observe_current_frame', 'propose_shot_revision', 'propose_scene_edit', 'get_generation_status'])
     expect(registration.closed).toBe(true)
     expect(registration.oneLifecycle).toBe(true)
     expect(registration.signalActive).toBe(true)
@@ -35,12 +35,12 @@ test.describe('browser WebMCP collaboration', () => {
     await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(0)
     await expect(page.getByTestId('agent-activity-panel')).toContainText('WebMCP paused')
     await page.getByTestId('agent-tools-toggle').click()
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(8)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(9)
   })
 
   test('tool calls select the shot and synchronize a durable visible proposal', async ({ page }) => {
     await page.goto('/')
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(8)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(9)
     const context = await page.evaluate(async () => {
       const tools = (window as unknown as { __framewrightTools: Map<string, { execute: (input: object, context: object) => Promise<{ data?: { selectedShot?: { id: string; version: number } } }> }> }).__framewrightTools
       return tools.get('get_storyboard_context')!.execute({}, {})
@@ -66,7 +66,7 @@ test.describe('browser WebMCP collaboration', () => {
 
   test('director context names the revision on screen and refuses a view that moved under it', async ({ page }) => {
     await page.goto('/')
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(8)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(9)
     await page.getByRole('button', { name: /Open SH-010,/ }).click()
     await expect(page.getByTestId('shot-workspace')).toBeVisible()
     await page.getByRole('button', { name: 'Director mode' }).click()
@@ -141,7 +141,7 @@ test.describe('browser WebMCP collaboration', () => {
     expect(proof.ok()).toBe(true)
     await page.reload()
     await page.getByRole('button', { name: new RegExp(`Open ${code},`) }).click()
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(8)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(9)
     // The proof job lands a new head asynchronously; read context only once the
     // artist would actually see both revisions.
     await expect(page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option')).toHaveCount(2)
@@ -194,7 +194,7 @@ test.describe('browser WebMCP collaboration', () => {
     await page.goto('/')
     await page.getByRole('button', { name: new RegExp(`Open ${code},`) }).click()
     await expect(page.getByTestId('shot-workspace')).toBeVisible()
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(8)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(9)
 
     const note = `The seal edge is lost against the gate. ${testInfo.project.name}`
     await page.getByRole('button', { name: 'Place comment' }).click()
@@ -284,7 +284,7 @@ test.describe('browser WebMCP collaboration', () => {
 
   test('passes AbortSignal cancellation through fetch', async ({ page }) => {
     await page.goto('/')
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(8)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(9)
     await page.route('**/api/webmcp/shots?*', async route => { await new Promise(resolve => setTimeout(resolve, 1500)); await route.continue() })
     const result = await page.evaluate(async () => {
       const tool = (window as unknown as { __framewrightTools: Map<string, { execute: (input: object, context: object) => Promise<{ code: string }> }> }).__framewrightTools.get('list_storyboard_shots')!

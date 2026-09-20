@@ -42,6 +42,8 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
     public DbSet<MusicRenderRecord> MusicRenders => Set<MusicRenderRecord>();
     public DbSet<SceneRecord> Scenes => Set<SceneRecord>();
     public DbSet<SceneInstanceRecord> SceneInstances => Set<SceneInstanceRecord>();
+    public DbSet<SceneAnnotationRecord> SceneAnnotations => Set<SceneAnnotationRecord>();
+    public DbSet<SceneProposalRecord> SceneProposals => Set<SceneProposalRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -118,6 +120,10 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<SceneRecord>().HasIndex(x => new { x.ProjectId, x.UpdatedAt });
         modelBuilder.Entity<SceneInstanceRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<SceneInstanceRecord>().HasIndex(x => new { x.SceneId, x.SortOrder });
+        modelBuilder.Entity<SceneAnnotationRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SceneAnnotationRecord>().HasIndex(x => new { x.SceneId, x.InstanceId, x.State });
+        modelBuilder.Entity<SceneProposalRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SceneProposalRecord>().HasIndex(x => new { x.ProjectId, x.IdempotencyKey }).IsUnique();
 
         ApplyProjectScope(modelBuilder);
     }
@@ -166,6 +172,8 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<MusicRenderRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<SceneRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<SceneInstanceRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
+        modelBuilder.Entity<SceneAnnotationRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
+        modelBuilder.Entity<SceneProposalRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
     }
 
     /// <summary>
@@ -692,6 +700,67 @@ public sealed class SceneInstanceRecord
     public double ScaleZ { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A note left on one object in a scene.
+///
+/// The anchor is a point in the instance's own local space, recorded together
+/// with the model revision it was placed against. If that instance is later
+/// pinned to a different revision the geometry underneath has changed, so the
+/// note is reported stale rather than being silently moved to a point that
+/// means something else now.
+/// </summary>
+public sealed class SceneAnnotationRecord
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid SceneId { get; set; }
+    public Guid InstanceId { get; set; }
+    /// <summary>The exact model revision the anchor was measured against.</summary>
+    public Guid AssetId { get; set; }
+    public double AnchorX { get; set; }
+    public double AnchorY { get; set; }
+    public double AnchorZ { get; set; }
+    /// <summary>The view the artist was looking from when the note was placed.</summary>
+    public double CameraYaw { get; set; }
+    public double CameraPitch { get; set; }
+    public double CameraDistance { get; set; }
+    public double CameraTargetX { get; set; }
+    public double CameraTargetY { get; set; }
+    public double CameraTargetZ { get; set; }
+    public required string Body { get; set; }
+    public required string State { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A staged change to exactly one scene instance. It records the scene version
+/// and director-context token it was built on, so a proposal made against a
+/// view that has since moved is refused rather than applied to different work.
+/// </summary>
+public sealed class SceneProposalRecord
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid SceneId { get; set; }
+    public Guid InstanceId { get; set; }
+    public int BaseSceneVersion { get; set; }
+    public required string ObservedStateToken { get; set; }
+    public required string Direction { get; set; }
+    public required string Rationale { get; set; }
+    /// <summary>Null means "leave this alone"; only named axes are proposed.</summary>
+    public string? PositionJson { get; set; }
+    public string? RotationJson { get; set; }
+    public string? ScaleJson { get; set; }
+    public required string State { get; set; }
+    public required string IdempotencyKey { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public long CreatedAtUnixMs { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
+    public DateTimeOffset? AppliedAt { get; set; }
 }
 
 public sealed class MusicCompositionRecord

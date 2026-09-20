@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorViewQuery, ModelProfileSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorShotView, ModelProfileSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -27,7 +27,7 @@ async function optionalRequest<T>(url: string): Promise<T | null> {
 }
 
 /** The shot view an agent is asking about, as query parameters the service can re-derive state from. */
-function directorQuery(view: DirectorViewQuery) {
+function directorQuery(view: DirectorShotView) {
   const parameters = new URLSearchParams({ shotId: view.shotId, displayedVersion: String(view.displayedVersion), archivedPreview: String(view.archived) })
   if (view.directorMode !== undefined) parameters.set('directorMode', String(view.directorMode))
   if (view.tool) parameters.set('tool', view.tool)
@@ -36,8 +36,8 @@ function directorQuery(view: DirectorViewQuery) {
 
 export const studioApi = {
   webMcpContext: (selectedShotId?: string, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/context${selectedShotId ? `?selectedShotId=${encodeURIComponent(selectedShotId)}` : ''}`, { signal }),
-  webMcpDirectorContext: (view: DirectorViewQuery, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/context?${directorQuery(view)}`, { signal }),
-  webMcpDirectorObservation: (view: DirectorViewQuery, stateToken: string, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/observation?${directorQuery(view)}&stateToken=${encodeURIComponent(stateToken)}`, { signal }),
+  webMcpDirectorContext: (view: DirectorShotView, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/context?${directorQuery(view)}`, { signal }),
+  webMcpDirectorObservation: (view: DirectorShotView, stateToken: string, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/observation?${directorQuery(view)}&stateToken=${encodeURIComponent(stateToken)}`, { signal }),
   webMcpShots: (offset = 0, limit = 10, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/shots?offset=${offset}&limit=${limit}`, { signal }),
   webMcpShot: (shotId: string, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/shots/${shotId}`, { signal }),
   webMcpContinuity: (shotId: string, signal?: AbortSignal) => request<WebMcpEnvelope<ShotContinuityReport>>(`/api/webmcp/shots/${shotId}/continuity`, { signal }),
@@ -127,6 +127,18 @@ export const studioApi = {
   createScene: (name: string) => request<SceneSummary>('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) }),
   saveScene: (sceneId: string, body: { expectedVersion: number; name: string; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: { id: string; assetId: string; name: string; position: number[]; rotation: number[]; scale: number[] }[] }) =>
     request<SceneSummary>(`/api/scenes/${sceneId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  sceneAnnotations: (sceneId: string) => request<SceneAnnotationSummary[]>(`/api/scenes/${sceneId}/annotations`),
+  addSceneAnnotation: (sceneId: string, body: { instanceId: string; anchor: number[]; camera: SceneCameraSummary; body: string }) =>
+    request<SceneAnnotationSummary>(`/api/scenes/${sceneId}/annotations`, { method: 'POST', body: JSON.stringify(body) }),
+  resolveSceneAnnotation: (annotationId: string) => request<SceneAnnotationSummary>(`/api/scene-annotations/${annotationId}/resolve`, { method: 'POST' }),
+  sceneProposals: (sceneId: string) => request<SceneProposalSummary[]>(`/api/scenes/${sceneId}/proposals`),
+  acceptSceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/accept`, { method: 'POST' }),
+  rejectSceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/reject`, { method: 'POST' }),
+  applySceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/apply`, { method: 'POST' }),
+  webMcpSceneContext: (sceneId: string, instanceId: string | undefined, directorMode: boolean, signal?: AbortSignal) =>
+    request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/scene-context?sceneId=${sceneId}${instanceId ? `&instanceId=${instanceId}` : ''}&directorMode=${directorMode}`, { signal }),
+  webMcpProposeSceneEdit: (body: Record<string, unknown>, signal?: AbortSignal) =>
+    request<WebMcpEnvelope<SceneProposalSummary>>('/api/webmcp/scene-proposals', { method: 'POST', body: JSON.stringify(body), signal }),
   prepareManifest: (shotId: string, body: { expectedShotVersion: number; expectedSketchRevision: number; route: GenerationRoute; purpose: GenerationPurpose; compositionAssetId?: string; creativeBriefOverride?: string; markupRevision?: number; allowSketchCompositionFallback?: boolean; videoEndpointRole?: 'LastFrame'; videoEndpointSourceCandidateId?: string }) => request<GenerationManifestSummary>(`/api/shots/${shotId}/manifests/prepare`, { method: 'POST', body: JSON.stringify(body) }),
   generateDraft: (shotId: string, expectedShotVersion: number, adapterId = 'comfyui-fast-draft', options?: { compositionAssetId?: string; creativeBriefOverride?: string; markupRevision?: number; allowSketchCompositionFallback?: boolean }) => request<JobSummary>(`/api/shots/${shotId}/generate-draft`, { method: 'POST', body: JSON.stringify({ expectedShotVersion, adapterId, ...options }) }),
   prepareVideoManifest: (shotId: string, body: { expectedShotVersion: number; motionBrief: string; firstFrameCandidateId?: string; lastFrameCandidateId?: string; confirmEndpointCompatibility: boolean; quality: 'Low' | 'Medium' | 'High'; takeId: string }) => request<GenerationManifestSummary>(`/api/shots/${shotId}/video-manifests/prepare`, { method: 'POST', body: JSON.stringify(body) }),

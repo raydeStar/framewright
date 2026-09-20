@@ -110,7 +110,10 @@ export interface ShotRevisionProposalSummary { id: string; shotId: string; baseV
 /** What applying an accepted proposal hands to the ordinary revision surface. Never a provider call. */
 export interface ShotRevisionInstructions { proposal: ShotRevisionProposalSummary; instructions: { shotId: string; code: string; baseVersion: number; direction: string; rationale: string; desiredMediaType: 'Image' | 'Video'; preservedConstraints: string[]; targetedNotes: { id: string; x: number; y: number; body: string; authorityId?: string; authorityVersion?: number }[]; generationAuthorized: boolean; note: string } }
 /** What the artist currently has on screen in the Shot workspace. */
-export interface DirectorViewQuery { shotId: string; displayedVersion: number; archived: boolean; directorMode?: boolean; tool?: string }
+export interface DirectorShotView { kind: 'shot'; shotId: string; displayedVersion: number; archived: boolean; directorMode?: boolean; tool?: string }
+/** What the artist has open in the Scene workspace, including which object is selected. */
+export interface DirectorSceneView { kind: 'scene'; sceneId: string; instanceId?: string; directorMode?: boolean }
+export type DirectorViewQuery = DirectorShotView | DirectorSceneView
 /** Where a scene's inspection camera sits. Orbit values, so a saved view reopens exactly. */
 export interface SceneCameraSummary { yaw: number; pitch: number; distance: number; target: number[]; fieldOfView: number }
 /** A scene's basic lighting: one key direction plus ambient fill. */
@@ -124,6 +127,20 @@ export interface SceneInstanceSummary {
 }
 export interface SceneSummary { id: string; name: string; version: number; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: SceneInstanceSummary[]; updatedAt: string }
 export interface SceneListItem { id: string; name: string; version: number; instanceCount: number; updatedAt: string }
+/** A note on one scene object, bound to the revision it was measured against. */
+export interface SceneAnnotationSummary {
+  id: string; sceneId: string; instanceId: string; assetId: string; instanceName: string
+  anchor: number[]; camera: SceneCameraSummary; body: string; state: string
+  stale: boolean; orphaned: boolean; createdAt: string
+}
+/** A staged change to exactly one instance. */
+export interface SceneProposalSummary {
+  id: string; sceneId: string; instanceId: string; instanceName: string; baseSceneVersion: number
+  direction: string; rationale: string
+  position: number[] | null; rotation: number[] | null; scale: number[] | null
+  state: 'Pending' | 'Accepted' | 'Rejected' | 'Applied'
+  createdAt: string; decidedAt?: string; appliedAt?: string
+}
 /** One material as the model inspector reports it. */
 export interface ModelMaterialSummary { name: string; textured: boolean; alphaMode: string; doubleSided: boolean }
 /** The supported GLB subset and the ceilings that refuse a model before it loads. */
