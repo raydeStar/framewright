@@ -146,6 +146,9 @@ public static class ModelFixtures
 
     public static byte[] AsymmetricBlock() => File.ReadAllBytes(Path());
     public static byte[] AsymmetricPost() => File.ReadAllBytes(Path("asymmetric-post.glb"));
+    public static byte[] RiggedFigure() => File.ReadAllBytes(Path("rigged-figure.glb"));
+    public static byte[] RiggedWrongProfile() => File.ReadAllBytes(Path("rigged-wrong-profile.glb"));
+    public static byte[] RiggedBrokenSkin() => File.ReadAllBytes(Path("rigged-broken-skin.glb"));
 
     public static string Path(string fileName = "asymmetric-block.glb")
     {

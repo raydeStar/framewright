@@ -34,8 +34,15 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     .filter(job => job.state === 'Completed' || job.state === 'Failed' || job.state === 'Cancelled')
     .map(job => job.id)))
 
+  // Refreshes overlap: an import finishes while a job-completion refresh is
+  // still in flight. Without a ticket the older answer can land second and put
+  // the library back to how it was before the import, which reads as a file
+  // that silently failed to arrive.
+  const refreshSequence = useRef(0)
   const refresh = useCallback(async () => {
+    const ticket = ++refreshSequence.current
     const [nextAssets, nextCollections, nextPlacements] = await Promise.all([studioApi.assets(true), studioApi.assetCollections(), studioApi.assetPlacements()])
+    if (ticket !== refreshSequence.current) return
     setAssets(nextAssets); setCollections(nextCollections); setPlacements(nextPlacements)
   }, [])
   useEffect(() => { void refresh().catch(reason => setError(reason instanceof Error ? reason.message : 'Could not open the asset library.')).finally(() => setLoading(false)) }, [refresh])

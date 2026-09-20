@@ -1784,6 +1784,19 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .model-revision-stack button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent-strong)}
 .model-revision-stack button strong{font-size:var(--text-xs)}
 .model-revision-stack button small{color:var(--quiet);font-size:var(--text-2xs)}
+.model-rig-state{margin:0 0 8px;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);font-size:var(--text-2xs);font-weight:650}
+.model-rig-state[data-ready="true"]{border-color:var(--accent);color:var(--accent)}
+.model-rig-state[data-ready="false"]{border-color:#7a5a3c;color:#c9a06a}
+.model-rig-findings{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px}
+.model-rig-findings li{display:flex;gap:6px;align-items:flex-start;color:#c9a06a;font-size:var(--text-2xs);line-height:1.4}
+.model-rig-findings svg{flex:none;margin-top:1px}
+.model-rig-bones{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:3px;max-height:260px;overflow:auto}
+.model-rig-bones li{display:grid;gap:1px;border-left:2px solid var(--line);padding-block:1px}
+.model-rig-bones strong{font-size:var(--text-2xs)}
+.model-rig-bones small{color:var(--quiet);font:var(--text-2xs) ui-monospace,monospace}
+.model-rig-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+.model-rig-actions button{display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:0 12px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:var(--text-xs);font-weight:650;cursor:pointer}
+.model-rig-actions button:disabled{opacity:.55;cursor:not-allowed}
 .model-revision-actions{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px}
 .model-revision-actions button{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:var(--text-xs);font-weight:650;cursor:pointer}
 .model-revision-actions button.primary{border-color:var(--accent);background:var(--accent);color:var(--ink-inverse)}

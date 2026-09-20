@@ -167,6 +167,29 @@ export interface SceneProposalSummary {
 export interface ModelMaterialSummary { name: string; textured: boolean; alphaMode: string; doubleSided: boolean }
 /** The supported GLB subset and the ceilings that refuse a model before it loads. */
 export interface ModelSupportLimits { maxBytes: number; maxVertices: number; maxTriangles: number; maxEmbeddedTextureBytes: number; maxNodes: number; maxMaterials: number; maxImages: number; supportedRequiredExtensions: string[] }
+/** One bone of a stored rig, with its rest pose as the file holds it. */
+export interface ModelBoneSummary {
+  name: string; parent: string | null; depth: number
+  restTranslation: number[]; restRotation: number[]; restScale: number[]; restWorldPosition: number[]
+}
+/**
+ * What is known about a stored model's rig. `animationReady` is the only claim
+ * anything may act on, and it is true solely when a documented body profile is
+ * matched and every check passed.
+ */
+export interface ModelRigSummary {
+  hasSkeleton: boolean; profileId: string; profileName: string; profileMatched: boolean
+  missingBones: string[]; unexpectedBones: string[]
+  skinCount: number; boneCount: number; skinnedVertexCount: number; maxInfluencesPerVertex: number
+  bones: ModelBoneSummary[]
+  transformsFinite: boolean; bindPoseValid: boolean; skinWeightsValid: boolean; skinWeightsChecked: number
+  findings: string[]; animationReady: boolean
+}
+/** Where a rig's bones land under one pose, bound to the exact model revision. */
+export interface RigPoseSummary {
+  assetId: string; contentHash: string; profileId: string
+  joints: { bone: string; parent: string | null; position: number[]; restPosition: number[] }[]
+}
 /** What the artist reads about a stored model, measured from the stored bytes. */
 export interface ModelProfileSummary {
   assetId: string; displayName: string; contentHash: string; bytes: number; contentUrl: string
@@ -177,5 +200,6 @@ export interface ModelProfileSummary {
   materials: ModelMaterialSummary[]
   boundsMin: number[]; boundsMax: number[]; dimensions: number[]
   limits: ModelSupportLimits
+  rig?: ModelRigSummary | null
 }
 export interface AgentActivityEntry { id: number; tool: string; state: 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'; message: string; at: string }

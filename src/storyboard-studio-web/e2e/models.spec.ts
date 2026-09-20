@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 
 const block = fileURLToPath(new URL('../../../fixtures/glb/asymmetric-block.glb', import.meta.url))
 const post = fileURLToPath(new URL('../../../fixtures/glb/asymmetric-post.glb', import.meta.url))
+const figure = fileURLToPath(new URL('../../../fixtures/glb/rigged-figure.glb', import.meta.url))
+const wrongProfile = fileURLToPath(new URL('../../../fixtures/glb/rigged-wrong-profile.glb', import.meta.url))
 
 /**
  * A per-run copy of a fixture. Both browser projects share one database, so a
@@ -220,5 +222,70 @@ test('a model is a reusable library record with revisions that never overwrite e
   // database, so a journey that archives something has to put it back.
   await page.getByTestId('model-library').getByRole('button', { name: 'Restore to library' }).click()
   await expect(page.getByTestId('model-library').getByRole('button', { name: 'Archive model' })).toBeVisible()
+  verifyConsole()
+})
+
+test('a rigged character reports its skeleton, poses deterministically, and refuses to flatter a wrong rig', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  const label = testInfo.project.name
+  await openAssets(page)
+
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: `rigged-figure-${label}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(figure, label) },
+    { name: `rigged-wrong-${label}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(wrongProfile, label) },
+  ])
+  // Wait for the import itself, so a refused upload fails here with its own
+  // reason rather than as a missing card later.
+  await expect(page.getByText('2 assets imported into the library.')).toBeVisible()
+  await page.getByRole('button', { name: /^Models/ }).click()
+  await page.getByRole('button', { name: `Open rigged-figure-${label}` }).click()
+  await expect(page.getByTestId('model-workspace')).toBeVisible()
+
+  // The skeleton is read from the stored file and named for what it is.
+  const rig = page.getByTestId('model-rig')
+  await expect(page.getByTestId('model-rig-state')).toHaveAttribute('data-ready', 'true')
+  await expect(page.getByTestId('model-rig-state')).toContainText('Humanoid A')
+  await expect(rig).toContainText('17')
+  await expect(rig).toContainText('Valid')
+  await expect(page.getByTestId('model-rig-findings')).toHaveCount(0)
+
+  const bones = page.getByTestId('model-rig-bones')
+  await expect(bones).toContainText('Hips')
+  await expect(bones).toContainText('LeftHand')
+  await expect(bones).toContainText('under Neck')
+
+  // A pose moves the bones it names and nothing else, and it is calculated,
+  // never saved: the model's own version and measurements do not move.
+  const restingHand = (await bones.getByRole('listitem').filter({ hasText: 'LeftHand' }).textContent()) ?? ''
+  await page.getByTestId('model-rig-pose').click()
+  await expect(bones.getByRole('listitem').filter({ hasText: 'LeftHand' })).not.toHaveText(restingHand)
+  const posedHand = (await bones.getByRole('listitem').filter({ hasText: 'LeftHand' }).textContent()) ?? ''
+  await expect(bones.getByRole('listitem').filter({ hasText: 'RightHand' })).toContainText('rest (-0.67')
+
+  // The same pose gives the same numbers every time.
+  await page.getByRole('button', { name: 'Back to rest' }).click()
+  await expect(bones.getByRole('listitem').filter({ hasText: 'LeftHand' })).toHaveText(restingHand)
+  await page.getByTestId('model-rig-pose').click()
+  await expect(bones.getByRole('listitem').filter({ hasText: 'LeftHand' })).toHaveText(posedHand)
+
+  // A skeleton whose bones are named something else is an unknown skeleton,
+  // and it is not posed at all.
+  await page.getByRole('button', { name: 'Asset library' }).click()
+  await page.getByRole('button', { name: `Open rigged-wrong-${label}` }).click()
+  await expect(page.getByTestId('model-rig-state')).toHaveAttribute('data-ready', 'false')
+  await expect(page.getByTestId('model-rig-state')).toContainText('Unknown skeleton')
+  await expect(page.getByTestId('model-rig-findings')).toContainText('does not match')
+  await expect(page.getByTestId('model-rig-pose')).toBeDisabled()
+
+  // A static prop has no skeleton, and that is an ordinary answer.
+  await page.getByRole('button', { name: 'Asset library' }).click()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: `rig-prop-${label}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, `rig-prop-${label}`),
+  })
+  await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
+  await page.getByRole('button', { name: /^Models/ }).click()
+  await page.getByRole('button', { name: `Open rig-prop-${label}` }).click()
+  await expect(page.getByTestId('model-rig-state')).toContainText('Static prop')
+  await expect(page.getByTestId('model-rig-pose')).toHaveCount(0)
   verifyConsole()
 })

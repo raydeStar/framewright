@@ -88,7 +88,7 @@ These are the `GlbSupportProfile.Default` values and are reported to the client
 with every model profile, so the artist reads the real ceiling rather than a
 number in a document that may have drifted.
 
-## Test fixture
+## Test fixtures
 
 `fixtures/glb/asymmetric-block.glb` is the known-dimension fixture the 3D path
 is tested against. It is authored by this repository's own builder
@@ -112,6 +112,51 @@ passing because a symmetric cube looks the same either way.
 with deliberately different extents — bounds min (0, 0, 0), max (1.00, 2.00,
 0.45) — so a test that switches between two models can tell they really swapped.
 
+Three rigged fixtures come out of one description in
+`fixtures/glb/build_rigged_figure.py`: `rigged-figure.glb` (a complete
+humanoid-a skeleton), `rigged-wrong-profile.glb` (the same mesh and skin with
+bones named `Bone_00` and so on), and `rigged-broken-skin.glb` (one vertex
+weighted to no bone). The broken ones differ from the good one in exactly the
+way their name says and in nothing else. The figure is asymmetric — the
+character's left arm is longer than its right — so a mirrored import lands
+somewhere a test can see.
+
+## Rigs
+
+One body class is supported: **humanoid-a**, a spine, two arms, and two legs.
+Its bones are named exactly, and a rig is only ever described as matching this
+profile when every one of them is present:
+
+    Hips, Spine, Chest, Neck, Head,
+    LeftUpperArm, LeftLowerArm, LeftHand,
+    RightUpperArm, RightLowerArm, RightHand,
+    LeftUpperLeg, LeftLowerLeg, LeftFoot,
+    RightUpperLeg, RightLowerLeg, RightFoot
+
+"Left" is the character's own left, which with +Y up and the character facing
++Z is +X.
+
+The hierarchy is read from the file's node tree rather than inferred from the
+names, and each bone reports both its own rest transform and the rest position
+that composes down the tree. A model's bind pose is confirmed only when its
+inverse bind matrices exist, match the joint count, and are finite. Skin weights
+are read from the file's binary chunk: every skinned vertex must be weighted to
+bones the skin actually has, with finite non-negative weights that sum to one.
+Above 250,000 skinned vertices the weights are reported unchecked rather than
+assumed sound.
+
+A rig is called **animation-ready** only when it matches this profile and passes
+every one of those checks. A skeleton whose bones are named anything else is an
+unknown skeleton, not an almost-humanoid, and nothing downstream may treat it as
+animatable. A static prop has no skeleton at all, which is an ordinary answer
+rather than a fault.
+
+A rig can be posed for inspection: named bones are rotated away from the rest
+pose and every joint's resulting position is computed from the stored bytes. The
+calculation stores nothing and draws nothing, so the same rig and the same pose
+give the same numbers every time, and a rig that is not animation-ready is not
+posed at all.
+
 ## Browser renderer
 
 The viewer uses **three.js 0.186.0** with its `GLTFLoader`, pinned to the exact
@@ -133,5 +178,6 @@ unavailable rather than showing an empty rectangle.
 
 Other containers (`.gltf` + external resources, FBX, OBJ, USD), Draco and
 Meshopt compression, texture transcoding, automatic repair, axis or unit
-conversion on import, and any export of 3D data. None of these are supported,
+conversion on import, any export of 3D data, and, for rigs, further body
+classes, hand and facial rigs, and retargeting between skeletons. None of these are supported,
 and none are implied by the presence of a model in the library.

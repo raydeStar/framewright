@@ -653,6 +653,10 @@ app.MapGet("/api/assets/{assetId:guid}/model-profile", async Task<IResult> (
     Guid assetId, AssetStore assets, CancellationToken cancellationToken)
     => ToHttpResult(await assets.ModelProfileAsync(assetId, cancellationToken)));
 
+app.MapPost("/api/assets/{assetId:guid}/rig-pose", async Task<IResult> (
+    Guid assetId, RigPoseRequest request, AssetStore assets, CancellationToken cancellationToken)
+    => ToHttpResult(await assets.RigPoseAsync(assetId, request, cancellationToken)));
+
 app.MapPost("/api/assets/media", async Task<IResult> (
     HttpContext context, AssetKind kind, AssetStore assets, CancellationToken cancellationToken) =>
 {

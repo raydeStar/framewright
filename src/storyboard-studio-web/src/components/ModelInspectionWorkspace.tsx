@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { Archive, ArrowLeft, Box, Check, Layers3, LoaderCircle, LockKeyhole, Ruler, Upload } from 'lucide-react'
+import { Archive, ArrowLeft, Bone, Box, Check, Layers3, LoaderCircle, LockKeyhole, Ruler, TriangleAlert, Upload } from 'lucide-react'
 import { studioApi } from '../api'
-import type { AssetSummary, ModelProfileSummary } from '../types'
+import type { AssetSummary, ModelProfileSummary, RigPoseSummary } from '../types'
 
 // three.js only loads when an artist actually opens a model, so the ordinary
 // image and audio workflows keep their current start-up cost.
@@ -27,6 +27,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
   const [tagText, setTagText] = useState(asset.tags.join(', '))
   const [notes, setNotes] = useState(asset.notes)
   const revisionFile = useRef<HTMLInputElement>(null)
+  const [pose, setPose] = useState<RigPoseSummary>()
 
   const active = revisions.find(item => item.id === activeId) ?? asset
   const current = revisions.find(item => item.isCurrentRevision) ?? revisions[0]
@@ -57,7 +58,10 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
 
   useEffect(() => {
     let live = true
-    setProfile(undefined); setFailure(undefined)
+    // A pose belongs to the revision it was calculated from, so switching
+    // revisions drops it rather than showing one model's bones against
+    // another's mesh.
+    setProfile(undefined); setFailure(undefined); setPose(undefined)
     studioApi.modelProfile(activeId)
       .then(loaded => { if (live) setProfile(loaded) })
       .catch(reason => { if (live) setFailure(reason instanceof Error ? reason.message : 'This model could not be inspected.') })
@@ -109,6 +113,15 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
   }
 
   const metres = (value: number) => `${value.toFixed(value < 10 ? 2 : 1)} m`
+
+  const rig = profile?.rig
+  // One documented pose, so the same press gives the same numbers every time
+  // and an artist can see plainly that the skeleton really drives the mesh.
+  const testPose = () => act(async () => {
+    const posed = await studioApi.rigPose(activeId, [{ bone: 'LeftUpperArm', rotation: [0, 0, 1.5708] }])
+    setPose(posed)
+    return 'Test pose applied to the skeleton. Nothing was saved.'
+  })
 
   return <main className="workspace model-workspace" data-testid="model-workspace">
     <header className="model-header">
@@ -192,6 +205,51 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
             </li>)}</ul>
           </section>
         </>}
+
+        {rig && <section data-testid="model-rig">
+          <h2><Bone size={15} />Rig</h2>
+          {!rig.hasSkeleton
+            ? <p className="model-note" data-testid="model-rig-state">
+                Static prop: no skeleton. Props do not need one, and this is not a fault.
+              </p>
+            : <>
+                <p className="model-rig-state" data-testid="model-rig-state" data-ready={rig.animationReady ? 'true' : 'false'}>
+                  {rig.animationReady
+                    ? `Animation-ready · ${rig.profileName}`
+                    : `Not animation-ready · ${rig.profileName}`}
+                </p>
+                <dl>
+                  <div><dt>Bones</dt><dd>{rig.boneCount}</dd></div>
+                  <div><dt>Skinned vertices</dt><dd>{rig.skinnedVertexCount.toLocaleString()}</dd></div>
+                  <div><dt>Rest transforms</dt><dd>{rig.transformsFinite ? 'Finite' : 'Not finite'}</dd></div>
+                  <div><dt>Bind pose</dt><dd>{rig.bindPoseValid ? 'Valid' : 'Not confirmed'}</dd></div>
+                  <div><dt>Skin weights</dt><dd>{rig.skinWeightsValid ? `Valid · ${rig.skinWeightsChecked.toLocaleString()} checked` : 'Not valid'}</dd></div>
+                </dl>
+                {rig.findings.length > 0 && <ul className="model-rig-findings" data-testid="model-rig-findings">
+                  {rig.findings.map(finding => <li key={finding}><TriangleAlert size={14} />{finding}</li>)}
+                </ul>}
+                <ul className="model-rig-bones" data-testid="model-rig-bones">
+                  {rig.bones.slice(0, 40).map(bone => <li key={bone.name} style={{ paddingLeft: `${bone.depth * 10}px` }}>
+                    <strong>{bone.name}</strong>
+                    <small>
+                      {bone.parent ? `under ${bone.parent}` : 'root'} · rest ({bone.restWorldPosition.map(value => value.toFixed(2)).join(', ')})
+                      {pose ? ` · posed (${(pose.joints.find(joint => joint.bone === bone.name)?.position ?? bone.restWorldPosition).map(value => value.toFixed(2)).join(', ')})` : ''}
+                    </small>
+                  </li>)}
+                </ul>
+                <div className="model-rig-actions">
+                  <button type="button" data-testid="model-rig-pose" disabled={busy || !rig.animationReady} onClick={() => void testPose()}>
+                    Test pose
+                  </button>
+                  {pose && <button type="button" onClick={() => setPose(undefined)}>Back to rest</button>}
+                </div>
+                <p className="model-note">
+                  {rig.animationReady
+                    ? 'A test pose is calculated from the stored file and saved nowhere. The model on screen is unchanged.'
+                    : 'This rig is not posed until every check passes. Bones named something else are an unknown skeleton, not a nearly-humanoid one.'}
+                </p>
+              </>}
+        </section>}
 
         <section data-testid="model-library">
           <h2>Library</h2>

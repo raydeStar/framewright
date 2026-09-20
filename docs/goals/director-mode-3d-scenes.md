@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M13. M00, M01, M04, M05 and M06 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED.  
+**Active milestone:** M15. M00, M01, M04, M05, M06 and M13 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -433,10 +433,10 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** M13 (inspect a known rigged character).
-- **Last verified milestone:** M06. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
+- **Active milestone:** M15 (compatible clips and rigid-part motion).
+- **Last verified milestone:** M13. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
 - **External acceptance blockers:** (1) No Reference Asset Compiler checkout - blocks M09/M14. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
-- **Next action:** Implement M13 on `feature/director-mode`: inspect a known rigged character honestly, refusing what this build cannot support. M07 and M08 stay deferred until the user's generation pipeline is connected; M09 and M14 remain blocked by the absent compiler, and M12/M16/M17 depend on those, so the remaining open runway is M13 and M15.
+- **Next action:** Implement M15 on `feature/director-mode`: play only clips a rig actually supports, and move rigid parts without a skeleton. M07 and M08 stay deferred until the user's generation pipeline is connected; M09 and M14 remain blocked by the absent compiler, and M12/M16/M17 depend on those, so M15 is the last open milestone on this runway.
 
 ### Milestone status
 
@@ -455,9 +455,9 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
 | M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
 | M12 | NOT_STARTED | None |
-| M13 | IN_PROGRESS | Active; depends on M04 |
+| M13 | VERIFIED | M13 acceptance record below |
 | M14 | NOT_STARTED | None |
-| M15 | NOT_STARTED | None |
+| M15 | IN_PROGRESS | Active; depends on M13 |
 | M16 | NOT_STARTED | None |
 | M17 | NOT_STARTED | None |
 | M18 | NOT_STARTED | None |
@@ -1128,6 +1128,82 @@ Three defects the browser journeys found, all fixed: the shell assembled the age
   correctly treated as the same asset.
 Checkpoint: see the M11 commits on feature/director-mode.
 Next dependency-ready milestone: M13.
+```
+
+### M13 acceptance record
+
+```text
+Milestone / status / date: M13 / VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M13 commits
+Outcome and supported constraints: A rigged character can be imported, stored, and inspected before
+  anything trusts a generated rig. Mesh, skeleton, bind data, and materials all survive closing and
+  reopening the application, because they are re-read from the same stored bytes rather than cached
+  as claims. The bone hierarchy comes from the file's node tree, not from bone names, and each bone
+  reports its own rest transform and the rest position that composes down that tree. Bind matrices
+  must exist, match the joint count, and be finite. Every skinned vertex's joints and weights are
+  read out of the binary chunk and must be finite, non-negative, weighted to bones the skin has, and
+  sum to one; above 250,000 skinned vertices the weights are reported unchecked rather than assumed
+  sound. A rig is called animation-ready only when it matches the one documented body profile,
+  humanoid-a, and passes every check: a skeleton whose bones are named something else is an unknown
+  skeleton, never an almost-humanoid, and it is not posed at all. A static prop has no skeleton,
+  which is an ordinary answer rather than a fault. A pose rotates named bones away from the rest
+  pose and reports where every joint lands; it is calculated from the stored bytes, stores nothing,
+  draws nothing, and is bound to the exact model revision, so the same pose gives the same numbers
+  every time.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/GlbRigInspector.cs: the documented profile, the skeleton, bind
+    data, and skin weight validation.
+  - src/StoryboardStudio.Api/Services/RigPoseCalculator.cs: the pure pose calculation.
+  - src/StoryboardStudio.Api/Services/GlbModelInspector.cs now carries the binary chunk to the rig
+    inspector, and AssetStore exposes the rig on the existing model profile plus one pose route.
+  - fixtures/glb/build_rigged_figure.py and its three fixtures.
+  - src/storyboard-studio-web: a rig panel in the existing model inspector, with the bone
+    hierarchy, the checks, the findings, and a test pose.
+  - Reused unchanged: the M04 import route, the content-addressed store, the M05 revision stack, and
+    the existing model profile surface.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check (exit code checked directly)
+  - npx playwright test models.spec.ts (desktop and tablet)
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 191 backend tests passed, 0 failed (184 before this milestone plus seven rig tests). Frontend
+     typecheck, lint, and format checks clean.
+  A: 116 browser journeys passed, 0 failed, 6 intentionally skipped (122 discovered) against the
+     real service and real persistence in a disposable temp data root. The new journey imports the
+     rigged fixture, reads its skeleton and hierarchy on screen, poses it twice and gets the same
+     numbers, confirms the other arm never moved, then opens the wrong-profile fixture and finds it
+     named an unknown skeleton with its test pose refused, and a static prop reporting no skeleton.
+  H: NOT RUN. No agent host is involved in this milestone; M13 asks for D and A only.
+  L: NOT RUN. No provider is involved.
+  V: NOT RUN as human acceptance; M13 does not ask for it.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: The application was closed and reopened on the same data root: the
+  content hash, vertex count, bone count, bind pose, skin weights, materials, and the posed
+  positions all came back identical. A joint that is not a node, a bind matrix set that does not
+  match the joint count, and a skin with no bind matrices are each reported rather than assumed
+  sound. A pose naming a bone the rig does not have, naming one bone twice, carrying a rotation
+  beyond one full turn, or carrying a number that overflows a double is refused. An empty pose is
+  the rest pose, which is an ordinary answer.
+Relevant earlier-path regression results: The full backend and browser suites passed in full,
+  including the M04 import journeys, the M05 revision journeys, and the M06, M10 and M11 scene
+  journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually).
+Human approvals actually recorded, where required: None required by this milestone.
+Known defects and dependency impact: None found. The rigged fixtures are authored in this
+  repository and carry its own licence, which is what "licensed, known-good" means here; no
+  third-party asset is vendored.
+Permitted deferrals: More body classes, hand and facial rigs, and arbitrary retargeting, all
+  explicitly deferred by M13.
+Bug-detection check: Two sabotages, each reverted. With animation-ready no longer requiring a
+  profile match, the wrong-profile test failed as intended; with the browser's test pose no longer
+  gated on animation-ready, the browser journey failed as intended.
+One defect the browser journeys found, fixed: the asset library's refreshes could land out of
+  order, so a refresh already in flight when an import finished could put the library back to how it
+  was before it, which reads as a file that silently failed to arrive.
+Checkpoint: see the M13 commits on feature/director-mode.
+Next dependency-ready milestone: M15.
 ```
 
 ### Acceptance record template

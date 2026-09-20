@@ -188,6 +188,41 @@ public sealed record ModelSupportLimits(
     int MaxNodes, int MaxMaterials, int MaxImages, string[] SupportedRequiredExtensions);
 
 /// <summary>What the artist reads about a stored model before and while inspecting it.</summary>
+/// <summary>One bone of a stored rig, with its rest pose as the file holds it.</summary>
+public sealed record ModelBoneSummary(
+    string Name, string? Parent, int Depth,
+    double[] RestTranslation, double[] RestRotation, double[] RestScale, double[] RestWorldPosition);
+
+/// <summary>
+/// What is known about a stored model's rig, and what could not be confirmed.
+///
+/// AnimationReady is the only claim anything downstream may act on, and it is
+/// granted solely when a documented body profile is matched and every check
+/// passed. A skeleton with bones named something else is reported as an unknown
+/// skeleton, never as an almost-humanoid that might work.
+/// </summary>
+public sealed record ModelRigSummary(
+    bool HasSkeleton, string ProfileId, string ProfileName, bool ProfileMatched,
+    string[] MissingBones, string[] UnexpectedBones,
+    int SkinCount, int BoneCount, int SkinnedVertexCount, int MaxInfluencesPerVertex,
+    ModelBoneSummary[] Bones,
+    bool TransformsFinite, bool BindPoseValid, bool SkinWeightsValid, int SkinWeightsChecked,
+    string[] Findings, bool AnimationReady);
+
+/// <summary>A rotation in radians applied to one named bone, on top of its rest pose.</summary>
+public sealed record RigBonePoseRequest(string Bone, double[] Rotation);
+
+public sealed record RigPoseRequest(RigBonePoseRequest[] Pose);
+
+public sealed record RigJointPlacementSummary(string Bone, string? Parent, double[] Position, double[] RestPosition);
+
+/// <summary>
+/// Where a rig's bones land under one pose. It is bound to the exact model
+/// revision it was calculated from, and it stores and draws nothing.
+/// </summary>
+public sealed record RigPoseSummary(
+    Guid AssetId, string ContentHash, string ProfileId, RigJointPlacementSummary[] Joints);
+
 public sealed record ModelProfileSummary(
     Guid AssetId, string DisplayName, string ContentHash, long Bytes, string ContentUrl,
     string Container, string SpecificationVersion, string Generator,
@@ -196,7 +231,8 @@ public sealed record ModelProfileSummary(
     string[] DeclaredExtensions, string[] RequiredExtensions,
     ModelMaterialSummary[] Materials,
     double[] BoundsMin, double[] BoundsMax, double[] Dimensions,
-    ModelSupportLimits Limits);
+    ModelSupportLimits Limits,
+    ModelRigSummary? Rig = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AssetKind

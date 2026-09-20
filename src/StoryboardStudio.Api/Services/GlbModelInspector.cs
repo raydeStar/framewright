@@ -55,7 +55,8 @@ public sealed record GlbModelProfile(
     GlbMaterialSummary[] Materials,
     double[] BoundsMin,
     double[] BoundsMax,
-    double[] Dimensions);
+    double[] Dimensions,
+    GlbRigProfile Rig);
 
 public sealed record GlbInspectionResult(bool Ok, string? Error, GlbModelProfile? Profile);
 
@@ -86,6 +87,7 @@ public static class GlbModelInspector
 
         JsonDocument? json = null;
         long binaryChunkBytes = 0;
+        var binaryChunkOffset = 0;
         var offset = 12;
         var chunkIndex = 0;
         try
@@ -112,6 +114,7 @@ public static class GlbModelInspector
                 {
                     if (binaryChunkBytes > 0) return Failure("This GLB is malformed: it declares more than one binary chunk.");
                     binaryChunkBytes = chunkLength;
+                    binaryChunkOffset = offset;
                 }
 
                 offset += (int)chunkLength;
@@ -120,12 +123,15 @@ public static class GlbModelInspector
 
             if (offset != bytes.Length) return Failure("This GLB is malformed: its chunk table does not fill the file.");
             if (json is null) return Failure("This GLB has no JSON chunk.");
-            return Describe(json.RootElement, binaryChunkBytes, limits);
+            // The skin is read from the file's own bytes rather than taken on
+            // trust from the JSON, so the binary chunk travels with the document.
+            var binary = binaryChunkBytes > 0 ? bytes.Slice(binaryChunkOffset, (int)binaryChunkBytes) : default;
+            return Describe(json.RootElement, binaryChunkBytes, binary, limits);
         }
         finally { json?.Dispose() ; }
     }
 
-    private static GlbInspectionResult Describe(JsonElement root, long binaryChunkBytes, GlbSupportProfile limits)
+    private static GlbInspectionResult Describe(JsonElement root, long binaryChunkBytes, ReadOnlySpan<byte> binary, GlbSupportProfile limits)
     {
         if (!root.TryGetProperty("asset", out var assetNode) || !assetNode.TryGetProperty("version", out var versionNode)
             || versionNode.GetString() is not { } specVersion)
@@ -231,7 +237,8 @@ public static class GlbModelInspector
             Materials: summaries,
             BoundsMin: [Round(min.X), Round(min.Y), Round(min.Z)],
             BoundsMax: [Round(max.X), Round(max.Y), Round(max.Z)],
-            Dimensions: [Round(max.X - min.X), Round(max.Y - min.Y), Round(max.Z - min.Z)]));
+            Dimensions: [Round(max.X - min.X), Round(max.Y - min.Y), Round(max.Z - min.Z)],
+            Rig: GlbRigInspector.Inspect(root, binary)));
     }
 
     /// <summary>

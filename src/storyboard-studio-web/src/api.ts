@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorShotView, ModelProfileSummary, SceneBlockoutPlanSummary, ScenePlaceholderSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorShotView, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, ScenePlaceholderSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -122,6 +122,8 @@ export const studioApi = {
     return response.json() as Promise<AssetSummary>
   },
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
+  rigPose: (assetId: string, pose: { bone: string; rotation: number[] }[]) =>
+    request<RigPoseSummary>(`/api/assets/${assetId}/rig-pose`, { method: 'POST', body: JSON.stringify({ pose }) }),
   scenes: () => request<SceneListItem[]>('/api/scenes'),
   scene: (sceneId: string) => request<SceneSummary>(`/api/scenes/${sceneId}`),
   createScene: (name: string) => request<SceneSummary>('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) }),

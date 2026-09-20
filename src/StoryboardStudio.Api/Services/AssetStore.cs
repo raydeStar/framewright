@@ -240,7 +240,54 @@ public sealed class AssetStore
             [.. profile.Materials.Select(material => new ModelMaterialSummary(material.Name, material.Textured, material.AlphaMode, material.DoubleSided))],
             profile.BoundsMin, profile.BoundsMax, profile.Dimensions,
             new ModelSupportLimits(limits.MaxBytes, limits.MaxVertices, limits.MaxTriangles, limits.MaxEmbeddedTextureBytes,
-                limits.MaxNodes, limits.MaxMaterials, limits.MaxImages, limits.SupportedRequiredExtensions)));
+                limits.MaxNodes, limits.MaxMaterials, limits.MaxImages, limits.SupportedRequiredExtensions),
+            Describe(profile.Rig)));
+    }
+
+    /// <summary>
+    /// The rig as the artist reads it. A static prop reports no skeleton, which
+    /// is an ordinary answer rather than a failure.
+    /// </summary>
+    internal static ModelRigSummary Describe(GlbRigProfile rig) => new(
+        rig.HasSkeleton, rig.ProfileId, rig.ProfileName, rig.ProfileMatched,
+        rig.MissingBones, rig.UnexpectedBones,
+        rig.SkinCount, rig.BoneCount, rig.SkinnedVertexCount, rig.MaxInfluencesPerVertex,
+        [.. rig.Bones.Select(bone => new ModelBoneSummary(
+            bone.Name, bone.Parent, bone.Depth,
+            bone.RestTranslation, bone.RestRotation, bone.RestScale, bone.RestWorldPosition))],
+        rig.TransformsFinite, rig.BindPoseValid, rig.SkinWeightsValid, rig.SkinWeightsChecked,
+        rig.Findings, rig.AnimationReady);
+
+    /// <summary>
+    /// Where this exact model revision's bones land under one pose. Nothing is
+    /// stored: the answer is recomputed from the stored bytes every time, so it
+    /// can never drift from the mesh it describes.
+    /// </summary>
+    public async Task<RepositoryResult<RigPoseSummary>> RigPoseAsync(
+        Guid assetId, RigPoseRequest request, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == assetId, cancellationToken);
+        if (asset is null) return RepositoryResult<RigPoseSummary>.NotFound();
+        if (asset.Kind != nameof(AssetKind.Model)) return RepositoryResult<RigPoseSummary>.Invalid("Only model assets have a rig.");
+
+        var path = Path.Combine(root, asset.StoragePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(path)) return RepositoryResult<RigPoseSummary>.Unavailable("The stored model file is missing from the asset root.");
+
+        var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
+        if (!inspection.Ok) return RepositoryResult<RigPoseSummary>.Invalid(inspection.Error!);
+        var rig = inspection.Profile!.Rig;
+        if (!rig.HasSkeleton) return RepositoryResult<RigPoseSummary>.Invalid("This model is a static prop: it has no skeleton to pose.");
+        if (!rig.AnimationReady)
+            return RepositoryResult<RigPoseSummary>.Invalid("This rig is not animation-ready, so it is not posed. Read its findings first.");
+
+        var pose = (request?.Pose ?? []).Select(bone => new RigPoseCalculator.BonePose(bone.Bone, bone.Rotation)).ToArray();
+        if (pose.Length > rig.BoneCount) return RepositoryResult<RigPoseSummary>.Invalid("A pose cannot name more bones than the rig has.");
+
+        var result = RigPoseCalculator.Apply(rig, pose);
+        if (!result.Ok) return RepositoryResult<RigPoseSummary>.Invalid(result.Error!);
+        return RepositoryResult<RigPoseSummary>.Ok(new RigPoseSummary(
+            asset.Id, asset.ContentHash, rig.ProfileId,
+            [.. result.Joints.Select(joint => new RigJointPlacementSummary(joint.Bone, joint.Parent, joint.Position, joint.RestPosition))]));
     }
 
     public async Task<RepositoryResult<AssetSummary>> ImportGeneratedMediaAsync(Stream input, string fileName, string mimeType, long? expectedLength, AssetKind kind, CancellationToken cancellationToken, string source = "Generated media")
