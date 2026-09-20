@@ -878,6 +878,10 @@ public sealed partial class GenerationJobWorker(GenerationJobSignal queue, IServ
             foreach (var jobId in assetPending) await queue.QueueAsync(jobId, stoppingToken);
             var audioPending = await scope.ServiceProvider.GetRequiredService<AudioGenerationJobService>().RecoverableJobsAsync(stoppingToken);
             foreach (var jobId in audioPending) await queue.QueueAsync(jobId, stoppingToken);
+            // A compiler stage that was running when the lights went out is the
+            // same job afterwards, by the same identity.
+            var modelPending = await scope.ServiceProvider.GetRequiredService<ModelGenerationService>().RecoverableJobsAsync(stoppingToken);
+            foreach (var jobId in modelPending) await queue.QueueAsync(jobId, stoppingToken);
         }
 
         // Always scan once on startup, including when there was no state change
@@ -934,6 +938,8 @@ public sealed partial class GenerationJobWorker(GenerationJobSignal queue, IServ
                 || string.Equals(lease.WorkType, AudioGenerationJobService.MusicWorkType, StringComparison.Ordinal)
                 || string.Equals(lease.WorkType, AudioGenerationJobService.VoiceDesignWorkType, StringComparison.Ordinal))
                 await scope.ServiceProvider.GetRequiredService<AudioGenerationJobService>().RunAsync(lease.JobId, cancellationToken);
+            else if (string.Equals(lease.WorkType, ModelGenerationService.ModelWorkType, StringComparison.Ordinal))
+                await scope.ServiceProvider.GetRequiredService<ModelGenerationService>().RunAsync(lease.JobId, cancellationToken);
             else
                 await scope.ServiceProvider.GetRequiredService<GenerationOrchestrator>().RunAsync(lease.JobId, cancellationToken);
 

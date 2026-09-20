@@ -59,6 +59,8 @@ builder.Services.AddScoped<SceneService>();
 builder.Services.AddScoped<SceneDirectionService>();
 builder.Services.AddScoped<SceneBlockoutService>();
 builder.Services.AddScoped<SceneMotionService>();
+builder.Services.AddSingleton<ICompilerGateway, CompilerGateway>();
+builder.Services.AddScoped<ModelGenerationService>();
 builder.Services.AddScoped<VisualConsistencyService>();
 builder.Services.AddScoped<TimelineService>();
 builder.Services.AddScoped<QwenVoiceService>();
@@ -465,6 +467,16 @@ app.MapPost("/api/scene-proposals/{proposalId:guid}/reject", async Task<IResult>
     => ToHttpResult(await direction.RejectAsync(proposalId, cancellationToken)));
 app.MapPost("/api/scene-proposals/{proposalId:guid}/apply", async Task<IResult> (Guid proposalId, SceneDirectionService direction, CancellationToken cancellationToken)
     => ToHttpResult(await direction.ApplyAsync(proposalId, cancellationToken)));
+app.MapGet("/api/models/generation/readiness", async (ModelGenerationService models, CancellationToken cancellationToken)
+    => Results.Ok(await models.PreflightAsync(cancellationToken)));
+app.MapPost("/api/models/generation", async Task<IResult> (
+    CreateModelGenerationRequest request, ModelGenerationService models, GenerationJobSignal queue, CancellationToken cancellationToken) =>
+{
+    var queued = await models.EnqueueAsync(request, cancellationToken);
+    if (queued.Kind == RepositoryResultKind.Ok && queued.Value is not null)
+        await queue.QueueAsync(queued.Value.Id, cancellationToken);
+    return ToHttpResult(queued);
+});
 app.MapPost("/api/webmcp/scene-blockouts", async (ProposeSceneBlockoutRequest request, SceneBlockoutService blockouts, CancellationToken cancellationToken)
     => Results.Ok(await blockouts.ProposeAsync(request, cancellationToken)));
 app.MapGet("/api/scene-blockouts", async Task<IResult> (Guid? referenceAssetId, SceneBlockoutService blockouts, CancellationToken cancellationToken)

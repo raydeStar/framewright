@@ -402,11 +402,48 @@ function StudioSkeleton() {
 
 function JobsDock({ jobs, scopeShotId, onOpen, onRetry, dismissed, onDismiss }: { jobs: StudioSnapshot['jobs']; scopeShotId?: string | null; onOpen: () => void; onRetry: (job: JobSummary) => Promise<void>; dismissed: string[]; onDismiss: (id: string) => void }) {
   const [retrying, setRetrying] = useState(false)
+  const [open, setOpen] = useState(false)
   const underway = jobs.filter(x => x.state === 'Queued' || x.state === 'Running')
   const active = underway.find(x => x.state === 'Running') ?? underway[0]
-  if (active) return <button className="jobs-dock active" onClick={onOpen} data-testid="jobs-dock" aria-label={`${active.shotCode} ${active.kind}: ${active.phase}, ${active.progress}%`}>
-    <LoaderCircle className="spin" size={15} /><span><strong>{active.shotCode} · {active.kind}</strong><small>{active.phase}{underway.length > 1 ? ` · ${underway.length - 1} waiting safely` : ''}</small></span><div className="job-progress" role="progressbar" aria-label="Generation progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={active.progress}><i style={{ width: `${active.progress}%` }} /></div><em>{active.progress}%</em><ChevronDown size={14} />
-  </button>
+  // Everything that finished recently, so a job that completed while the
+  // artist was elsewhere is still there to be found rather than gone.
+  const settled = jobs
+    .filter(job => (job.state === 'Completed' || job.state === 'Failed' || job.state === 'Cancelled')
+      && !dismissed.includes(job.id)
+      && Date.now() - new Date(job.completedAt ?? job.createdAt).getTime() < 30 * 60 * 1000)
+    .sort((a, b) => (b.completedAt ?? b.createdAt).localeCompare(a.completedAt ?? a.createdAt))
+    .slice(0, 8)
+
+  if (active) return <div className="jobs-queue" data-testid="jobs-queue">
+    <button className="jobs-dock active" onClick={() => setOpen(value => !value)} data-testid="jobs-dock"
+      aria-expanded={open}
+      aria-label={`${underway.length} job${underway.length === 1 ? '' : 's'} underway. ${active.shotCode} ${active.kind}: ${active.phase}, ${active.progress}%`}>
+      <LoaderCircle className="spin" size={15} /><span><strong>{active.shotCode} · {active.kind}</strong><small>{active.phase}{underway.length > 1 ? ` · ${underway.length - 1} waiting safely` : ''}</small></span><div className="job-progress" role="progressbar" aria-label="Generation progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={active.progress}><i style={{ width: `${active.progress}%` }} /></div><em>{active.progress}%</em><ChevronDown size={14} />
+    </button>
+    {open && <div className="jobs-queue-panel" data-testid="jobs-queue-panel" role="group" aria-label="Work queue">
+      <header>
+        <strong>Work queue</strong>
+        <button type="button" onClick={onOpen} aria-label="Refresh the work queue">Refresh</button>
+      </header>
+      <ul>
+        {underway.map(job => <li key={job.id} data-testid="jobs-queue-item" data-state={job.state}>
+          <span><strong>{job.shotCode}</strong><small>{job.kind} · {job.phase}</small></span>
+          <div className="job-progress" role="progressbar" aria-label={`${job.shotCode} progress`}
+            aria-valuemin={0} aria-valuemax={100} aria-valuenow={job.progress}>
+            <i style={{ width: `${job.progress}%` }} /></div>
+          <em>{job.state === 'Queued' ? 'waiting' : `${job.progress}%`}</em>
+        </li>)}
+        {settled.map(job => <li key={job.id} data-testid="jobs-queue-item" data-state={job.state}>
+          <span><strong>{job.shotCode}</strong><small>{job.kind} · {job.state === 'Completed' ? job.phase : job.error || job.state}</small></span>
+          {job.state === 'Completed' && job.outputAssetId
+            ? <em className="job-done">delivered</em>
+            : <button type="button" disabled={retrying}
+                onClick={() => { setRetrying(true); void onRetry(job).finally(() => setRetrying(false)) }}>Retry</button>}
+        </li>)}
+      </ul>
+      <p>Work continues if you leave this screen. Progress moves when a stage finishes, not on a timer.</p>
+    </div>}
+  </div>
 
   // Terminal failures used to be invisible: this dock only ever rendered
   // Queued and Running, so a job that failed simply vanished and the artist was

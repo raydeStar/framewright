@@ -27,11 +27,17 @@ public class StudioApiFactory : WebApplicationFactory<Program>
     private readonly string? assetRoot;
     private readonly bool startGenerationWorker;
     private readonly IVideoMediaProbe? videoMediaProbe;
+    /// <summary>Lets a test stand in for a collaborator the application talks to.</summary>
+    private readonly Action<IServiceCollection>? configureServices;
     public string DataRoot { get; }
     public string DisabledCodexExecutable => Path.Combine(DataRoot, "codex-disabled-for-tests.exe");
 
     public StudioApiFactory()
         : this(Path.Combine(Path.GetTempPath(), "storyboard-studio-tests", Guid.NewGuid().ToString("N")), true) { }
+
+    internal StudioApiFactory(Action<IServiceCollection> configureServices)
+        : this(Path.Combine(Path.GetTempPath(), "storyboard-studio-tests", Guid.NewGuid().ToString("N")), true,
+            configureServices: configureServices) { }
 
     internal StudioApiFactory(IVideoMediaProbe videoMediaProbe)
         : this(Path.Combine(Path.GetTempPath(), "storyboard-studio-tests", Guid.NewGuid().ToString("N")), true, videoMediaProbe: videoMediaProbe) { }
@@ -41,8 +47,10 @@ public class StudioApiFactory : WebApplicationFactory<Program>
         bool deleteDataRoot,
         string? assetRoot = null,
         bool startGenerationWorker = true,
-        IVideoMediaProbe? videoMediaProbe = null)
+        IVideoMediaProbe? videoMediaProbe = null,
+        Action<IServiceCollection>? configureServices = null)
     {
+        this.configureServices = configureServices;
         DataRoot = Path.GetFullPath(dataRoot);
         this.deleteDataRoot = deleteDataRoot;
         this.assetRoot = assetRoot is null ? null : Path.GetFullPath(assetRoot);
@@ -96,6 +104,9 @@ public class StudioApiFactory : WebApplicationFactory<Program>
                     .ToArray();
                 foreach (var descriptor in workerDescriptors) services.Remove(descriptor);
             }
+            // Last, so a test's stand-in wins over the application's own
+            // registration of the same collaborator.
+            configureServices?.Invoke(services);
         });
     }
 

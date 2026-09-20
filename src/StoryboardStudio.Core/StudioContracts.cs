@@ -232,6 +232,19 @@ public sealed record RigJointPlacementSummary(string Bone, string? Parent, doubl
 public sealed record RigPoseSummary(
     Guid AssetId, string ContentHash, string ProfileId, RigJointPlacementSummary[] Joints);
 
+/// <summary>What the artist asks for: this reference image, made into a model.</summary>
+public sealed record CreateModelGenerationRequest(Guid SourceAssetId, string Name);
+
+/// <summary>
+/// Whether model generation can run on this workstation, and whether it is
+/// allowed to. Capability and permission are separate answers: a route that
+/// could run is still uncommissioned until the artist says otherwise.
+/// </summary>
+public sealed record ModelGenerationReadiness(
+    bool Installed, bool Commissioned, bool CanRun,
+    string? CompilerVersion, string? Checkout, string? Blender,
+    string[] Missing, string Detail);
+
 /// <summary>One reusable clip a model carries, as the file declares it.</summary>
 public sealed record ModelClipSummary(
     string Name, double Duration, int ChannelCount,

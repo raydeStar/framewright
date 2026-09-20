@@ -206,6 +206,36 @@ public sealed class AssetStore
     }
 
     /// <summary>
+    /// A generated model enters through exactly the same gate an imported one
+    /// does: the same ceiling, the same container validation, the same content
+    /// addressing. A worker cannot put anything in the library that an artist
+    /// could not have imported by hand.
+    /// </summary>
+    public async Task<RepositoryResult<AssetSummary>> ImportGeneratedModelAsync(
+        Stream input, string fileName, long? expectedLength, CancellationToken cancellationToken,
+        string source = "Generated model")
+    {
+        var length = expectedLength ?? (input.CanSeek ? input.Length - input.Position : -1);
+        if (length <= 0 || length > MaxModelBytes)
+            return RepositoryResult<AssetSummary>.Invalid(
+                $"Model files must be between 1 byte and {MaxModelBytes / (1024 * 1024)} MB.");
+        var file = new FormFile(input, input.CanSeek ? input.Position : 0, length, "file", fileName)
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = "model/gltf-binary",
+        };
+        return await ImportModelAsync(file, cancellationToken, source);
+    }
+
+    /// <summary>The stored file behind an asset, or null when it is missing.</summary>
+    public string? StoredFilePath(string storagePath)
+    {
+        if (string.IsNullOrWhiteSpace(storagePath)) return null;
+        var path = Path.Combine(root, storagePath.Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(path) ? path : null;
+    }
+
+    /// <summary>
     /// Whether a stored asset file is still present in the asset root. A scene
     /// uses this to say "this model is unavailable" instead of drawing nothing.
     /// </summary>
