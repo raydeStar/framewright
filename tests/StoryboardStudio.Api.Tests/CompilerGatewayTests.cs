@@ -22,7 +22,10 @@ public sealed class CompilerGatewayTests
 
         public void Dispose()
         {
-            try { File.Delete(Path); } catch (IOException) { }
+            foreach (var leftover in new[] { Path, Path + ".args" })
+            {
+                try { File.Delete(leftover); } catch (IOException) { }
+            }
         }
     }
 
@@ -30,7 +33,10 @@ public sealed class CompilerGatewayTests
     {
         var path = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), $"rac-stub-{Guid.NewGuid():N}.cmd");
-        File.WriteAllText(path, "@echo off\n" + string.Join("\n", lines) + "\n");
+        // CRLF: a batch file is read line by line by cmd itself, and one
+        // written with bare newlines runs some lines and silently mangles
+        // others — a redirect on the first line is where it shows.
+        File.WriteAllText(path, "@echo off\r\n" + string.Join("\r\n", lines) + "\r\n");
         return new StubCompiler { Path = path };
     }
 
@@ -152,5 +158,92 @@ public sealed class CompilerGatewayTests
         Assert.Null(run.ReceiptJson);
         Assert.Null(run.PayloadPath);
         Assert.False(string.IsNullOrWhiteSpace(run.Error));
+    }
+
+    /// <summary>
+    /// The geometry route needs weights and an environment that are a separate
+    /// install from the compiler checkout. The compiler is told where they are
+    /// rather than left to find them, because a guessed tree is a different set
+    /// of weights from the one an asset was gated with, and nothing in a
+    /// receipt would show the difference.
+    /// </summary>
+    [Fact]
+    public async Task TheStudioTreeIsPassedToTheCompilerWhenOneIsConfigured()
+    {
+        // The stub records its arguments beside itself rather than reporting
+        // them in its JSON: they contain quotes and backslashes, which is
+        // exactly what makes smuggling them through the answer unreliable.
+        // Appended, not overwritten: describing also asks the compiler its
+        // version, and the last call would otherwise be the only one recorded.
+        using var recording = Stub(
+            "echo %* >> \"%~f0.args\"",
+            "echo {\"ok\":true,\"stages\":[]}");
+
+        var capabilities = await Gateway(
+            ("Executable", recording.Path),
+            ("StudioTreePath", @"C:\studio\tree")).DescribeAsync(CancellationToken.None);
+
+        Assert.True(capabilities.Installed);
+        var passed = File.ReadAllText(recording.Path + ".args");
+        Assert.Contains("--legacy-root", passed, StringComparison.Ordinal);
+        Assert.Contains(@"C:\studio\tree", passed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunningAStageAlsoNamesTheStudioTree()
+    {
+        using var recording = Stub(
+            "echo %* >> \"%~f0.args\"",
+            "echo {\"ok\":true,\"stage\":\"geometry\",\"exit_code\":0,\"seconds\":1}");
+
+        var run = await Gateway(
+            ("Executable", recording.Path),
+            ("StudioTreePath", @"C:\studio\tree")).RunStageAsync(
+                "geometry", "reference.png", "candidate.glb", "receipt.json",
+                CancellationToken.None);
+
+        // Describing and running must agree about which tree is in use, or the
+        // capability answer describes a machine the run does not happen on.
+        // The run itself is not asserted to have succeeded: this stub writes no
+        // receipt, and a run with no receipt is correctly not a success.
+        Assert.False(run.Ok);
+        var passed = File.ReadAllText(recording.Path + ".args");
+        Assert.Contains("--legacy-root", passed, StringComparison.Ordinal);
+        Assert.Contains(@"C:\studio\tree", passed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NoStudioTreeIsAnOrdinaryAnswerRatherThanAFailure()
+    {
+        using var listing = Stub(
+            "echo {\"ok\":true,\"legacy_root\":null,\"stages\":[" +
+            "{\"stage\":\"geometry\",\"runner\":\"powershell\",\"summary\":\"s\",\"produces\":\"p\"," +
+            "\"available\":false,\"missing\":[\"legacy-root\"]}]}");
+
+        var capabilities = await Gateway(("Executable", listing.Path)).DescribeAsync(CancellationToken.None);
+
+        // A workstation without the weights is the common case, and it must
+        // read as "this machine cannot do that", not as a broken compiler.
+        Assert.True(capabilities.Installed);
+        Assert.Null(capabilities.StudioTree);
+        Assert.False(capabilities.CanRun("geometry"));
+        var geometry = Assert.Single(capabilities.Stages);
+        Assert.Equal(["legacy-root"], geometry.Missing);
+    }
+
+    [Fact]
+    public async Task AConfiguredStudioTreeIsReportedBackFromTheCompilersOwnAnswer()
+    {
+        using var listing = Stub(
+            "echo {\"ok\":true,\"legacy_root\":\"C:\\\\studio\\\\tree\",\"stages\":[" +
+            "{\"stage\":\"geometry\",\"runner\":\"powershell\",\"summary\":\"s\",\"produces\":\"p\"," +
+            "\"available\":true,\"missing\":[]}]}");
+
+        var capabilities = await Gateway(("Executable", listing.Path)).DescribeAsync(CancellationToken.None);
+
+        // Reported from the compiler's answer rather than echoed back from this
+        // studio's configuration: what matters is the tree it actually used.
+        Assert.Equal(@"C:\studio\tree", capabilities.StudioTree);
+        Assert.True(capabilities.CanRun("geometry"));
     }
 }

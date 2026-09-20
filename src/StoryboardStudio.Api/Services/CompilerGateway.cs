@@ -11,7 +11,8 @@ public sealed record CompilerCapabilities(
     string? Checkout,
     string? Blender,
     IReadOnlyList<CompilerStage> Stages,
-    string? Detail = null)
+    string? Detail = null,
+    string? StudioTree = null)
 {
     public bool CanRun(string stage) =>
         Installed && Stages.Any(candidate => candidate.Stage == stage && candidate.Available);
@@ -58,6 +59,15 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
     private string? Blender => Trimmed(configuration.GetValue<string>($"{Section}:BlenderPath"));
 
     /// <summary>
+    /// The studio tree holding the geometry weights and their environment. It
+    /// is a separate install from the compiler checkout, and most workstations
+    /// have the one without the other, which is exactly why the compiler is
+    /// told where it is rather than left to find it. Unset is an ordinary
+    /// answer: the compiler then reports geometry as unavailable, by name.
+    /// </summary>
+    private string? StudioTree => Trimmed(configuration.GetValue<string>($"{Section}:StudioTreePath"));
+
+    /// <summary>
     /// False until the artist commissions the route, exactly as provider
     /// submission is. An uncommissioned route still reports what it could do.
     /// </summary>
@@ -71,6 +81,7 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
         var arguments = new List<string> { "run-stage", "--list" };
         if (Checkout is { } checkout) { arguments.Add("--repo-root"); arguments.Add(checkout); }
         if (Blender is { } blender) { arguments.Add("--blender"); arguments.Add(blender); }
+        if (StudioTree is { } studio) { arguments.Add("--legacy-root"); arguments.Add(studio); }
 
         var run = await RunAsync(arguments, TimeSpan.FromSeconds(60), cancellationToken);
         if (!run.Started)
@@ -113,7 +124,8 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
                 Version: await VersionAsync(cancellationToken),
                 Checkout: Text(root, "checkout"),
                 Blender: Text(root, "blender"),
-                Stages: stages);
+                Stages: stages,
+                StudioTree: Text(root, "legacy_root"));
         }
         catch (JsonException)
         {
@@ -131,6 +143,7 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
         };
         if (Checkout is { } checkout) { arguments.Add("--repo-root"); arguments.Add(checkout); }
         if (Blender is { } blender) { arguments.Add("--blender"); arguments.Add(blender); }
+        if (StudioTree is { } studio) { arguments.Add("--legacy-root"); arguments.Add(studio); }
 
         var started = timeProvider.GetTimestamp();
         var run = await RunAsync(arguments, Timeout, cancellationToken);
