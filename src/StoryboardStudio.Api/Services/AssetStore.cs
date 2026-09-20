@@ -206,6 +206,14 @@ public sealed class AssetStore
     }
 
     /// <summary>
+    /// Whether a stored asset file is still present in the asset root. A scene
+    /// uses this to say "this model is unavailable" instead of drawing nothing.
+    /// </summary>
+    public bool StoredFileExists(string storagePath) =>
+        !string.IsNullOrWhiteSpace(storagePath)
+        && File.Exists(Path.Combine(root, storagePath.Replace('/', Path.DirectorySeparatorChar)));
+
+    /// <summary>
     /// Re-reads the stored bytes so the profile can never drift from the model
     /// the viewer is about to show. Only the JSON chunk is parsed, so this stays
     /// cheap no matter how large the geometry payload is.

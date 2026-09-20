@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Aperture, ArrowLeft, ArrowRight, BadgeCheck, Blocks, Bot, Check, ChevronDown, CircleAlert, CircleDot, CircleSlash, Clapperboard, Command, Download, Film, GalleryHorizontalEnd, Globe2, Grid2X2, Library, LoaderCircle, LockKeyhole, MessageCircle, RefreshCw, Search, Settings2, Sparkles, Unplug, WandSparkles, X } from 'lucide-react'
+import { Aperture, ArrowLeft, ArrowRight, BadgeCheck, Blocks, Bot, Boxes, Check, ChevronDown, CircleAlert, CircleDot, CircleSlash, Clapperboard, Command, Download, Film, GalleryHorizontalEnd, Globe2, Grid2X2, Library, LoaderCircle, LockKeyhole, MessageCircle, RefreshCw, Search, Settings2, Sparkles, Unplug, WandSparkles, X } from 'lucide-react'
 import { ApiError, studioApi } from './api'
 import { getSupersededJobIds } from './jobState'
 import Dialog from './components/Dialog'
@@ -9,6 +9,7 @@ import AuthorityWorkspace from './components/AuthorityWorkspace'
 import ProjectSwitcher from './components/ProjectSwitcher'
 import AuthorityLibraryDialog from './components/AuthorityLibraryDialog'
 import WorldWorkspace from './components/WorldWorkspace'
+const SceneWorkspace = lazy(() => import('./components/SceneWorkspace'))
 import { BoardWorkspace, ReviewWorkspace, SequenceWorkspace, ShotWorkspace } from './components/StudioWorkspaces'
 import { FRAMEWRIGHT_WEBMCP_TOOL_NAMES, registerFramewrightWebMcp } from './webmcp'
 import type { AgentActivityEntry, AssetGenerationDraft, BackupStatus, CodexAssistResponse, CredentialStatus, DirectorViewQuery, IntegrationSummary, JobSummary, PairingStatusSummary, ProjectSummary, ReferenceSummary, RuntimeReadinessSummary, ShotRevisionProposalSummary, ShotSummary, StudioSnapshot, Workspace } from './types'
@@ -19,6 +20,7 @@ const workspaceItems: { id: Workspace; label: string; icon: React.ReactNode }[] 
   { id: 'board', label: 'Board', icon: <Grid2X2 /> },
   { id: 'assets', label: 'Assets', icon: <Library /> },
   { id: 'world', label: 'World', icon: <Globe2 /> },
+  { id: 'scene', label: 'Scene', icon: <Boxes /> },
   { id: 'shot', label: 'Shot', icon: <Aperture /> },
   { id: 'review', label: 'Review', icon: <GalleryHorizontalEnd /> },
   { id: 'sequence', label: 'Sequence', icon: <Clapperboard /> },
@@ -262,14 +264,14 @@ export default function App() {
   const activeShotJob = selected && studio.jobs.find(job => job.shotId === selected.id && (job.state === 'Queued' || job.state === 'Running'))
   const generationBusy = actionBusy || Boolean(activeShotJob)
   // Board, Assets, and World are project-level workspaces; the others need a shot.
-  const active: Workspace = selected || workspace === 'assets' || workspace === 'world' || (workspace === 'authority' && selectedAuthority) ? workspace : 'board'
+  const active: Workspace = selected || workspace === 'assets' || workspace === 'world' || workspace === 'scene' || (workspace === 'authority' && selectedAuthority) ? workspace : 'board'
   const shotScoped = active === 'shot' || active === 'review' || active === 'sequence'
 
   return <div className={`app-shell${directorMode && active === 'shot' ? ' director-mode' : ''}`}>
     <a className="skip-link" href="#studio-workspace">Skip to workspace</a>
     <aside className="workspace-rail" aria-label="Workspaces">
       <button className="brand" onClick={() => setWorkspace('board')} aria-label="Framewright home" title="Framewright · Build every shot with intention"><div className="brand-glyph"><Film size={20} /></div><span>FRAME</span></button>
-      <nav aria-label="Production workspaces">{workspaceItems.map(item => <button key={item.id} aria-current={active === item.id ? 'page' : undefined} disabled={!selected && !['board', 'assets', 'world'].includes(item.id)} title={!selected && !['board', 'assets', 'world'].includes(item.id) ? 'Add a shot to this sequence first.' : undefined} className={active === item.id ? 'active' : ''} onClick={() => setWorkspace(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
+      <nav aria-label="Production workspaces">{workspaceItems.map(item => <button key={item.id} aria-current={active === item.id ? 'page' : undefined} disabled={!selected && !['board', 'assets', 'world', 'scene'].includes(item.id)} title={!selected && !['board', 'assets', 'world', 'scene'].includes(item.id) ? 'Add a shot to this sequence first.' : undefined} className={active === item.id ? 'active' : ''} onClick={() => setWorkspace(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
       <div className="rail-bottom"><button onClick={() => { setSetupOpen(true); void inspectIntegrations() }}><Blocks /><span>Connect</span><i className="online-dot" /></button><button onClick={() => { setSetupOpen(true); void inspectIntegrations() }}><Settings2 /><span>Settings</span></button></div>
     </aside>
     <section className={`app-main workspace-${active}`}>
@@ -291,6 +293,7 @@ export default function App() {
         {active === 'board' && <BoardWorkspace studio={studio} selectedId={selected?.id ?? ''} initialView={boardView} onViewChange={setBoardView} onSelect={setSelectedId} onOpen={id => { setSelectedId(id); setWorkspace('shot') }} onCreateShot={initialImage => setEntityEditor({ kind: 'shot', initialImage })} onCreateAuthority={() => setEntityEditor({ kind: 'authority' })} onEditAuthority={authority => { setBoardView('authorities'); setSelectedAuthorityId(authority.id); setWorkspace('authority') }} onOpenLibrary={() => setLibraryOpen(true)} onChanged={message => { if (message) setToast(message); void refresh() }} />}
         {active === 'assets' && !assetGenerationDraft && <AssetWorkspace studio={studio} initialAssetId={assetLandingId} onEditAuthority={authority => { setSelectedAuthorityId(authority.id); setWorkspace('authority') }} onOpenGeneration={setAssetGenerationDraft} onOpenSequence={() => setWorkspace('sequence')} onJobQueued={acceptQueuedJob} onToast={setToast} />}
         {active === 'assets' && assetGenerationDraft && <Suspense fallback={<WorkspaceLoading label="Opening image workspace" />}><SketchWorkspace key={assetGenerationDraft.id} shot={selected ?? assetFallbackShot(assetGenerationDraft)} references={studio.references} assetDraft={assetGenerationDraft} onOpenFrame={() => setAssetGenerationDraft(undefined)} onJobQueued={() => undefined} onAssetJobQueued={job => { acceptQueuedJob(job); setAssetGenerationDraft(undefined); setToast(`${job.shotCode} queued. You can keep working while Framewright renders it.`) }} /></Suspense>}
+        {active === 'scene' && <Suspense fallback={<WorkspaceLoading label="Opening scenes" />}><SceneWorkspace onToast={setToast} /></Suspense>}
         {active === 'world' && <WorldWorkspace project={studio.project} onSaved={(saved, message) => { setStudio(current => current ? { ...current, project: saved } : current); setToast(message) }} />}
         {active === 'authority' && selectedAuthority && !assetGenerationDraft && <AuthorityWorkspace studio={studio} authority={selectedAuthority} onBack={() => { setBoardView('authorities'); setWorkspace('board') }} onOpenGeneration={(draft, revision) => { setAuthorityGeneration({ authorityId: selectedAuthority.id, expectedVersion: selectedAuthority.version, ...revision }); setAssetGenerationDraft(draft) }} onJobQueued={acceptQueuedJob} onChanged={(saved, message) => { setSelectedAuthorityId(saved.id); setToast(message); void refresh() }} onDeleted={message => { setSelectedAuthorityId(undefined); setBoardView('authorities'); setWorkspace('board'); setToast(message); void refresh() }} />}
         {active === 'authority' && selectedAuthority && assetGenerationDraft && authorityGeneration && <Suspense fallback={<WorkspaceLoading label="Opening authority workspace" />}><SketchWorkspace key={assetGenerationDraft.id} shot={selected ?? assetFallbackShot(assetGenerationDraft)} references={studio.references} assetDraft={assetGenerationDraft} authorityTarget={{ referenceId: authorityGeneration.authorityId, expectedVersion: authorityGeneration.expectedVersion, description: authorityGeneration.description, lockedConstraint: authorityGeneration.lockedConstraint }} onOpenFrame={() => { setAssetGenerationDraft(undefined); setAuthorityGeneration(undefined) }} onJobQueued={() => undefined} onAssetJobQueued={job => { acceptQueuedJob(job); setAssetGenerationDraft(undefined); setAuthorityGeneration(undefined); setToast(`${job.shotCode} queued. Its new authority version will attach automatically when ready.`) }} /></Suspense>}

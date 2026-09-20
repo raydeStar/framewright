@@ -40,6 +40,8 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
     public DbSet<MusicCompositionRecord> MusicCompositions => Set<MusicCompositionRecord>();
     public DbSet<MusicCompositionRevisionRecord> MusicCompositionRevisions => Set<MusicCompositionRevisionRecord>();
     public DbSet<MusicRenderRecord> MusicRenders => Set<MusicRenderRecord>();
+    public DbSet<SceneRecord> Scenes => Set<SceneRecord>();
+    public DbSet<SceneInstanceRecord> SceneInstances => Set<SceneInstanceRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -112,6 +114,10 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<MusicCompositionRevisionRecord>().HasIndex(x => new { x.CompositionId, x.RevisionNumber }).IsUnique();
         modelBuilder.Entity<MusicRenderRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<MusicRenderRecord>().HasIndex(x => new { x.CompositionRevisionId, x.CreatedAt });
+        modelBuilder.Entity<SceneRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SceneRecord>().HasIndex(x => new { x.ProjectId, x.UpdatedAt });
+        modelBuilder.Entity<SceneInstanceRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SceneInstanceRecord>().HasIndex(x => new { x.SceneId, x.SortOrder });
 
         ApplyProjectScope(modelBuilder);
     }
@@ -158,6 +164,8 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<MusicCompositionRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<MusicCompositionRevisionRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<MusicRenderRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
+        modelBuilder.Entity<SceneRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
+        modelBuilder.Entity<SceneInstanceRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
     }
 
     /// <summary>
@@ -631,6 +639,59 @@ public sealed class CandidateVersionRecord
     public Guid? SourceManifestId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? SupersededAt { get; set; }
+}
+
+/// <summary>
+/// The editable working state of one small scene: where the inspection camera
+/// sits, how it is lit, and a monotonic version so a save built on a stale read
+/// is refused instead of erasing newer work.
+/// </summary>
+public sealed class SceneRecord
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public required string Name { get; set; }
+    public int Version { get; set; }
+    public double CameraYaw { get; set; }
+    public double CameraPitch { get; set; }
+    public double CameraDistance { get; set; }
+    public double CameraTargetX { get; set; }
+    public double CameraTargetY { get; set; }
+    public double CameraTargetZ { get; set; }
+    public double CameraFieldOfView { get; set; }
+    public double KeyLightIntensity { get; set; }
+    public double KeyLightYaw { get; set; }
+    public double KeyLightPitch { get; set; }
+    public double AmbientLightIntensity { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// One placed object. Two instances may reference the same model revision and
+/// still be moved independently, which is why the transform lives here and not
+/// on the asset.
+/// </summary>
+public sealed class SceneInstanceRecord
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid SceneId { get; set; }
+    /// <summary>The exact model revision this instance is pinned to.</summary>
+    public Guid AssetId { get; set; }
+    public required string Name { get; set; }
+    public int SortOrder { get; set; }
+    public double PositionX { get; set; }
+    public double PositionY { get; set; }
+    public double PositionZ { get; set; }
+    public double RotationX { get; set; }
+    public double RotationY { get; set; }
+    public double RotationZ { get; set; }
+    public double ScaleX { get; set; }
+    public double ScaleY { get; set; }
+    public double ScaleZ { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed class MusicCompositionRecord

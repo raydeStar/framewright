@@ -1,4 +1,4 @@
-export type Workspace = 'board' | 'assets' | 'world' | 'authority' | 'shot' | 'review' | 'sequence'
+export type Workspace = 'board' | 'assets' | 'world' | 'authority' | 'scene' | 'shot' | 'review' | 'sequence'
 export type ShotStage = 'Sketch' | 'Draft' | 'Final' | 'Video'
 export type ApprovalState = 'Working' | 'NeedsWork' | 'Ratified'
 export type GenerationRoute = 'FastDraft' | 'PrecisionDraft'
@@ -111,6 +111,19 @@ export interface ShotRevisionProposalSummary { id: string; shotId: string; baseV
 export interface ShotRevisionInstructions { proposal: ShotRevisionProposalSummary; instructions: { shotId: string; code: string; baseVersion: number; direction: string; rationale: string; desiredMediaType: 'Image' | 'Video'; preservedConstraints: string[]; targetedNotes: { id: string; x: number; y: number; body: string; authorityId?: string; authorityVersion?: number }[]; generationAuthorized: boolean; note: string } }
 /** What the artist currently has on screen in the Shot workspace. */
 export interface DirectorViewQuery { shotId: string; displayedVersion: number; archived: boolean; directorMode?: boolean; tool?: string }
+/** Where a scene's inspection camera sits. Orbit values, so a saved view reopens exactly. */
+export interface SceneCameraSummary { yaw: number; pitch: number; distance: number; target: number[]; fieldOfView: number }
+/** A scene's basic lighting: one key direction plus ambient fill. */
+export interface SceneEnvironmentSummary { keyIntensity: number; keyYaw: number; keyPitch: number; ambientIntensity: number }
+/** One placed object, pinned to an exact model revision. */
+export interface SceneInstanceSummary {
+  id: string; assetId: string; name: string
+  position: number[]; rotation: number[]; scale: number[]
+  assetName: string; revisionNumber: number; contentUrl: string | null
+  available: boolean; archived: boolean; dimensions: number[]
+}
+export interface SceneSummary { id: string; name: string; version: number; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: SceneInstanceSummary[]; updatedAt: string }
+export interface SceneListItem { id: string; name: string; version: number; instanceCount: number; updatedAt: string }
 /** One material as the model inspector reports it. */
 export interface ModelMaterialSummary { name: string; textured: boolean; alphaMode: string; doubleSided: boolean }
 /** The supported GLB subset and the ceilings that refuse a model before it loads. */

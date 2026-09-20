@@ -73,6 +73,39 @@ public enum ManifestState
     Cancelled
 }
 
+/// <summary>Where the scene's inspection camera sits. Orbit values, not a matrix, so a saved view reopens exactly.</summary>
+public sealed record SceneCameraSummary(double Yaw, double Pitch, double Distance, double[] Target, double FieldOfView);
+
+/// <summary>The scene's basic lighting. Deliberately small: one key direction plus ambient fill.</summary>
+public sealed record SceneEnvironmentSummary(double KeyIntensity, double KeyYaw, double KeyPitch, double AmbientIntensity);
+
+/// <summary>
+/// One placed object. It is pinned to an exact model revision, and it reports
+/// whether that revision can still be loaded, so a scene opens honestly rather
+/// than silently dropping something it cannot draw.
+/// </summary>
+public sealed record SceneInstanceSummary(
+    Guid Id, Guid AssetId, string Name,
+    double[] Position, double[] Rotation, double[] Scale,
+    string AssetName, int RevisionNumber, string? ContentUrl,
+    bool Available, bool Archived, double[] Dimensions);
+
+public sealed record SceneSummary(
+    Guid Id, string Name, int Version,
+    SceneCameraSummary Camera, SceneEnvironmentSummary Environment,
+    SceneInstanceSummary[] Instances, DateTimeOffset UpdatedAt);
+
+public sealed record SceneListItem(Guid Id, string Name, int Version, int InstanceCount, DateTimeOffset UpdatedAt);
+
+public sealed record CreateSceneRequest(string Name);
+
+public sealed record SaveSceneInstanceRequest(Guid Id, Guid AssetId, string Name, double[] Position, double[] Rotation, double[] Scale);
+
+public sealed record SaveSceneRequest(
+    int ExpectedVersion, string Name,
+    SceneCameraSummary Camera, SceneEnvironmentSummary Environment,
+    SaveSceneInstanceRequest[] Instances);
+
 /// <summary>One material as the model inspector reports it.</summary>
 public sealed record ModelMaterialSummary(string Name, bool Textured, string AlphaMode, bool DoubleSided);
 

@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M06. M00, M01, M04 and M05 are VERIFIED; M02 and M03 are CONTRACT_VERIFIED.  
+**Active milestone:** M10. M00, M01, M04, M05 and M06 are VERIFIED; M02 and M03 are CONTRACT_VERIFIED.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -433,10 +433,10 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** M06 (a small persistent scene).
-- **Last verified milestone:** M05. M02 and M03 remain CONTRACT_VERIFIED pending an actual WebMCP host.
+- **Active milestone:** M10 (direct the selected 3D object).
+- **Last verified milestone:** M06. M02 and M03 remain CONTRACT_VERIFIED pending an actual WebMCP host.
 - **External acceptance blockers:** (1) No Reference Asset Compiler checkout - blocks M09/M14. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
-- **Next action:** Implement M06 on `feature/director-mode`: a scene with distinct instances of library model revisions, basic lighting and camera, and save/reopen. M07 and M08 (generation) are deferred at the user's request until their existing pipeline is connected.
+- **Next action:** Implement M10 on `feature/director-mode`: extend Director Mode to the scene so an agent can read and propose against one selected instance. M07 and M08 stay deferred until the user's generation pipeline is connected; M09 and M14 remain blocked by the absent compiler, and M12/M16/M17 depend on those, so the open runway is M10, M11, M13 and M15.
 
 ### Milestone status
 
@@ -448,11 +448,11 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M03 | CONTRACT_VERIFIED | M03 acceptance record below; no actual agent host available |
 | M04 | VERIFIED | M04 acceptance record below |
 | M05 | VERIFIED | M05 acceptance record below |
-| M06 | IN_PROGRESS | Active; depends on M05 |
+| M06 | VERIFIED | M06 acceptance record below |
 | M07 | DEFERRED | User is supplying an existing generation pipeline; revisit with them |
 | M08 | DEFERRED | Depends on M07; revisit with the user's pipeline |
 | M09 | NOT_STARTED | None |
-| M10 | NOT_STARTED | None |
+| M10 | IN_PROGRESS | Active; depends on the M03 contract and M06 |
 | M11 | NOT_STARTED | None |
 | M12 | NOT_STARTED | None |
 | M13 | NOT_STARTED | None |
@@ -891,6 +891,79 @@ Checkpoint: see the M05 commit on feature/director-mode.
 Next dependency-ready milestone: M06. M07 and M08 are deferred at the user's request: they intend
   to supply an existing generation pipeline, so the image-to-model route will be designed against
   that rather than invented here.
+```
+
+### M06 acceptance record
+
+```text
+Milestone / status / date: M06 / VERIFIED / 2026-09-19
+Tested code revision or worktree identity: feature/director-mode, working tree at the M06 commits
+Outcome and supported constraints: A project holds small editable scenes. A scene contains
+  distinct instances, each pinned to an exact model revision, with its own name and transform, an
+  orbit camera, and basic key/ambient lighting. Two instances of one model move independently
+  because the transform lives on the instance. The artist adds, selects, renames, moves, rotates,
+  scales, duplicates, and removes instances through explicit numeric controls, and can also select
+  by clicking in the viewport; dragging orbits the camera and never changes the selection or an
+  object. The whole scene saves as one unit against the version it was read at, so a save built on
+  a stale view is refused and newer work survives. An instance whose model becomes unavailable
+  keeps its identity and transform and draws as a placeholder rather than vanishing. Removing an
+  instance removes the placement only; the library asset is untouched, and editing library
+  organisation moves nothing.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/SceneService.cs: list, get, create, and a validate-then-write
+    save with optimistic concurrency.
+  - src/StoryboardStudio.Api/Persistence: Scenes and SceneInstances behind migration
+    20260919-model-scenes-v11.
+  - src/StoryboardStudio.Api/Program.cs: the /api/scenes routes.
+  - src/storyboard-studio-web: a Scene workspace on the rail, SceneViewport (three.js), and the
+    scene client API.
+  - Reused unchanged: the model library and its content route, project query filters, the audit
+    trail, the workspace shell, and the lazily loaded three.js chunk from M04.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check (exit code checked directly)
+  - npx playwright test scenes.spec.ts (desktop and tablet)
+  - npm --prefix src/storyboard-studio-web run test:e2e (full desktop + tablet matrix)
+Results by evidence class (D/A/H/L/V/P):
+  D: 174 backend tests passed, 0 failed (168 before this milestone plus six scene contract tests).
+     Frontend typecheck, lint, and format checks clean.
+  A: 106 browser journeys passed, 0 failed, 6 intentionally skipped (112 discovered) against the
+     real service and real persistence in a disposable temp data root. The new journeys place two
+     instances of one model, move one of them only, save, reload, and confirm both reopen with
+     their own transforms behind a single asset id - including that both really reached the scene
+     graph, not only the API - and separately confirm that a save built on a stale view is refused
+     while the model stays in the library untouched.
+  H: NOT REQUIRED for M06. No agent host is involved in placing objects.
+  L: NOT RUN. No provider is involved.
+  V: The desktop capture at artifacts/director-mode/desktop-scene.png was inspected by the
+     execution agent. That inspection is what revealed an object placed away from the origin was
+     simply off screen, which is why the viewport now has a Frame all control. This is AI
+     inspection, not recorded human visual acceptance.
+  P: NOT RUN. No runtime dependency changed; three.js still loads only when 3D is opened.
+Failure/conflict/restart checks: A stale save is refused and the newer work is intact afterwards.
+  Zero scale, positions outside the working volume, an image used as a model, duplicate instance
+  ids, and another project's scene are each refused, and a refused save leaves the stored scene at
+  its previous version with its previous instances. A scene reopens after a real service restart
+  with the correct revisions, transforms, camera, and lighting. Deleting the stored model file
+  leaves the instance present, marked unavailable, and drawn as a placeholder.
+Relevant earlier-path regression results: The full backend and browser suites passed in full.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
+  passed individually). Human visual acceptance (not required by M06). A real WebGL-less browser;
+  the viewport has a fallback that keeps the object list and placement controls usable, but no
+  journey exercises it.
+Human approvals actually recorded, where required: None required. No provider, no ratification,
+  no destructive action.
+Known defects and dependency impact: None found. Scenes have no snapshots or shot binding yet,
+  which M16 adds, and no per-object annotation, which M10 adds.
+Permitted deferrals: Advanced lighting, collision, snapping, large-world editing, and instancing
+  optimisation, all explicitly deferred by M06. Gizmos are optional in the milestone and are not
+  implemented; placement is numeric and explicit.
+Bug-detection check: With the version check removed from the save path, the stale-save test failed
+  as intended (expected Conflict, got OK) and passed again once the sabotage was reverted.
+Checkpoint: see the M06 commits on feature/director-mode.
+Next dependency-ready milestone: M10. M07 and M08 remain deferred pending the user's generation
+  pipeline, and M09/M14 remain blocked by the absent Reference Asset Compiler, so the open runway
+  is M10, M11, M13 and M15.
 ```
 
 ### Acceptance record template

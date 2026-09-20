@@ -19,6 +19,7 @@ public static class StudioDatabaseInitializer
     private const string YuE2CompositionMigration = "20260918-yue2-compositions-v8";
     private const string YuE2ArtifactManifestMigration = "20260918-yue2-artifact-manifests-v9";
     private const string DirectorProposalApplyMigration = "20260919-director-proposal-apply-v10";
+    private const string ModelSceneMigration = "20260919-model-scenes-v11";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -154,6 +155,17 @@ public static class StudioDatabaseInitializer
                 () => EnsureDirectorProposalApplyColumnsAsync(db, cancellationToken), cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, ModelSceneMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, ModelSceneMigration, cancellationToken);
+            }
+
+            await RunMigrationAsync(db, ModelSceneMigration,
+                () => EnsureModelSceneTablesAsync(db, cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -278,6 +290,7 @@ public static class StudioDatabaseInitializer
             VisualConsistencyAuditMigration => "versioned-asset-and-contract-bound-vision-audit-with-reconciliation-decisions",
             WebMcpProposalMigration => "durable-project-scoped-human-gated-shot-revision-proposals-with-sort-key",
             DirectorProposalApplyMigration => "proposal-observed-context-token-preserved-constraints-and-single-apply-record",
+            ModelSceneMigration => "project-scoped-editable-scenes-with-versioned-camera-lighting-and-model-revision-instances",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
@@ -994,6 +1007,58 @@ public static class StudioDatabaseInitializer
         await EnsureColumnAsync(db, "ShotRevisionProposals", "AppliedAt", "TEXT NULL", cancellationToken);
         await EnsureColumnAsync(db, "ShotRevisionProposals", "ObservedStateToken", "TEXT NULL", cancellationToken);
         await EnsureColumnAsync(db, "ShotRevisionProposals", "PreservedConstraintsJson", "TEXT NOT NULL DEFAULT '[]'", cancellationToken);
+    }
+
+    /// <summary>
+    /// V11 adds editable scenes. Instances are separate rows so two objects can
+    /// share one model revision and still be moved independently, and the scene
+    /// version supports refusing a save that was built on a stale read.
+    /// </summary>
+    private static async Task EnsureModelSceneTablesAsync(StudioDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "Scenes" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_Scenes" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "Name" TEXT NOT NULL,
+                "Version" INTEGER NOT NULL,
+                "CameraYaw" REAL NOT NULL,
+                "CameraPitch" REAL NOT NULL,
+                "CameraDistance" REAL NOT NULL,
+                "CameraTargetX" REAL NOT NULL,
+                "CameraTargetY" REAL NOT NULL,
+                "CameraTargetZ" REAL NOT NULL,
+                "CameraFieldOfView" REAL NOT NULL,
+                "KeyLightIntensity" REAL NOT NULL,
+                "KeyLightYaw" REAL NOT NULL,
+                "KeyLightPitch" REAL NOT NULL,
+                "AmbientLightIntensity" REAL NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_Scenes_ProjectId_UpdatedAt" ON "Scenes" ("ProjectId", "UpdatedAt");
+
+            CREATE TABLE IF NOT EXISTS "SceneInstances" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_SceneInstances" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "SceneId" TEXT NOT NULL,
+                "AssetId" TEXT NOT NULL,
+                "Name" TEXT NOT NULL,
+                "SortOrder" INTEGER NOT NULL,
+                "PositionX" REAL NOT NULL,
+                "PositionY" REAL NOT NULL,
+                "PositionZ" REAL NOT NULL,
+                "RotationX" REAL NOT NULL,
+                "RotationY" REAL NOT NULL,
+                "RotationZ" REAL NOT NULL,
+                "ScaleX" REAL NOT NULL,
+                "ScaleY" REAL NOT NULL,
+                "ScaleZ" REAL NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_SceneInstances_SceneId_SortOrder" ON "SceneInstances" ("SceneId", "SortOrder");
+            """, cancellationToken);
     }
 
     private static async Task EnsureYuE2CompositionTablesAsync(StudioDbContext db, CancellationToken cancellationToken)

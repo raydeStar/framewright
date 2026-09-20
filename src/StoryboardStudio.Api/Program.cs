@@ -55,6 +55,7 @@ builder.Services.AddSingleton<IVideoMediaProbe, FfprobeVideoMediaProbe>();
 builder.Services.AddScoped<AuthorityLibraryService>();
 builder.Services.AddScoped<ContinuityService>();
 builder.Services.AddScoped<WebMcpStoryboardService>();
+builder.Services.AddScoped<SceneService>();
 builder.Services.AddScoped<VisualConsistencyService>();
 builder.Services.AddScoped<TimelineService>();
 builder.Services.AddScoped<QwenVoiceService>();
@@ -435,6 +436,14 @@ app.MapGet("/api/maintenance/diagnostics", async Task<IResult> (
 // return domain failures as stable envelopes and never dispatch a provider.
 app.MapGet("/api/webmcp/context", async (Guid? selectedShotId, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.ContextAsync(selectedShotId, cancellationToken)));
+app.MapGet("/api/scenes", async (SceneService scenes, CancellationToken cancellationToken)
+    => Results.Ok(await scenes.ListAsync(cancellationToken)));
+app.MapPost("/api/scenes", async Task<IResult> (CreateSceneRequest request, SceneService scenes, CancellationToken cancellationToken)
+    => ToHttpResult(await scenes.CreateAsync(request, cancellationToken)));
+app.MapGet("/api/scenes/{sceneId:guid}", async Task<IResult> (Guid sceneId, SceneService scenes, CancellationToken cancellationToken)
+    => ToHttpResult(await scenes.GetAsync(sceneId, cancellationToken)));
+app.MapPut("/api/scenes/{sceneId:guid}", async Task<IResult> (Guid sceneId, SaveSceneRequest request, SceneService scenes, CancellationToken cancellationToken)
+    => ToHttpResult(await scenes.SaveAsync(sceneId, request, cancellationToken)));
 app.MapGet("/api/webmcp/director/context", async (Guid shotId, int? displayedVersion, bool? archivedPreview, bool? directorMode, string? tool, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.DirectorContextAsync(shotId, displayedVersion, archivedPreview ?? false, directorMode ?? false, tool, cancellationToken)));
 app.MapGet("/api/webmcp/director/observation", async (Guid shotId, int? displayedVersion, bool? archivedPreview, string? stateToken, WebMcpStoryboardService service, CancellationToken cancellationToken)

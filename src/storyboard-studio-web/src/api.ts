@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorViewQuery, ModelProfileSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorViewQuery, ModelProfileSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -122,6 +122,11 @@ export const studioApi = {
     return response.json() as Promise<AssetSummary>
   },
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
+  scenes: () => request<SceneListItem[]>('/api/scenes'),
+  scene: (sceneId: string) => request<SceneSummary>(`/api/scenes/${sceneId}`),
+  createScene: (name: string) => request<SceneSummary>('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) }),
+  saveScene: (sceneId: string, body: { expectedVersion: number; name: string; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: { id: string; assetId: string; name: string; position: number[]; rotation: number[]; scale: number[] }[] }) =>
+    request<SceneSummary>(`/api/scenes/${sceneId}`, { method: 'PUT', body: JSON.stringify(body) }),
   prepareManifest: (shotId: string, body: { expectedShotVersion: number; expectedSketchRevision: number; route: GenerationRoute; purpose: GenerationPurpose; compositionAssetId?: string; creativeBriefOverride?: string; markupRevision?: number; allowSketchCompositionFallback?: boolean; videoEndpointRole?: 'LastFrame'; videoEndpointSourceCandidateId?: string }) => request<GenerationManifestSummary>(`/api/shots/${shotId}/manifests/prepare`, { method: 'POST', body: JSON.stringify(body) }),
   generateDraft: (shotId: string, expectedShotVersion: number, adapterId = 'comfyui-fast-draft', options?: { compositionAssetId?: string; creativeBriefOverride?: string; markupRevision?: number; allowSketchCompositionFallback?: boolean }) => request<JobSummary>(`/api/shots/${shotId}/generate-draft`, { method: 'POST', body: JSON.stringify({ expectedShotVersion, adapterId, ...options }) }),
   prepareVideoManifest: (shotId: string, body: { expectedShotVersion: number; motionBrief: string; firstFrameCandidateId?: string; lastFrameCandidateId?: string; confirmEndpointCompatibility: boolean; quality: 'Low' | 'Medium' | 'High'; takeId: string }) => request<GenerationManifestSummary>(`/api/shots/${shotId}/video-manifests/prepare`, { method: 'POST', body: JSON.stringify(body) }),
