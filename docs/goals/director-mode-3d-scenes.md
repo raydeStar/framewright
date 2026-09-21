@@ -1616,6 +1616,9 @@ Artist's verdict on the hero (2026-09-21): "a LOT better"; pinned as good; one c
 Playwright, full suite after the GPU work: 123 passed, 6 skipped, 1 failed -- the generation journey on
   desktop, on a stray 400 from another test sharing the stand-in server; it passes alone in 26 s and was one
   of the three failures already seen at the start of the session. Recorded as a cross-test flake, not fixed.
+Second hero through the studio with the skin fix (job 96a0fc63, 17 min 31 s including a slower paint):
+  delivered 4.85 MB; skin under the head mask measured at roughness 0.555 and metallic 0.005 on the delivered
+  file, against 0.30 and 0.11 before. The nose-bridge streak is a soft sheen. Awaiting the artist's next look.
 Checks NOT RUN at the time of this record: none required.
 Known limits: the head band is a height fraction, right for a standing humanoid and wrong for a crouching
   one; a hero's reference crop keeps whatever the silhouette's top 22% holds (here hood and shoulders, which
