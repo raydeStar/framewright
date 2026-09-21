@@ -57,7 +57,12 @@ public interface ICompilerGateway
 
     Task<CompilerStageRun> RunStageAsync(
         string stage, string sourcePath, string outputPath, string reportPath,
-        CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? options = null);
+        CancellationToken cancellationToken,
+        // A sequence of pairs rather than a dictionary, because some stages
+        // take an option more than once: naming four parts of a model and the
+        // surface each should be is four --assign, and a dictionary can only
+        // hold the last of them.
+        IEnumerable<KeyValuePair<string, string>>? options = null);
 }
 
 /// <summary>
@@ -159,7 +164,8 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
 
     public async Task<CompilerStageRun> RunStageAsync(
         string stage, string sourcePath, string outputPath, string reportPath,
-        CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? options = null)
+        CancellationToken cancellationToken,
+        IEnumerable<KeyValuePair<string, string>>? options = null)
     {
         var arguments = new List<string>
         {
@@ -170,7 +176,7 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
         // compiler owns what a stage accepts and what each setting means; a
         // studio that second-guessed either would be keeping a second copy of
         // somebody else's contract.
-        foreach (var (name, value) in options ?? new Dictionary<string, string>())
+        foreach (var (name, value) in options ?? [])
         {
             arguments.Add("--" + name);
             // An empty value is a switch rather than a setting. Passing "" as

@@ -252,6 +252,44 @@ public sealed record CreateModelGenerationRequest(
 /// could run is still uncommissioned until the artist says otherwise.
 /// </summary>
 /// <summary>
+/// What a model is currently made of, part by part.
+///
+/// A painter answers in one material, so a whole model arrives as one surface
+/// and every part of it inherits whatever that paint's roughness and metallic
+/// maps happened to say. This is that state, measured, in the same words used
+/// to change it -- so judging a part is a comparison rather than an invention.
+/// </summary>
+public sealed record ModelSurfaceSurvey(
+    Guid AssetId, int FacesTotal, ModelSurfacePart[] Parts,
+    string[] Surfaces, string[] Tones);
+
+/// <summary>
+/// One part of a model: named the way somebody points at one, and measured.
+/// </summary>
+/// <param name="ReadsAs">
+/// Which named surface these measurements are nearest to. This is the whole
+/// point of the survey: "this reads as cast metal and it is supposed to be a
+/// crystal" is a judgement a person or a vision model makes well, where
+/// "invent a roughness value from this picture" is one they make badly.
+/// </param>
+public sealed record ModelSurfacePart(
+    string Part, string Colour, string Tone, int Faces, double Share,
+    double? RoughnessMedian, double? MetallicMedian, string? ReadsAs,
+    double[]? HeightRange);
+
+/// <summary>One part, and the surface the artist says it should be.</summary>
+public sealed record ModelSurfaceAssignment(string Part, string Surface);
+
+/// <summary>
+/// Give a model's parts the surfaces they are supposed to be, and bake the
+/// occlusion its own geometry already implies. Nothing about the source is
+/// touched; what comes back is a revision beside it.
+/// </summary>
+public sealed record CreateModelSurfacingRequest(
+    Guid SourceAssetId, string? Name, ModelSurfaceAssignment[] Assignments,
+    int? Resolution, double? EdgeWear);
+
+/// <summary>
 /// Prepare an existing library model for browser or runtime use: the same
 /// compiler, a different route. Nothing about the source is touched.
 /// </summary>

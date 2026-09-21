@@ -548,6 +548,23 @@ app.MapPost("/api/models/preparation", async Task<IResult> (
 app.MapGet("/api/jobs/{jobId:guid}/preparation-evidence", async Task<IResult> (
     Guid jobId, ModelGenerationService models, CancellationToken cancellationToken)
     => ToHttpResult(await models.PreparationEvidenceAsync(jobId, cancellationToken)));
+// What a model is currently made of, part by part. A question rather than a
+// job: it reads the model, measures it, and produces no asset.
+app.MapGet("/api/assets/{assetId:guid}/surface-survey", async Task<IResult> (
+    Guid assetId, ModelGenerationService models, CancellationToken cancellationToken)
+    => ToHttpResult(await models.SurveyAsync(assetId, cancellationToken)));
+app.MapGet("/api/models/surfacing/readiness", async (ModelGenerationService models, CancellationToken cancellationToken)
+    => Results.Ok(await models.SurfacingPreflightAsync(cancellationToken)));
+app.MapPost("/api/models/surfacing", async Task<IResult> (
+    CreateModelSurfacingRequest request, ModelGenerationService models, GenerationJobSignal queue,
+    CancellationToken cancellationToken) =>
+{
+    var queued = await models.EnqueueSurfacingAsync(request, cancellationToken);
+    if (queued.Kind == RepositoryResultKind.Ok && queued.Value is not null)
+        await queue.QueueAsync(queued.Value.Id, cancellationToken);
+    return ToHttpResult(queued);
+});
+
 // Reached from the derivative as well as from the job, so a decision can be
 // made the next day rather than only in the session that started the work.
 app.MapGet("/api/assets/{assetId:guid}/preparation-evidence", async Task<IResult> (

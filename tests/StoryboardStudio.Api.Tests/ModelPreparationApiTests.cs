@@ -40,6 +40,7 @@ public sealed class ModelPreparationApiTests
         public int Runs { get; private set; }
         public List<(string Stage, string Source)> Calls { get; } = [];
         public Dictionary<string, IReadOnlyDictionary<string, string>> Options { get; } = [];
+        public Dictionary<string, List<KeyValuePair<string, string>>> Given { get; } = [];
 
         public static CompilerStage Stage(string name) => new(
             name, name is "reduce-mesh" or "review-views" ? "powershell" : "blender",
@@ -47,6 +48,7 @@ public sealed class ModelPreparationApiTests
             OutputSuffix: name switch
             {
                 "adopt-mesh" => ".blend",
+                "survey-surfaces" => ".json",
                 // A directory, not a file. The compiler says so by naming no
                 // suffix at all, and this studio has to cope with it.
                 "review-views" => "",
@@ -57,18 +59,25 @@ public sealed class ModelPreparationApiTests
             Installed: true, Commissioned: true, Version: "reference-asset-compiler 0.1.2",
             Checkout: "C:/checkout", Blender: "C:/blender.exe",
             Stages: [Stage("adopt-mesh"), Stage("reduce-mesh"), Stage("review-views"),
-                     Stage("browser-payload")]);
+                     Stage("browser-payload"), Stage("bake-detail"), Stage("assign-surfaces"),
+                     Stage("survey-surfaces")]);
 
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
 
         public async Task<CompilerStageRun> RunStageAsync(
             string stage, string sourcePath, string outputPath, string reportPath,
-            CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? options = null)
+            CancellationToken cancellationToken,
+            IEnumerable<KeyValuePair<string, string>>? options = null)
         {
             Runs += 1;
             Calls.Add((stage, Path.GetFileName(sourcePath)));
-            Options[stage] = options ?? new Dictionary<string, string>();
+            // Kept as a list, because a stage may be given the same option more
+            // than once and a dictionary would silently keep only the last.
+            Given[stage] = [.. options ?? []];
+            Options[stage] = Given[stage]
+                .GroupBy(item => item.Key)
+                .ToDictionary(group => group.Key, group => group.Last().Value);
             Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
 
             if (FailingStage == stage)
@@ -659,6 +668,139 @@ public sealed class ModelPreparationApiTests
         Assert.Empty(bareProfile.UvChannels!);
         Assert.Equal(bareProfile.PrimitiveCount, bareProfile.PrimitivesWithoutUvs);
         Assert.True(bareProfile.PrimitivesWithoutUvs > 0);
+    }
+
+    [Fact]
+    public async Task EveryPartTheArtistNamedReachesTheCompiler()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "surfaces.glb", ModelFixtures.DenseProp());
+
+        var queued = await client.PostAsJsonAsync("/api/models/surfacing", new
+        {
+            sourceAssetId = source.Id,
+            name = "Surfaces (crystal)",
+            assignments = new[]
+            {
+                new { part = "blue:dark", surface = "crystal" },
+                new { part = "teal:bright@0.7-0.82", surface = "gemstone" },
+                new { part = "grey:bright", surface = "brushed-metal" },
+            },
+            resolution = 1024,
+            edgeWear = 0.25,
+        });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        Assert.Equal("Surfaces", job.Kind);
+
+        var finished = await RunAsync(factory, job.Id);
+        Assert.Equal(JobState.Completed, finished.State);
+
+        // Three parts means three --assign. A dictionary of options would have
+        // kept the last one and silently dropped the other two, which is
+        // exactly the kind of loss that reports success.
+        var given = compiler.Given["assign-surfaces"];
+        Assert.Equal(3, given.Count(item => item.Key == "assign"));
+        Assert.Contains(given, item => item.Value == "blue:dark=crystal");
+        Assert.Contains(given, item => item.Value == "teal:bright@0.7-0.82=gemstone");
+        Assert.Contains(given, item => item.Value == "grey:bright=brushed-metal");
+
+        // The bake runs before the surfaces are assigned and reads the original,
+        // because occlusion is a measurement of geometry and has nothing to do
+        // with which material a face points at.
+        var order = compiler.Calls.Select(call => call.Stage).ToArray();
+        Assert.Equal(["review-views", "bake-detail", "assign-surfaces", "browser-payload", "review-views"], order);
+        Assert.Equal(compiler.Calls[0].Source, compiler.Calls[1].Source);
+        Assert.Equal("1024", compiler.Options["bake-detail"]["resolution"]);
+        Assert.Equal("0.25", compiler.Options["bake-detail"]["edge-wear"]);
+    }
+
+    [Fact]
+    public async Task ResurfacingDeliversARevisionBesideItsSourceAndSaysWhatChanged()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "resurfaced.glb", ModelFixtures.DenseProp());
+
+        var queued = await client.PostAsJsonAsync("/api/models/surfacing", new
+        {
+            sourceAssetId = source.Id,
+            name = "Resurfaced",
+            assignments = new[] { new { part = "blue:dark", surface = "crystal" } },
+        });
+        queued.EnsureSuccessStatusCode();
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.Id);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var before = await db.Assets.SingleAsync(asset => asset.Id == source.Id);
+        var after = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+
+        // Same shape as a preparation: a revision beside the source, the source
+        // still current, and nobody has judged it yet.
+        Assert.Equal(before.RevisionFamilyId, after.RevisionFamilyId);
+        Assert.True(before.IsCurrentRevision);
+        Assert.False(after.IsCurrentRevision);
+        Assert.Null(after.PreparationAcceptedAt);
+
+        // And it says what was actually done, in the artist's own terms.
+        Assert.Contains("blue:dark as crystal", after.RevisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("Resurfaced from", after.Notes, StringComparison.Ordinal);
+
+        // The before-and-after views are reachable from the derivative, the
+        // same way a preparation's are.
+        var evidence = await client.GetFromJsonAsync<ModelPreparationEvidence>(
+            $"/api/assets/{finished.OutputAssetId}/preparation-evidence") ?? throw new InvalidOperationException();
+        Assert.Equal(8, evidence.Source!.Views.Length);
+        Assert.Equal(8, evidence.Derivative!.Views.Length);
+    }
+
+    [Fact]
+    public async Task NamingTheSamePartTwiceIsRefusedBeforeAnythingIsQueued()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "twice.glb", ModelFixtures.DenseProp());
+
+        var refused = await client.PostAsJsonAsync("/api/models/surfacing", new
+        {
+            sourceAssetId = source.Id,
+            name = "Ambiguous",
+            assignments = new[]
+            {
+                new { part = "blue:dark", surface = "crystal" },
+                new { part = "blue:dark", surface = "matte" },
+            },
+        });
+
+        // Which surface won would otherwise depend on the order they were
+        // listed in, which is not something an artist should have to know.
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("named twice", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task ChangingNothingIsNotAChange()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "nothing.glb", ModelFixtures.DenseProp());
+
+        var refused = await client.PostAsJsonAsync("/api/models/surfacing", new
+        {
+            sourceAssetId = source.Id,
+            name = "Nothing",
+            assignments = Array.Empty<object>(),
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(0, compiler.Runs);
     }
 
     private static async Task RetryAsync(StudioApiFactory factory, Guid jobId)

@@ -39,10 +39,14 @@ public sealed class ModelGenerationService(
     public const string AdoptMeshStage = "adopt-mesh";
     public const string ReduceMeshStage = "reduce-mesh";
     public const string ReviewViewsStage = "review-views";
+    public const string SurveySurfacesStage = "survey-surfaces";
+    public const string BakeDetailStage = "bake-detail";
+    public const string AssignSurfacesStage = "assign-surfaces";
 
     /// <summary>Which of the two things a frozen packet is asking for.</summary>
     public const string GenerateWork = "generate";
     public const string PrepareWork = "prepare";
+    public const string SurfaceWork = "surface";
 
     /// <summary>
     /// What a reference image goes through to become something a browser can
@@ -99,6 +103,29 @@ public sealed class ModelGenerationService(
         new(ReviewViewsStage),
     ];
 
+    /// <summary>
+    /// What a model goes through to be given the surfaces it is supposed to
+    /// have.
+    ///
+    /// The bake comes first and reads the original, because occlusion is a
+    /// measurement of the geometry and has nothing to do with which material a
+    /// face points at. Assigning surfaces then releases the roughness map on
+    /// every part it touches -- which is why the occlusion had to go into
+    /// glTF's own slot, where releasing a map cannot take it with it.
+    /// </summary>
+    private static readonly RouteStepPlan[] SurfacingPlan =
+    [
+        new(ReviewViewsStage, ReadsOriginal: true),
+        new(BakeDetailStage, ReadsOriginal: true),
+        new(AssignSurfacesStage),
+        new(BrowserPayloadStage),
+        new(ReviewViewsStage),
+    ];
+
+    /// <summary>Every stage surfacing needs, for the capability check.</summary>
+    public static readonly string[] SurfacingRoute =
+        [.. SurfacingPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
+
     /// <summary>Every stage a preparation needs, for the capability check.</summary>
     public static readonly string[] PreparationRoute =
         [.. PreparationPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
@@ -130,6 +157,8 @@ public sealed class ModelGenerationService(
         [AdoptMeshStage] = "Taking the reviewed mesh in, unchanged",
         [ReduceMeshStage] = "Collapsing it to a runtime budget",
         [ReviewViewsStage] = "Rendering the views a person judges it by",
+        [BakeDetailStage] = "Baking the detail its own shape already implies",
+        [AssignSurfacesStage] = "Giving each part the surface it should be",
     };
 
     /// <summary>
@@ -159,7 +188,7 @@ public sealed class ModelGenerationService(
     // 5 packet named no work at all, and defaulting one would be guessing at
     // an answer the artist gave; there are only ever a handful in flight, and
     // asking again costs a click.
-    private const int FrozenPacketVersion = 6;
+    private const int FrozenPacketVersion = 7;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>
@@ -171,7 +200,8 @@ public sealed class ModelGenerationService(
         int PacketVersion, Guid SourceAssetId, string SourceContentHash, string SourceName,
         int SourceRevisionNumber, RouteStep[] Route, string? CompilerVersion, DateTimeOffset FrozenAt,
         string Size, double SizeAdjust, string? GlassColour,
-        string Work = GenerateWork, int TriangleBudget = 0);
+        string Work = GenerateWork, int TriangleBudget = 0,
+        ModelSurfaceAssignment[]? Assignments = null, int BakeResolution = 0, double EdgeWear = 0);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -217,6 +247,10 @@ public sealed class ModelGenerationService(
     /// </summary>
     public Task<ModelGenerationReadiness> PreparationPreflightAsync(CancellationToken cancellationToken) =>
         PreflightAsync(PreparationRoute, "Preparing a derivative", cancellationToken);
+
+    /// <summary>The same question again, for the route that changes surfaces.</summary>
+    public Task<ModelGenerationReadiness> SurfacingPreflightAsync(CancellationToken cancellationToken) =>
+        PreflightAsync(SurfacingRoute, "Changing a model's surfaces", cancellationToken);
 
     private async Task<ModelGenerationReadiness> PreflightAsync(
         string[] route, string work, CancellationToken cancellationToken)
@@ -455,6 +489,178 @@ public sealed class ModelGenerationService(
     }
 
     /// <summary>
+    /// What this model is currently made of, part by part.
+    ///
+    /// Run here and now rather than queued: it reads the model and measures it,
+    /// takes a couple of seconds, and produces no asset. Queueing a question
+    /// would mean an artist asking what something is made of and being told to
+    /// come back later.
+    /// </summary>
+    public async Task<RepositoryResult<ModelSurfaceSurvey>> SurveyAsync(
+        Guid assetId, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
+        if (asset is null) return RepositoryResult<ModelSurfaceSurvey>.NotFound();
+        if (asset.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<ModelSurfaceSurvey>.Invalid("Only a model is made of surfaces.");
+        var path = assets.StoredFilePath(asset.StoragePath);
+        if (path is null)
+            return RepositoryResult<ModelSurfaceSurvey>.Invalid("That model's file is missing from the asset root.");
+
+        var capabilities = await compiler.DescribeAsync(cancellationToken);
+        if (!capabilities.CanRun(SurveySurfacesStage))
+            return RepositoryResult<ModelSurfaceSurvey>.Unavailable(
+                "This compiler cannot survey a model's surfaces yet.");
+
+        // Somewhere of its own, cleared afterwards: a survey is a question, and
+        // a question should not leave anything behind.
+        var workspace = Path.Combine(
+            StudioPaths.ResolveDataRoot(configuration, environment), "surveys", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workspace);
+        try
+        {
+            var run = await compiler.RunStageAsync(
+                SurveySurfacesStage, path,
+                Path.Combine(workspace, "survey.json"), Path.Combine(workspace, "report.json"),
+                cancellationToken);
+            if (!run.Ok || run.ReceiptJson is null)
+                return RepositoryResult<ModelSurfaceSurvey>.Invalid(
+                    run.Error ?? "The compiler could not read what this model is made of.");
+
+            using var document = JsonDocument.Parse(run.ReceiptJson);
+            var root = document.RootElement;
+            var parts = root.TryGetProperty("parts", out var listed) && listed.ValueKind == JsonValueKind.Array
+                ? listed.EnumerateArray().Select(part => new ModelSurfacePart(
+                    Text(part, "part"), Text(part, "colour"), Text(part, "tone"),
+                    part.TryGetProperty("faces", out var faces) ? faces.GetInt32() : 0,
+                    Number(part, "share") ?? 0,
+                    Number(part, "roughness_median"), Number(part, "metallic_median"),
+                    part.TryGetProperty("reads_as", out var reads) && reads.ValueKind == JsonValueKind.String
+                        ? reads.GetString() : null,
+                    part.TryGetProperty("height_range", out var band) && band.ValueKind == JsonValueKind.Array
+                        ? [.. band.EnumerateArray().Select(value => value.GetDouble())] : null))
+                    .ToArray()
+                : [];
+            var vocabulary = root.TryGetProperty("vocabulary", out var words) ? words : default;
+            return RepositoryResult<ModelSurfaceSurvey>.Ok(new ModelSurfaceSurvey(
+                assetId,
+                root.TryGetProperty("faces_total", out var total) ? total.GetInt32() : 0,
+                parts,
+                Strings(vocabulary, "surfaces"),
+                Strings(vocabulary, "tones")));
+        }
+        catch (JsonException)
+        {
+            return RepositoryResult<ModelSurfaceSurvey>.Invalid(
+                "The compiler's survey could not be read.");
+        }
+        finally
+        {
+            try { Directory.Delete(workspace, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    private static string Text(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var found) && found.ValueKind == JsonValueKind.String
+            ? found.GetString() ?? "" : "";
+
+    private static double? Number(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var found) && found.ValueKind == JsonValueKind.Number
+            ? found.GetDouble() : null;
+
+    private static string[] Strings(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(name, out var found) && found.ValueKind == JsonValueKind.Array
+            ? [.. found.EnumerateArray().Select(value => value.GetString() ?? "")] : [];
+
+    /// <summary>
+    /// Freezes the artist's answers about what each part should be, and queues
+    /// the work. Same shape as a preparation: what comes back is a revision
+    /// beside the source, and the source stays the current one until somebody
+    /// has looked at both.
+    /// </summary>
+    public async Task<RepositoryResult<JobSummary>> EnqueueSurfacingAsync(
+        CreateModelSurfacingRequest request, CancellationToken cancellationToken)
+    {
+        var source = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(asset => asset.Id == request.SourceAssetId, cancellationToken);
+        if (source is null) return RepositoryResult<JobSummary>.NotFound();
+        if (source.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<JobSummary>.Invalid("Surfaces are given to a model.");
+        if (source.IsArchived)
+            return RepositoryResult<JobSummary>.Invalid(
+                "That model is archived. Restore it before changing its surfaces.");
+
+        var name = (request.Name ?? "").Trim();
+        if (name.Length is 0 or > 120)
+            return RepositoryResult<JobSummary>.Invalid("This needs a name of 1 to 120 characters.");
+
+        var assignments = request.Assignments ?? [];
+        if (assignments.Length == 0)
+            return RepositoryResult<JobSummary>.Invalid(
+                "Say which part should be which surface. Changing nothing is not a change.");
+        // The same part twice would make which surface wins depend on the order
+        // it happened to be listed in, which is not something an artist should
+        // have to know. The compiler refuses it too; saying so here is faster.
+        var duplicated = assignments.GroupBy(entry => entry.Part, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicated is not null)
+            return RepositoryResult<JobSummary>.Invalid(
+                $"{duplicated.Key} is named twice. Each part gets one surface.");
+        if (assignments.Any(entry => string.IsNullOrWhiteSpace(entry.Part) || string.IsNullOrWhiteSpace(entry.Surface)))
+            return RepositoryResult<JobSummary>.Invalid("Every assignment names a part and a surface.");
+
+        var resolution = request.Resolution ?? 1024;
+        if (resolution is not (512 or 1024 or 2048))
+            return RepositoryResult<JobSummary>.Invalid("A baked map is 512, 1024 or 2048 across.");
+        var edgeWear = request.EdgeWear ?? 0;
+        if (edgeWear is < 0 or > 1)
+            return RepositoryResult<JobSummary>.Invalid("Edge wear runs from 0 to 1.");
+
+        var readiness = await SurfacingPreflightAsync(cancellationToken);
+        if (!readiness.CanRun)
+            return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+
+        var now = timeProvider.GetUtcNow();
+        var packet = new FrozenModelRequest(
+            FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
+            source.RevisionNumber ?? 1,
+            [.. SurfacingPlan.Select(step => new RouteStep(
+                step.Stage,
+                readiness.Suffixes?.GetValueOrDefault(step.Stage) ?? ".glb",
+                step.ReadsOriginal))],
+            readiness.CompilerVersion, now,
+            Size: "", SizeAdjust: 1.0, GlassColour: null,
+            Work: SurfaceWork, TriangleBudget: 0,
+            Assignments: assignments, BakeResolution: resolution, EdgeWear: edgeWear);
+        var requestJson = JsonSerializer.Serialize(packet, Json);
+
+        var jobId = Guid.NewGuid();
+        var job = new JobRecord
+        {
+            Id = jobId,
+            ShotId = Guid.Empty,
+            ShotCode = name,
+            Kind = "Surfaces",
+            WorkType = ModelWorkType,
+            State = JobState.Queued.ToString(),
+            Progress = 0,
+            Phase = "Frozen model queued",
+            Backend = "Reference Asset Compiler",
+            AdapterId = string.Join(" then ", SurfacingPlan.Select(step => step.Stage)),
+            RequestJson = requestJson,
+            IdempotencyKey = IdempotencyKey(requestJson, jobId),
+            CreatedAt = now,
+            LastHeartbeatAt = now,
+            Attempt = 1,
+        };
+        db.Jobs.Add(job);
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<JobSummary>.Ok(Map(job));
+    }
+
+    /// <summary>
     /// Jobs a restart should pick up again. Their identity is unchanged, so a
     /// job that was running before the lights went out is the same job after.
     /// </summary>
@@ -491,8 +697,13 @@ public sealed class ModelGenerationService(
         if (packet.Route is not { Length: > 0 })
             return await FailAsync(job, "This job's frozen request names no stages to run.", cancellationToken);
 
-        var preparing = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal);
-        var sourceWord = preparing ? "model" : "reference";
+        // A preparation and a surfacing both start from a model and both
+        // deliver a revision beside it. What differs is the route, not what
+        // happens to the answer.
+        var derivative = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal);
+        var preparing = derivative;
+        var sourceWord = derivative ? "model" : "reference";
         var source = await db.Assets.AsNoTracking()
             .SingleOrDefaultAsync(asset => asset.Id == packet.SourceAssetId, cancellationToken);
         if (source is null)
@@ -680,17 +891,17 @@ public sealed class ModelGenerationService(
     /// What belongs here is only what this studio knows and the compiler
     /// cannot: that it is a browser studio, and what the artist said.
     /// </summary>
-    private static Dictionary<string, string> StageOptions(
+    private static IEnumerable<KeyValuePair<string, string>> StageOptions(
         string stage, FrozenModelRequest packet, JobRecord job, string referencePath) => stage switch
     {
-        GeometryStage => new()
+        GeometryStage => new Dictionary<string, string>()
         {
             ["octree-resolution"] = BrowserOctreeResolution,
             // Otherwise the workspace is named after the reference's content
             // hash, which is what the stored file is called.
             ["asset-name"] = job.ShotCode,
         },
-        StageMeshStage => new()
+        StageMeshStage => new Dictionary<string, string>()
         {
             ["size"] = packet.Size,
             ["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture),
@@ -698,22 +909,37 @@ public sealed class ModelGenerationService(
         // Rebuilt on a uniform grid rather than collapsed: a generator's
         // surface has no topology worth preserving, and collapsing it keeps
         // the noise as slivers and spikes.
-        RemeshStage => new() { ["triangle-budget"] = RuntimeTriangleBudget },
+        RemeshStage => new Dictionary<string, string> { ["triangle-budget"] = RuntimeTriangleBudget },
         // A generated prop is an approved static triangle mesh: it is unfolded
         // as it stands rather than welded or remeshed, which would change the
         // geometry the reduction gate already measured.
-        UvUnwrapStage => new() { ["allow-triangulated-glb"] = "" },
+        UvUnwrapStage => new Dictionary<string, string> { ["allow-triangulated-glb"] = "" },
         // The paint is conditioned on the same picture the geometry came from.
-        TextureStage => new() { ["reference"] = referencePath },
-        GlassStage => new() { ["colour"] = packet.GlassColour ?? "" },
+        TextureStage => new Dictionary<string, string> { ["reference"] = referencePath },
+        GlassStage => new Dictionary<string, string> { ["colour"] = packet.GlassColour ?? "" },
         // A preparation exists to keep what a reviewed mesh already has, so a
         // mesh with no UV layer is refused by name rather than delivered as a
         // derivative nobody can paint.
-        AdoptMeshStage => new() { ["require-uvs"] = "" },
+        AdoptMeshStage => new Dictionary<string, string> { ["require-uvs"] = "" },
+        // The detail the geometry already implies. Occlusion goes into glTF's
+        // own slot rather than the packed roughness map, because the stage
+        // after this one releases that map on every part it gives a surface.
+        BakeDetailStage => new Dictionary<string, string>
+        {
+            ["resolution"] = (packet.BakeResolution == 0 ? 1024 : packet.BakeResolution)
+                .ToString(CultureInfo.InvariantCulture),
+            ["edge-wear"] = packet.EdgeWear.ToString(CultureInfo.InvariantCulture),
+        },
+        // One --assign per part, which is why a stage's options are a sequence
+        // of pairs rather than a dictionary: a dictionary would keep the last
+        // and silently drop the rest.
+        AssignSurfacesStage => (packet.Assignments ?? [])
+            .Select(entry => new KeyValuePair<string, string>(
+                "assign", $"{entry.Part}={entry.Surface}")),
         // The collapse, judged as a derivative of something already reviewed
         // rather than as a candidate production authority. The compiler owns
         // what that changes and records every allowance it makes.
-        ReduceMeshStage => new()
+        ReduceMeshStage => new Dictionary<string, string>()
         {
             ["triangle-budget"] = packet.TriangleBudget.ToString(CultureInfo.InvariantCulture),
             ["runtime-derivative"] = "",
@@ -744,10 +970,15 @@ public sealed class ModelGenerationService(
             || before.Profile.VertexCount != after.Profile.VertexCount;
 
         var note = new StringBuilder()
-            .Append("Runtime derivative of ").Append(packet.SourceName)
+            .Append(string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
+                ? "Resurfaced from " : "Runtime derivative of ")
+            .Append(packet.SourceName)
             .Append(" revision ").Append(packet.SourceRevisionNumber)
             .Append(" (").Append(packet.SourceContentHash[..12]).Append("…)");
-        if (before.Profile is not null && after.Profile is not null)
+        if (string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal))
+            note.Append(": ").Append(string.Join(", ", (packet.Assignments ?? [])
+                .Select(entry => $"{entry.Part} as {entry.Surface}")));
+        else if (before.Profile is not null && after.Profile is not null)
             note.Append(": ").Append(before.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture))
                 .Append(" triangles reduced to ")
                 .Append(after.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture));
@@ -793,9 +1024,16 @@ public sealed class ModelGenerationService(
     {
         var asset = await db.Assets.SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
         if (asset is null) return;
-        var preparing = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal);
+        var preparing = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal);
+        var opening = packet.Work switch
+        {
+            PrepareWork => "Prepared for runtime from ",
+            SurfaceWork => "Resurfaced from ",
+            _ => "Generated from ",
+        };
         var lineage = new StringBuilder()
-            .Append(preparing ? "Prepared for runtime from " : "Generated from ").Append(packet.SourceName)
+            .Append(opening).Append(packet.SourceName)
             .Append(" revision ").Append(packet.SourceRevisionNumber)
             .Append(" (").Append(packet.SourceContentHash[..12]).Append("…)")
             .Append(" by the Reference Asset Compiler")
@@ -858,8 +1096,13 @@ public sealed class ModelGenerationService(
         FrozenModelRequest? packet;
         try { packet = JsonSerializer.Deserialize<FrozenModelRequest>(job.RequestJson, Json); }
         catch (JsonException) { packet = null; }
-        if (packet is null || !string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal))
-            return RepositoryResult<ModelPreparationEvidence>.Invalid("This job is not a preparation.");
+        // Both routes that start from a model render the same before-and-after
+        // views, and both are judged the same way.
+        if (packet is null
+            || !(string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
+                || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)))
+            return RepositoryResult<ModelPreparationEvidence>.Invalid(
+                "This job did not produce a before-and-after to compare.");
 
         var workspace = Workspace(job.Id);
         ModelPreparationViews? source = null;

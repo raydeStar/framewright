@@ -76,11 +76,12 @@ public sealed class ModelGenerationApiTests
 
         public async Task<CompilerStageRun> RunStageAsync(
             string stage, string sourcePath, string outputPath, string reportPath,
-            CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? options = null)
+            CancellationToken cancellationToken,
+            IEnumerable<KeyValuePair<string, string>>? options = null)
         {
             Runs += 1;
             Calls.Add((stage, Path.GetFileName(sourcePath)));
-            Options[stage] = options ?? new Dictionary<string, string>();
+            Options[stage] = (options ?? []).ToDictionary(item => item.Key, item => item.Value);
             if (ReceiptThenDieStage == stage)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
