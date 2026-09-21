@@ -879,6 +879,41 @@ public sealed class ModelGenerationService(
             job.Id, packet.SourceAssetId, job.OutputAssetId, source, derivative));
     }
 
+    /// <summary>
+    /// The same evidence, found from the derivative rather than from the job
+    /// that made it.
+    ///
+    /// A comparison that exists only in the page that started it is not a
+    /// review gate: the artist closes the screen, comes back to decide, and
+    /// the pictures the decision is supposed to rest on are gone. The
+    /// derivative knows which job delivered it, so the evidence can be reached
+    /// from the thing being judged.
+    /// </summary>
+    public async Task<RepositoryResult<ModelPreparationEvidence>> PreparationEvidenceForAssetAsync(
+        Guid assetId, CancellationToken cancellationToken)
+    {
+        // Ordered here rather than in the query: SQLite cannot ORDER BY a
+        // DateTimeOffset, and an asset is delivered by one job, so there is
+        // nothing here worth paging.
+        var delivered = await db.Jobs.AsNoTracking()
+            .Where(job => job.WorkType == ModelWorkType && job.OutputAssetId == assetId)
+            .Select(job => new { job.Id, job.CompletedAt })
+            .ToArrayAsync(cancellationToken);
+        var jobId = delivered
+            .OrderByDescending(job => job.CompletedAt)
+            .Select(job => (Guid?)job.Id)
+            .FirstOrDefault();
+        // Most models were never prepared from anything, and saying so is an
+        // ordinary answer rather than a failure. Refusing here put a 404 in
+        // the console of every model an artist opened, which is noise this
+        // studio treats as a defect -- and rightly, because a console that
+        // always has errors in it is a console nobody reads.
+        return jobId is null
+            ? RepositoryResult<ModelPreparationEvidence>.Ok(
+                new ModelPreparationEvidence(Guid.Empty, assetId, null, null, null))
+            : await PreparationEvidenceAsync(jobId.Value, cancellationToken);
+    }
+
     private static ModelPreparationViews? ReadViews(Guid jobId, string workspace, int step)
     {
         var manifest = Path.Combine(workspace, $"step-{step}-{ReviewViewsStage}", "views.json");

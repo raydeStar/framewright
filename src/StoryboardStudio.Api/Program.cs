@@ -529,6 +529,11 @@ app.MapPost("/api/models/preparation", async Task<IResult> (
 app.MapGet("/api/jobs/{jobId:guid}/preparation-evidence", async Task<IResult> (
     Guid jobId, ModelGenerationService models, CancellationToken cancellationToken)
     => ToHttpResult(await models.PreparationEvidenceAsync(jobId, cancellationToken)));
+// Reached from the derivative as well as from the job, so a decision can be
+// made the next day rather than only in the session that started the work.
+app.MapGet("/api/assets/{assetId:guid}/preparation-evidence", async Task<IResult> (
+    Guid assetId, ModelGenerationService models, CancellationToken cancellationToken)
+    => ToHttpResult(await models.PreparationEvidenceForAssetAsync(assetId, cancellationToken)));
 app.MapGet("/api/jobs/{jobId:guid}/preparation-views/{step:int}/{file}", async Task<IResult> (
     Guid jobId, int step, string file, ModelGenerationService models, CancellationToken cancellationToken) =>
 {

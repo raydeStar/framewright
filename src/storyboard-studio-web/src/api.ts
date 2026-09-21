@@ -129,6 +129,7 @@ export const studioApi = {
   prepareModel: (sourceAssetId: string, name: string, triangleBudget: number) =>
     request<JobSummary>('/api/models/preparation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, triangleBudget }) }),
   preparationEvidence: (jobId: string) => request<ModelPreparationEvidence>(`/api/jobs/${jobId}/preparation-evidence`),
+  assetPreparationEvidence: (assetId: string) => request<ModelPreparationEvidence>(`/api/assets/${assetId}/preparation-evidence`),
   setPreparationAcceptance: (assetId: string, accepted: boolean, note: string) =>
     request<AssetSummary>(`/api/assets/${assetId}/preparation-acceptance`, { method: 'POST', body: JSON.stringify({ accepted, note }) }),
   rigPose: (assetId: string, pose: { bone: string; rotation: number[] }[]) =>

@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M09. M00, M01, M04, M05, M06, M07, M08, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M09 and M14 are dependency-ready, and M12, M16, M17 and M18 follow them.  
+**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M04, M05, M06, M07, M08, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M09 and M14 are dependency-ready, and M12, M16, M17 and M18 follow them.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -457,7 +457,7 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M06 | VERIFIED | M06 acceptance record below |
 | M07 | VERIFIED | M07 acceptance record below |
 | M08 | VERIFIED | M08 acceptance record below |
-| M09 | NOT_STARTED | Dependency-ready; compiler checked out 2026-09-20 |
+| M09 | IN_PROGRESS | Route built and run live; awaiting the artist's recorded verdict |
 | M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
 | M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
 | M12 | NOT_STARTED | None |
@@ -1461,6 +1461,97 @@ Defects found by running it rather than reasoning about it: a stage could inheri
   dismissed job failure came back on every reload, for ever.
 Checkpoint: see the M08 commits on feature/director-mode.
 Next dependency-ready milestone: M09.
+```
+
+### M09 progress record
+
+```text
+Milestone / status / date: M09 / IN_PROGRESS / 2026-09-20
+Tested code revision or worktree identity: feature/director-mode at the M09 commits; Reference Asset
+  Compiler at 5b285a0 on its main.
+Outcome and supported constraints: A model already in this library becomes a runtime derivative
+  through the artist's own affordance, in about twenty seconds on this workstation, and arrives as a
+  revision beside its source rather than instead of it. The handling is deliberately the opposite of
+  generation: a generated mesh has no topology worth keeping and is rebuilt and repainted, while a
+  library model's UVs, materials and shell are the review, so it is adopted unchanged and collapsed
+  with them riding along. What is supported is a bounded static mesh with one mesh object and a UV
+  layer. Rigged characters and multi-mesh assets are not claimed.
+Implementation surfaces reused/changed:
+  - Compiler: scripts/blender/adopt_reviewed_mesh.py (new), scripts/blender/reduction_verdict.py
+    (new, the one judgement that is not arithmetic, kept away from Blender so it can be argued
+    with), reduce_feature_qem.py and run_feature_qem_reduction.ps1 gaining one named
+    runtime-derivative mode, stages.py and cli.py registering both, contract section 9.
+  - src/StoryboardStudio.Api/Services/ModelGenerationService.cs: a second work kind on the frozen
+    packet (v6), a per-step ReadsOriginal flag, directory-aware step completion, the preparation
+    route, the stacking that leaves the source current, and the evidence reader.
+  - src/StoryboardStudio.Api/Services/AssetStore.cs: per-asset preparation acceptance.
+  - src/StoryboardStudio.Api/Persistence: schema v16, four columns on Assets, backup taken.
+  - src/storyboard-studio-web/src/components/ModelPreparation.tsx: the budget, the progress, the
+    side-by-side fixed views in both passes, and the accept/refuse gate.
+  - Reused unchanged: the durable job record, the lease service, the queue worker, content-addressed
+    import, the revision stack, and the M04/M13 model inspection.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check
+  - npm --prefix src/storyboard-studio-web run test:e2e
+  - python -m pytest (the compiler, in its own checkout)
+  - ./scripts/public-release-audit.ps1
+  - rac run-stage adopt-mesh / reduce-mesh / browser-payload / review-views against real assets
+Results by evidence class (D/A/H/L/V/P):
+  D: 251 backend tests passed, 0 failed. 472 compiler tests passed. Frontend typecheck, lint and
+     format clean.
+  A: 124 browser journeys passed, 0 failed, 6 intentionally skipped. One journey, the M18 director
+     mode one, failed once under full-suite load and passes in isolation and on re-run; it is flaky
+     and unrelated to this milestone's surfaces.
+  H: NOT RUN. No agent host is involved in this milestone.
+  L: RUN. Live on this workstation. The Ayric sword adopted at 18,000 triangles with one UV layer,
+     one material and two textures, extent drift exactly 0; reduced to 8,000 with p99 surface
+     deviation 2.9 mm and maximum 7.7 mm on a 1.35 m blade; exported at 5,326 vertices with both
+     textures intact; eight fixed views of the source and eight of the derivative, each bound to the
+     hash of the bytes it is a picture of. A second run at 6,000 triangles through the panel took
+     about twenty seconds end to end. The glazed lantern is refused at 97 mm maximum deviation on a
+     424 mm object, which is the right answer -- collapsing folds its glass panes -- and nothing was
+     delivered.
+  V: NOT RECORDED. This is what M09 still wants. The derivative is in the library as revision 3 of
+     the Ayric sword, unaccepted, with its source still the current revision and its comparison
+     views reachable from the asset itself. The artist has not yet pressed accept or refuse.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: A stage this compiler does not offer refuses the route and names
+  it. A budget that would not reduce the model is refused before anything is queued, naming the
+  count the model actually has. A failing stage leaves the source usable, delivers no derivative,
+  and invents no revision stack. An interrupted run adopts the fixed views it already rendered
+  rather than re-asking for a directory the compiler refuses to overwrite. A view the manifest does
+  not list is not served, whatever is on disk beside it.
+Relevant earlier-path regression results: The full backend and browser suites passed, including the
+  M04/M05 model journeys, the M07/M08 generation journeys, and the M06/M10/M11/M15 scene journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps passed
+  individually).
+Human approvals actually recorded, where required: NONE YET. This is the outstanding item.
+Known defects and dependency impact: The compiler's own ledger route is still not wired -- the
+  geometry and preparation stages write workspaces that satisfy their own preflight but are not
+  `rac new` ledger workspaces, so `cleanup-receipt` and `retopology-receipt` still cannot be
+  recorded against them. Nothing here claims production readiness: every reduction receipt says
+  `production_grade: false` and `requires_fixed_view_review: true`, and the mode this route uses
+  records every allowance it makes by name in `accepted_findings`.
+Permitted deferrals: Rigged and multi-mesh preparation, texture rebaking to a runtime budget, and
+  the ledger's approval chain.
+Bug-detection check: Eleven sabotages across both repositories, all caught. In the studio: a
+  derivative that quietly becomes the current revision, one that inherits its parent's acceptance, a
+  route that reads only the step before it, evidence not recognised because it is a directory, a
+  topology change that goes unrecorded, a refusal with no reason, and a view endpoint that serves
+  anything in the workspace. In the compiler: a relaxation that stops asking whether the source was
+  already open, openness that stops counting non-manifold edges, every reduction quietly becoming a
+  runtime derivative, and adoption insisting on UVs nobody asked about.
+Defects found by running it rather than reasoning about it: the lineage sentence written after
+  delivery overwrote the revision note that carried the triangle counts, and called a preparation
+  "Generated"; a model's first revision was labelled "Original image"; the readiness line offered
+  "model generation" above a button that reduces something; SQLite cannot ORDER BY a DateTimeOffset,
+  so finding the job that delivered an asset threw rather than answering; asking a model with no
+  derivative for its evidence returned 404 and put a console error on every model an artist opened;
+  and the sabotage harness itself restored files with their original timestamps, so one full-suite
+  run tested a binary that still had the sabotage in it.
+Checkpoint: see the M09 commits on feature/director-mode, and 5b285a0 on the compiler's main.
+Next dependency-ready milestone: M14, once M09's verdict is recorded.
 ```
 
 ### Acceptance record template

@@ -53,6 +53,19 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
 
   useEffect(() => { setBudget(suggested(profile.triangleCount)) }, [profile.triangleCount])
 
+  // A derivative carries its own evidence, so opening one tomorrow shows the
+  // same comparison it was delivered with. Without this the pictures the
+  // decision rests on lived only in the session that started the work, which
+  // is no kind of review gate.
+  useEffect(() => {
+    let live = true
+    setEvidence(undefined); setJob(undefined); setNote('')
+    studioApi.assetPreparationEvidence(asset.id)
+      .then(found => { if (live) setEvidence(found) })
+      .catch(() => { if (live) setEvidence(undefined) })
+    return () => { live = false }
+  }, [asset.id])
+
   // A preparation runs for minutes on hardware this screen does not own, so
   // this follows the job rather than waiting on it. Leaving the screen does
   // not stop it; the queue carries it.
@@ -151,7 +164,10 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
         is why all four are here.
       </p>
       {(['source', 'derivative'] as const).map(of => <figure key={of} className="model-comparison-row">
-        <figcaption>{of === 'source' ? 'Reviewed model' : `Derivative · ${budget.toLocaleString()} triangle budget`}</figcaption>
+        {/* No budget in the caption: reopening a derivative tomorrow loads the
+            evidence it was delivered with, and the number in the input box is
+            whatever is being asked for next, not what made these pictures. */}
+        <figcaption>{of === 'source' ? 'Reviewed model' : 'Derivative'}</figcaption>
         <div className="model-comparison-views">
           {views(of).map(view => <img key={view.url} src={view.url} alt={`${of} ${view.view}`} loading="lazy" />)}
         </div>

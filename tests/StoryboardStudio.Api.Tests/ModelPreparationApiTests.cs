@@ -501,6 +501,36 @@ public sealed class ModelPreparationApiTests
         Assert.Equal(8, evidence.Derivative!.Views.Length);
     }
 
+    [Fact]
+    public async Task TheEvidenceIsReachableFromTheDerivativeAndNotOnlyFromTheJob()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "tomorrow.glb", ModelFixtures.DenseProp());
+        var job = await QueueAsync(client, source.Id, "Tomorrow (runtime)");
+        var finished = await RunAsync(factory, job.Id);
+
+        // A comparison that lives only in the page that started it is not a
+        // review gate: the artist closes the screen, comes back to decide, and
+        // the pictures the decision rests on are gone.
+        var evidence = await client.GetFromJsonAsync<ModelPreparationEvidence>(
+            $"/api/assets/{finished.OutputAssetId}/preparation-evidence") ?? throw new InvalidOperationException();
+        Assert.Equal(job.Id, evidence.JobId);
+        Assert.Equal(8, evidence.Source!.Views.Length);
+        Assert.Equal(8, evidence.Derivative!.Views.Length);
+
+        // The source has no evidence of its own, which is right: the thing
+        // being judged is the derivative. It says so plainly rather than
+        // refusing, because most models were never prepared from anything and
+        // a 404 on every one of them is console noise, not information.
+        var none = await client.GetFromJsonAsync<ModelPreparationEvidence>(
+            $"/api/assets/{source.Id}/preparation-evidence") ?? throw new InvalidOperationException();
+        Assert.Equal(Guid.Empty, none.JobId);
+        Assert.Null(none.Source);
+        Assert.Null(none.Derivative);
+    }
+
     private static async Task RetryAsync(StudioApiFactory factory, Guid jobId)
     {
         using var scope = factory.Services.CreateScope();
