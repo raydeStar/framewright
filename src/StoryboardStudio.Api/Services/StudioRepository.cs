@@ -2259,7 +2259,7 @@ public sealed class StudioRepository(
 
     private static CommentSummary MapComment(CommentRecord x) => new(x.Id, x.ShotId, x.Version, x.X, x.Y, x.Body, x.State, x.CreatedAt, x.ReferenceId, x.ReferenceVersion);
     private static AssetReviewNoteSummary MapAssetReviewNote(AssetReviewNoteRecord x) => new(x.Id, x.AssetId, x.X, x.Y, x.Body, x.State, x.CreatedAt);
-    private static JobSummary MapJob(JobRecord x) => new(x.Id, x.ShotId, x.ShotCode, x.Kind, Enum.Parse<JobState>(x.State), x.Progress, x.Phase, x.Backend, x.CreatedAt, x.CompletedAt, x.Error, x.ManifestId, x.AdapterId, x.OutputAssetId, x.OutputAssetId is null ? null : $"/api/assets/{x.OutputAssetId}/content", x.ProviderRequestId, x.Attempt, x.RetryOfJobId, x.LastHeartbeatAt, x.WorkType);
+    private static JobSummary MapJob(JobRecord x) => new(x.Id, x.ShotId, x.ShotCode, x.Kind, Enum.Parse<JobState>(x.State), x.Progress, x.Phase, x.Backend, x.CreatedAt, x.CompletedAt, x.Error, x.ManifestId, x.AdapterId, x.OutputAssetId, x.OutputAssetId is null ? null : $"/api/assets/{x.OutputAssetId}/content", x.ProviderRequestId, x.Attempt, x.RetryOfJobId, x.LastHeartbeatAt, x.WorkType, x.AcknowledgedAt);
 }
 
 public enum RepositoryResultKind { Ok, NotFound, Invalid, Conflict, Unavailable }

@@ -691,6 +691,56 @@ public sealed class ModelGenerationApiTests
         Assert.Contains("teal", message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A failure the artist has seen stays seen. Dismissal used to live in the
+    /// page, so every reload raised every failure the project had ever had —
+    /// on every screen, for ever, with no way to stop it.
+    /// </summary>
+    [Fact]
+    public async Task AFailureTheArtistHasSeenStaysSeen()
+    {
+        var compiler = new ControlledCompiler { Failure = "The stage refused." };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "acknowledged-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Doomed", size = "knee" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var jobId = job.RootElement.GetProperty("id").GetGuid();
+        var failed = await RunAsync(factory, jobId);
+        Assert.Equal(JobState.Failed, failed.State);
+
+        var acknowledged = await client.PostAsync($"/api/jobs/{jobId}/acknowledge", null);
+        Assert.Equal(HttpStatusCode.NoContent, acknowledged.StatusCode);
+
+        // It survives the reload that used to bring it back.
+        using var snapshot = await client.GetFromJsonAsync<JsonDocument>("/api/studio")
+            ?? throw new InvalidOperationException();
+        var seen = snapshot.RootElement.GetProperty("jobs").EnumerateArray()
+            .Single(candidate => candidate.GetProperty("id").GetGuid() == jobId);
+        Assert.NotEqual(JsonValueKind.Null, seen.GetProperty("acknowledgedAt").ValueKind);
+    }
+
+    [Fact]
+    public async Task WorkStillRunningCannotBeWavedAway()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "running-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Underway", size = "knee" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+
+        var refused = await client.PostAsync(
+            $"/api/jobs/{job.RootElement.GetProperty("id").GetGuid()}/acknowledge", null);
+
+        // Hiding a queued job would hide work that is still holding a lease.
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+    }
+
     [Fact]
     public async Task AStageMissingFromTheCompilerRefusesTheWholeRouteAndNamesIt()
     {

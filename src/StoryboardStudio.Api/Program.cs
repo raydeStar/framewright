@@ -255,6 +255,23 @@ app.MapDelete("/api/credentials/openai", (HttpContext context, IProviderCredenti
     return Results.Ok(credentials.GetOpenAiStatus());
 });
 app.MapGet("/api/generation/adapters", (GenerationOrchestrator orchestrator) => Results.Ok(orchestrator.ListAdapters()));
+// A failure the artist has seen stays seen. Dismissal used to live in the page,
+// so every reload brought back every failure a project had ever had, for ever.
+app.MapPost("/api/jobs/{jobId:guid}/acknowledge", async Task<IResult> (
+    Guid jobId, StudioDbContext db, TimeProvider clock, CancellationToken cancellationToken) =>
+{
+    var job = await db.Jobs.SingleOrDefaultAsync(candidate => candidate.Id == jobId, cancellationToken);
+    if (job is null) return Results.NotFound();
+    // Only a terminal state can be acknowledged: work still running is not
+    // something to wave away, and hiding it would hide a job still holding a
+    // lease.
+    if (job.State != JobState.Failed.ToString() && job.State != JobState.Cancelled.ToString())
+        return Results.BadRequest(new { error = "Only a failed or cancelled job can be acknowledged." });
+    job.AcknowledgedAt ??= clock.GetUtcNow();
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
+
 app.MapPost("/api/jobs/{jobId:guid}/retry", async Task<IResult> (
     Guid jobId, GenerationOrchestrator orchestrator, AssetImageGenerationService assetGeneration,
     AudioGenerationJobService audioGeneration, StudioDbContext db, GenerationJobSignal queue,

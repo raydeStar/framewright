@@ -356,6 +356,13 @@ public sealed class JobRecord
     public required string Backend { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+    /// <summary>
+    /// When the artist acknowledged a terminal failure. A dismissal that lived
+    /// only in the page came back on every reload, so a job that failed once
+    /// went on interrupting for ever. Seen is a fact about the job, not about
+    /// the tab it was seen in.
+    /// </summary>
+    public DateTimeOffset? AcknowledgedAt { get; set; }
     public string? Error { get; set; }
     public Guid? ManifestId { get; set; }
     public string? AdapterId { get; set; }

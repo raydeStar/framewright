@@ -210,6 +210,7 @@ export const studioApi = {
   updateShot: (shotId: string, body: { expectedUpdatedAt: string; title: string; description: string; durationFrames: number; camera: string; action: string; referenceIds: string[]; constraints: string[] }) => request<ShotSummary>(`/api/shots/${shotId}`, { method: 'PUT', body: JSON.stringify(body) }),
   generationAdapters: () => request<GenerationAdapterSummary[]>('/api/generation/adapters'),
   retryJob: (jobId: string) => request<JobSummary>(`/api/jobs/${jobId}/retry`, { method: 'POST' }),
+  acknowledgeJob: (jobId: string) => request<void>(`/api/jobs/${jobId}/acknowledge`, { method: 'POST' }),
   backupStatus: () => request<BackupStatus>('/api/maintenance/status'),
   runtimeStatus: () => request<RuntimeReadinessSummary>('/api/runtime/status'),
   productionExportStatus: () => request<ProductionExportReadiness>('/api/export/production/status'),

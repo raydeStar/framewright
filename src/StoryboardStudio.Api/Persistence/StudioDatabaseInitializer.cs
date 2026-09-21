@@ -23,6 +23,7 @@ public static class StudioDatabaseInitializer
     private const string SceneDirectionMigration = "20260919-scene-direction-v12";
     private const string SceneBlockoutMigration = "20260919-scene-blockout-v13";
     private const string SceneMotionMigration = "20260919-scene-motion-v14";
+    private const string AcknowledgedFailureMigration = "20260920-acknowledged-failures-v15";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -202,6 +203,19 @@ public static class StudioDatabaseInitializer
                 () => EnsureSceneMotionColumnsAsync(db, cancellationToken), cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, AcknowledgedFailureMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, AcknowledgedFailureMigration, cancellationToken);
+                migrationBackupCreated = true;
+            }
+
+            await RunMigrationAsync(db, AcknowledgedFailureMigration,
+                () => EnsureColumnAsync(db, "Jobs", "AcknowledgedAt", "TEXT NULL", cancellationToken),
+                cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -330,6 +344,7 @@ public static class StudioDatabaseInitializer
             SceneDirectionMigration => "revision-bound-scene-annotations-and-single-instance-human-gated-proposals",
             SceneBlockoutMigration => "reference-bound-blockout-plans-and-placeholder-scene-objects",
             SceneMotionMigration => "per-instance-clip-bindings-and-rigid-part-pivot-motion",
+            AcknowledgedFailureMigration => "a-failure-an-artist-has-seen-stays-seen",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

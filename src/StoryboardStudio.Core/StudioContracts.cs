@@ -918,7 +918,8 @@ public sealed record JobSummary(
     int Attempt = 1,
     Guid? RetryOfJobId = null,
     DateTimeOffset? LastHeartbeatAt = null,
-    string WorkType = "Shot");
+    string WorkType = "Shot",
+    DateTimeOffset? AcknowledgedAt = null);
 
 public sealed record GenerationAdapterSummary(
     string Id,

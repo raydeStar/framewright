@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M08. M00, M01, M04, M05, M06, M07, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M08, M09 and M14 are dependency-ready, and M12, M16, M17 and M18 follow them.  
+**Active milestone:** M09. M00, M01, M04, M05, M06, M07, M08, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M09 and M14 are dependency-ready, and M12, M16, M17 and M18 follow them.  
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -433,8 +433,8 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
 - **Available providers and permissions:** Not exercised. No provider call, GPU job, model download, or live generation was authorized or made. The backend and browser suites pin ComfyUI to `http://127.0.0.1:1` with submission disabled, YuE2 disabled, and OpenAI submission disabled.
 - **Baseline checks:** All green at `9ab9b68` - see the M00 acceptance record below.
-- **Active milestone:** M08 (commission one live image-to-model route).
-- **Last verified milestone:** M07. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
+- **Active milestone:** M09 (reviewed model preparation).
+- **Last verified milestone:** M08. M02, M03, M10 and M11 are CONTRACT_VERIFIED pending an actual WebMCP host; M11 also awaits human composition acceptance.
 - **External acceptance blockers:** (1) Resolved 2026-09-20: the Reference Asset Compiler is checked out, so M09/M14 are unblocked. Neither is runnable until Framewright can locate a pinned compiler and the browser payload export exists; both are engineering work, not an external blocker. (2) No verified WebMCP-capable browser/agent host - caps M02/M03/M10/M11 at `CONTRACT_VERIFIED` until a real host is exercised. (3) Resolved at M04: the user chose three.js, pinned at 0.186.0 and loaded only when a model is opened.
 - **Next action:** M08 is in progress and its groundwork is done. The compiler now offers a `geometry` stage: one reference image in, one candidate mesh out, with the workspace, intake and request written for it, and a capability answer that names which of `legacy-root`, `geometry-environment`, `hunyuan-checkout` and `runners` is missing on a machine without the weights. This studio's gateway can name that studio tree (`Integrations:ReferenceAssetCompiler:StudioTreePath`) so the compiler is told where the weights are rather than left to find them. No inference has been run.
   The route is now wired and proven with a controlled compiler, no GPU involved. A request freezes a route rather than one stage name; preflight refuses unless every step can run and names the step that cannot; each step reads what the one before it wrote; each step keeps its own output and receipt, so an interrupted job resumes at the step it reached instead of asking a GPU to rebuild the same mesh; a step that fails stops the route on the compiler's own reason rather than on a guess from the file system; and the delivery records what each step did, including which were adopted from an interrupted attempt.
@@ -456,7 +456,7 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M05 | VERIFIED | M05 acceptance record below |
 | M06 | VERIFIED | M06 acceptance record below |
 | M07 | VERIFIED | M07 acceptance record below |
-| M08 | IN_PROGRESS | Active; needs an up-to-date compiler on PATH and the artist's authorization |
+| M08 | VERIFIED | M08 acceptance record below |
 | M09 | NOT_STARTED | Dependency-ready; compiler checked out 2026-09-20 |
 | M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
 | M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
@@ -1377,6 +1377,90 @@ Three defects the tests found, all fixed: an interrupted run that left only half
   which content addressing correctly refuses, since the same bytes are the same asset.
 Checkpoint: see the M07 commits on feature/director-mode.
 Next dependency-ready milestone: M08.
+```
+
+### M08 acceptance record
+
+```text
+Milestone / status / date: M08 / VERIFIED / 2026-09-20
+Tested code revision or worktree identity: feature/director-mode, working tree at the M08 commits
+Outcome and supported constraints: A reference image in this studio's library becomes a delivered,
+  inspectable library model through the artist's own affordance, on this workstation's hardware, in
+  about two minutes. The route is the Reference Asset Compiler's, stage by stage, through the one
+  typed gateway: generate, set its real size, rebuild it to a runtime budget, unwrap, paint, glaze,
+  export. Every verdict is the compiler's and every receipt is recorded rather than re-derived. The
+  delivered prop is a static one, which is what this milestone supports; characters and rigs are not
+  claimed.
+Implementation surfaces reused/changed:
+  - src/StoryboardStudio.Api/Services/ModelGenerationService.cs: the frozen route, its per-step
+    reconciliation, the artist's size and glass answers, and the browser-scale options this studio
+    asks for.
+  - src/StoryboardStudio.Api/Services/CompilerGateway.cs: per-stage options, the studio tree, and
+    the vocabularies read back from the compiler rather than copied.
+  - src/StoryboardStudio.Api/Program.cs: an untracked local settings layer, so paths and a
+    commissioned route reach neither repository.
+  - src/storyboard-studio-web: the size and glass questions on a reference, and the model viewer's
+    paint and wire toggles, panning, fill light and environment.
+  - Reused unchanged: the job record, the lease service, the queue worker, content-addressed import,
+    and the M13 rig reading that makes a delivered model inspectable.
+Commands and checks actually run:
+  - dotnet test Framewright.slnx --nologo
+  - npm --prefix src/storyboard-studio-web run check
+  - npm --prefix src/storyboard-studio-web run test:e2e
+  - python -m pytest (the compiler, in its own checkout)
+  - rac run-stage --list, and each stage by name against the real lantern
+Results by evidence class (D/A/H/L/V/P):
+  D: 238 backend tests passed, 0 failed. The compiler's own suite passed in full. Frontend
+     typecheck, lint and format clean.
+  A: 124 browser journeys passed, 0 failed, 6 intentionally skipped, against the real service and
+     real persistence. The generation journeys drive the real gateway and process boundary through a
+     controlled compiler that speaks every stage.
+  H: NOT RUN. No agent host is involved in this milestone.
+  L: RUN. Live on this workstation's RTX 4090: Hunyuan3D single-view geometry at octree 256
+     (47 s, 592,024 triangles), voxel rebuild to 9,000 vertices and 18,000 triangles, UV unwrap with
+     a maximum vertex delta of 8.4e-07, Hunyuan3D-Paint 2.1 at 6 views and 512 px with faces
+     unchanged, geometry delta 2.9e-08 and UV delta 5.3e-08, and glazing of 1,651 of 19,998 faces.
+     Delivered model: 12,927 vertices, 18,000 triangles, 0.24 x 0.42 x 0.26 m, two materials, one
+     transmitting at 85%. Receipts retained per step with their hashes.
+  V: RECORDED. The artist inspected the delivered prop in the studio and accepted it, and separately
+     accepted the rebuilt surface on sight after rejecting the earlier collapsed one. The prop is
+     placed in the M06 scene "Ayric - character stage" (version 3) at knee height beside the
+     character, which is the size the artist asked for.
+  P: NOT RUN. No runtime dependency changed.
+Failure/conflict/restart checks: A missing capability refuses at enqueue and leaves no job. A stage
+  the compiler does not offer refuses the whole route and names the step. A size or glass colour the
+  compiler does not know is refused before anything runs. An interrupted job resumes at the step it
+  reached rather than repeating the GPU work. A half-written step is cleared and run again out loud,
+  and an output from one attempt cannot pair with a receipt from the next. A duplicate delivery
+  produces no second model and no second lineage record.
+Relevant earlier-path regression results: The full backend and browser suites passed, including the
+  M04/M05 model journeys, the M06/M10/M11/M15 scene journeys, and the M07 generation journeys.
+Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps passed
+  individually).
+Human approvals actually recorded, where required: The artist accepted the delivered prop on
+  2026-09-20, in the studio, after inspecting it with the paint and wire toggles.
+Known defects and dependency impact: The compiler's own ledger route for a generated asset is not
+  wired: geometry writes a workspace that satisfies its own preflight but is not a `rac new` ledger
+  workspace, so `cleanup-receipt` and `retopology-receipt` cannot yet be recorded against it. That
+  is M09's work and does not weaken what is claimed here, because nothing here claims production
+  readiness: every reduction receipt says `production_grade: false` and
+  `requires_fixed_view_review: true`.
+Permitted deferrals: Broad style fidelity, arbitrary character readiness, and multiple generators.
+  Rigs, clips and the ledger's approval chain are M09 and M14.
+Bug-detection check: Sabotages across this milestone's surfaces, all caught after correction: a
+  defaulted size, a defaulted glass colour, a colour nobody offers, always glazing, a reducer
+  pointed at its own destination, a stage that could wait on input, and a failure that could be
+  waved away while still running. Three passed at first and each exposed a real gap rather than a
+  strong design: a failed step was being caught by a missing file rather than by the run's verdict;
+  clearing a half-answer looked redundant until the mismatched-pair case was written; and letting
+  any stage survive a nonzero exit would have delivered a rejected reduction as a finished asset.
+Defects found by running it rather than reasoning about it: a stage could inherit the service's
+  standard input and hang for ever holding a lease; the route named every step's file .glb when a
+  staged mesh is a .blend; the raw generator output was refused by both library gates, correctly;
+  the reduction gate's absolute-metre thresholds were meaningless against an unscaled mesh; and a
+  dismissed job failure came back on every reload, for ever.
+Checkpoint: see the M08 commits on feature/director-mode.
+Next dependency-ready milestone: M09.
 ```
 
 ### Acceptance record template

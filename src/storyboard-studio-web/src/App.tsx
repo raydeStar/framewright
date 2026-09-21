@@ -325,7 +325,7 @@ export default function App() {
         {active === 'sequence' && selected && <SequenceWorkspace studio={studio} selectedId={selected.id} onSelect={setSelectedId} onReordered={() => void refresh()} onJobQueued={acceptQueuedJob} />}
       </div>
 
-      <JobsDock jobs={studio.jobs} scopeShotId={active === 'board' ? undefined : shotScoped ? selected?.id : null} onOpen={() => void refresh()} onRetry={async job => { try { const retry = await studioApi.retryJob(job.id); setToast(`${retry.shotCode} retry ${retry.attempt} queued.`); setDismissedJobs(current => current.filter(id => id !== job.id)); if (retry.workType === 'Shot') void followGeneration(retry.shotId, studio.shots.find(shot => shot.id === retry.shotId)?.version ?? 0); await refresh(true) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not retry this generation.') } }} dismissed={dismissedJobs} onDismiss={id => setDismissedJobs(current => [...current, id])} />
+      <JobsDock jobs={studio.jobs} scopeShotId={active === 'board' ? undefined : shotScoped ? selected?.id : null} onOpen={() => void refresh()} onRetry={async job => { try { const retry = await studioApi.retryJob(job.id); setToast(`${retry.shotCode} retry ${retry.attempt} queued.`); setDismissedJobs(current => current.filter(id => id !== job.id)); if (retry.workType === 'Shot') void followGeneration(retry.shotId, studio.shots.find(shot => shot.id === retry.shotId)?.version ?? 0); await refresh(true) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not retry this generation.') } }} dismissed={dismissedJobs} onDismiss={id => { setDismissedJobs(current => [...current, id]); void studioApi.acknowledgeJob(id).then(() => refresh(true)).catch(() => undefined) }} />
     </section>
 
     {setupOpen && <SetupDrawer project={studio.project} integrations={integrations} pairing={pairing} busy={integrationBusy} onProjectSaved={() => void refresh()} onRefresh={() => { void inspectIntegrations(); void inspectPairing() }} onRotatePairing={async () => setPairing(await studioApi.rotatePairing())} onRevokePairing={async () => setPairing(await studioApi.revokePairing())} onClose={() => setSetupOpen(false)} onAskCodex={() => { setSetupOpen(false); void askCodex('Integration setup', 'Inspect the configured integration status shown by Framewright and recommend the next safe setup steps. Do not change files or submit jobs.') }} />}
@@ -451,7 +451,8 @@ function JobsDock({ jobs, scopeShotId, onOpen, onRetry, dismissed, onDismiss }: 
   // Blocked and Failed as first-class job states — this is where they surface.
   const superseded = getSupersededJobIds(jobs)
   const stalled = jobs
-    .filter(job => (job.state === 'Failed' || job.state === 'Cancelled') && !superseded.has(job.id) && !dismissed.includes(job.id)
+    .filter(job => (job.state === 'Failed' || job.state === 'Cancelled') && !superseded.has(job.id)
+      && !dismissed.includes(job.id) && !job.acknowledgedAt
       && (scopeShotId === null ? job.workType !== 'Shot' : !scopeShotId || job.shotId === scopeShotId))
     .sort((a, b) => (b.completedAt ?? b.createdAt).localeCompare(a.completedAt ?? a.createdAt))[0]
   if (!stalled) return null
