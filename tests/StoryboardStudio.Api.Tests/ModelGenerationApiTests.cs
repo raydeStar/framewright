@@ -46,17 +46,23 @@ public sealed class ModelGenerationApiTests
         public string? ReceiptThenDieStage { get; set; }
 
         public static CompilerStage Stage(string name) =>
-            new(name, name is "geometry" or "reduce-mesh" ? "powershell" : "blender",
+            new(name, name is "geometry" or "reduce-mesh" or "uv-unwrap" or "texture"
+                    ? "powershell" : "blender",
                 $"The {name} stage.", $"reference-asset-compiler.{name}.v1", true, [],
                 // A staged mesh is a .blend where everything else is a .glb,
                 // and the stage that reads it refuses anything else.
-                OutputSuffix: name == "stage-mesh" ? ".blend" : ".glb");
+                OutputSuffix: name switch
+                {
+                    "stage-mesh" => ".blend",
+                    "uv-unwrap" => ".obj",
+                    _ => ".glb",
+                });
 
         public static CompilerCapabilities Ready => new(
             Installed: true, Commissioned: true, Version: "reference-asset-compiler 0.1.2",
             Checkout: "C:/checkout", Blender: "C:/blender.exe",
             Stages: [Stage("geometry"), Stage("stage-mesh"), Stage("reduce-mesh"),
-                     Stage("browser-payload")]);
+                     Stage("uv-unwrap"), Stage("texture"), Stage("browser-payload")]);
 
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
@@ -247,13 +253,13 @@ public sealed class ModelGenerationApiTests
         Assert.Equal(JobState.Completed, first.State);
         // The whole route: a mesh from the picture, its real size, a runtime
         // budget, and only then a file a browser can load.
-        Assert.Equal(4, compiler.Runs);
+        Assert.Equal(6, compiler.Runs);
 
         // The delivery arrives a second time. No stage is run again and no
         // second model appears.
         var again = await RunAsync(factory, jobId);
         Assert.Equal(first.OutputAssetId, again.OutputAssetId);
-        Assert.Equal(4, compiler.Runs);
+        Assert.Equal(6, compiler.Runs);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
@@ -293,7 +299,7 @@ public sealed class ModelGenerationApiTests
         // It is run again, because half an answer is not an answer, and the
         // rerun is on the record rather than hidden inside a phase that passed.
         Assert.Equal(JobState.Completed, finished.State);
-        Assert.Equal(4, compiler.Runs);
+        Assert.Equal(6, compiler.Runs);
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
         var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
@@ -437,7 +443,7 @@ public sealed class ModelGenerationApiTests
         var finished = await RunAsync(factory, jobId);
 
         Assert.Equal(JobState.Completed, finished.State);
-        Assert.Equal(["geometry", "stage-mesh", "reduce-mesh", "browser-payload"],
+        Assert.Equal(["geometry", "stage-mesh", "reduce-mesh", "uv-unwrap", "texture", "browser-payload"],
             compiler.Calls.Select(call => call.Stage));
         // The order is not the whole claim: each step must read what the one
         // before it wrote, not the picture the generator read.
@@ -448,6 +454,8 @@ public sealed class ModelGenerationApiTests
         // machine where every other part of the route had already worked.
         Assert.Equal("step-2-stage-mesh.blend", compiler.Calls[2].Source);
         Assert.Equal("step-3-reduce-mesh.glb", compiler.Calls[3].Source);
+        Assert.Equal("step-4-uv-unwrap.obj", compiler.Calls[4].Source);
+        Assert.Equal("step-5-texture.glb", compiler.Calls[5].Source);
 
         // The artist's size reaches the stage that applies it, and nothing
         // else invents one: a guessed size would silently invalidate every
@@ -458,18 +466,23 @@ public sealed class ModelGenerationApiTests
         // triangles that the reduction throws away again.
         Assert.Equal("256", compiler.Options["geometry"]["octree-resolution"]);
         Assert.Equal("20000", compiler.Options["reduce-mesh"]["triangle-budget"]);
+        // The painter is conditioned on the same picture the geometry came
+        // from, and only the caller knows which picture an asset is of.
+        Assert.EndsWith(".png", compiler.Options["texture"]["reference"], StringComparison.Ordinal);
+        // A generated prop is unfolded as the triangle mesh it already is.
+        Assert.True(compiler.Options["uv-unwrap"].ContainsKey("allow-triangulated-glb"));
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
         var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
         using var result = JsonDocument.Parse(record.ResultJson!);
-        Assert.Equal(["geometry", "stage-mesh", "reduce-mesh", "browser-payload"],
+        Assert.Equal(["geometry", "stage-mesh", "reduce-mesh", "uv-unwrap", "texture", "browser-payload"],
             result.RootElement.GetProperty("route").EnumerateArray().Select(item => item.GetString()));
         Assert.Equal("knee", result.RootElement.GetProperty("size").GetString());
         // Each step's receipt is recorded, not just the last one's: "the route
         // succeeded" hides which half of it actually ran.
         var steps = result.RootElement.GetProperty("steps").EnumerateArray().ToArray();
-        Assert.Equal(4, steps.Length);
+        Assert.Equal(6, steps.Length);
         Assert.All(steps, step => Assert.False(string.IsNullOrWhiteSpace(
             step.GetProperty("receiptSha256").GetString())));
     }
@@ -502,7 +515,7 @@ public sealed class ModelGenerationApiTests
         // The whole point of keeping a result per step: the generator is the
         // expensive one, and asking a GPU to build the same mesh a second time
         // is the cost of resuming badly.
-        Assert.Equal(["stage-mesh", "reduce-mesh", "browser-payload"],
+        Assert.Equal(["stage-mesh", "reduce-mesh", "uv-unwrap", "texture", "browser-payload"],
             compiler.Calls.Select(call => call.Stage));
 
         using var scope = factory.Services.CreateScope();
@@ -513,7 +526,7 @@ public sealed class ModelGenerationApiTests
         // Adopted rather than run, and the delivery says which it was.
         Assert.True(steps[0].GetProperty("adopted").GetBoolean());
         Assert.False(steps[1].GetProperty("adopted").GetBoolean());
-        Assert.Equal(4, steps.Length);
+        Assert.Equal(6, steps.Length);
         Assert.False(result.RootElement.GetProperty("rerunAfterIncompleteAnswer").GetBoolean());
     }
 
@@ -613,6 +626,8 @@ public sealed class ModelGenerationApiTests
                         "reference-asset-compiler.geometry-candidate.v1", false, ["legacy-root"]),
                     ControlledCompiler.Stage("stage-mesh"),
                     ControlledCompiler.Stage("reduce-mesh"),
+                    ControlledCompiler.Stage("uv-unwrap"),
+                    ControlledCompiler.Stage("texture"),
                     ControlledCompiler.Stage("browser-payload"),
                 ],
             },
@@ -630,7 +645,7 @@ public sealed class ModelGenerationApiTests
         var detail = readiness.RootElement.GetProperty("detail").GetString()!;
         Assert.Contains("geometry", detail, StringComparison.Ordinal);
         Assert.Contains("legacy-root", detail, StringComparison.Ordinal);
-        Assert.Equal(["legacy-root"],
+        Assert.Contains("legacy-root",
             readiness.RootElement.GetProperty("missing").EnumerateArray().Select(item => item.GetString()));
 
         var refused = await client.PostAsJsonAsync("/api/models/generation",

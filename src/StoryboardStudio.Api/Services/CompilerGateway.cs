@@ -165,7 +165,10 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
         foreach (var (name, value) in options ?? new Dictionary<string, string>())
         {
             arguments.Add("--" + name);
-            arguments.Add(value);
+            // An empty value is a switch rather than a setting. Passing "" as
+            // its argument would make the compiler read the next flag as this
+            // one's value, which fails in a way that names the wrong option.
+            if (value.Length > 0) arguments.Add(value);
         }
         if (Checkout is { } checkout) { arguments.Add("--repo-root"); arguments.Add(checkout); }
         if (Blender is { } blender) { arguments.Add("--blender"); arguments.Add(blender); }

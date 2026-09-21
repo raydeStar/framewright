@@ -65,6 +65,9 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
                     produces  = 'reference-asset-compiler.staged-mesh.v1'
                     arguments = @('source', 'output', 'report')
                     options   = @('size', 'size_adjust')
+                    # A staged mesh is a .blend where everything else is glTF,
+                    # and a stand-in that says otherwise is worse than none.
+                    output_suffix = '.blend'
                     available = $true
                     missing   = @()
                     # The vocabulary belongs to the compiler, so the studio
@@ -87,6 +90,27 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
                     missing   = @()
                 },
                 [ordered]@{
+                    stage     = 'uv-unwrap'
+                    runner    = 'powershell'
+                    summary   = 'Unfold a mesh onto a map, moving no vertex, so it can be painted.'
+                    produces  = 'reference-asset-compiler.texture-uv-transport.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('allow_triangulated_glb')
+                    output_suffix = '.obj'
+                    available = $true
+                    missing   = @()
+                },
+                [ordered]@{
+                    stage     = 'texture'
+                    runner    = 'powershell'
+                    summary   = 'Paint a UV-mapped mesh from its reference image.'
+                    produces  = 'reference-asset-compiler.paint-validation.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('reference', 'views', 'resolution')
+                    available = $true
+                    missing   = @()
+                },
+                [ordered]@{
                     stage     = 'browser-payload'
                     runner    = 'blender'
                     summary   = 'Export the staged asset as a self-contained browser GLB, +Y up and metric.'
@@ -103,7 +127,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     $stage = $arguments[1]
-    if ($stage -notin @('geometry', 'stage-mesh', 'reduce-mesh', 'browser-payload')) {
+    if ($stage -notin @('geometry', 'stage-mesh', 'reduce-mesh', 'uv-unwrap', 'texture', 'browser-payload')) {
         Write-Error "RAC_ERROR unknown stage: $stage"
         exit 2
     }
@@ -134,6 +158,8 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         'geometry'    { 'reference-asset-compiler.geometry-candidate.v1' }
         'stage-mesh'  { 'reference-asset-compiler.staged-mesh.v1' }
         'reduce-mesh' { 'reference-asset-compiler.production-retopology-candidate.v1' }
+        'uv-unwrap'   { 'reference-asset-compiler.texture-uv-transport.v1' }
+        'texture'     { 'reference-asset-compiler.paint-validation.v1' }
         default       { 'reference-asset-compiler.browser-payload.v1' }
     }
     $stageReceipt = [ordered]@{

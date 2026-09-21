@@ -32,6 +32,8 @@ public sealed class ModelGenerationService(
     public const string GeometryStage = "geometry";
     public const string StageMeshStage = "stage-mesh";
     public const string ReduceMeshStage = "reduce-mesh";
+    public const string UvUnwrapStage = "uv-unwrap";
+    public const string TextureStage = "texture";
     public const string BrowserPayloadStage = "browser-payload";
 
     /// <summary>
@@ -44,10 +46,19 @@ public sealed class ModelGenerationService(
     /// two metres tall, whatever the subject. Staging gives it the size the
     /// artist said it is, which is what makes the reduction gate's millimetres
     /// mean anything. Reduction collapses it to a runtime budget and measures
-    /// what that cost. Only then is there a mesh worth exporting for a browser.
+    /// what that cost.
+    ///
+    /// What comes out of that is the right shape and the wrong colour: a
+    /// generated mesh has none, and no UVs to put any on. Unwrapping gives it
+    /// a map without moving a vertex, and the painter fills that map from the
+    /// same reference the geometry came from. Only then is there a mesh worth
+    /// exporting for a browser.
     /// </summary>
     public static readonly string[] ReferenceToModelRoute =
-        [GeometryStage, StageMeshStage, ReduceMeshStage, BrowserPayloadStage];
+    [
+        GeometryStage, StageMeshStage, ReduceMeshStage,
+        UvUnwrapStage, TextureStage, BrowserPayloadStage,
+    ];
 
     /// <summary>What each step is doing, in words an artist reading a queue would use.</summary>
     private static readonly Dictionary<string, string> StagePhase = new(StringComparer.Ordinal)
@@ -55,6 +66,8 @@ public sealed class ModelGenerationService(
         [GeometryStage] = "Making a mesh from the reference",
         [StageMeshStage] = "Setting its real size",
         [ReduceMeshStage] = "Bringing it down to a size a browser can carry",
+        [UvUnwrapStage] = "Unfolding it so it can be painted",
+        [TextureStage] = "Painting it from the reference",
         [BrowserPayloadStage] = "Preparing the mesh for the browser",
     };
 
@@ -341,7 +354,7 @@ public sealed class ModelGenerationService(
                     cancellationToken);
                 run = await compiler.RunStageAsync(
                     stage, stepSource, outputPath, receiptPath, cancellationToken,
-                    StageOptions(stage, packet, job));
+                    StageOptions(stage, packet, job, sourcePath));
                 if (!run.Ok)
                     return await FailAsync(job,
                         run.Error ?? $"The {stage} stage did not produce a result.", cancellationToken);
@@ -415,7 +428,7 @@ public sealed class ModelGenerationService(
     /// cannot: that it is a browser studio, and what the artist said.
     /// </summary>
     private static Dictionary<string, string> StageOptions(
-        string stage, FrozenModelRequest packet, JobRecord job) => stage switch
+        string stage, FrozenModelRequest packet, JobRecord job, string referencePath) => stage switch
     {
         GeometryStage => new()
         {
@@ -430,6 +443,12 @@ public sealed class ModelGenerationService(
             ["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture),
         },
         ReduceMeshStage => new() { ["triangle-budget"] = RuntimeTriangleBudget },
+        // A generated prop is an approved static triangle mesh: it is unfolded
+        // as it stands rather than welded or remeshed, which would change the
+        // geometry the reduction gate already measured.
+        UvUnwrapStage => new() { ["allow-triangulated-glb"] = "" },
+        // The paint is conditioned on the same picture the geometry came from.
+        TextureStage => new() { ["reference"] = referencePath },
         _ => [],
     };
 
