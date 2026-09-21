@@ -60,7 +60,7 @@ public sealed class ModelPreparationApiTests
             Checkout: "C:/checkout", Blender: "C:/blender.exe",
             Stages: [Stage("adopt-mesh"), Stage("reduce-mesh"), Stage("review-views"),
                      Stage("browser-payload"), Stage("bake-detail"), Stage("assign-surfaces"),
-                     Stage("survey-surfaces")]);
+                     Stage("survey-surfaces"), Stage("compress-textures")]);
 
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
@@ -801,6 +801,119 @@ public sealed class ModelPreparationApiTests
         });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Equal(0, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task ReEncodingDeliversARevisionWithTheSameGeometryAndSaysWhatItSaved()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "heavy.glb", ModelFixtures.DenseProp());
+        // The stand-in cannot actually shrink anything, so it hands back a
+        // different mesh. That the real re-encoder leaves geometry byte-identical
+        // is proved where it belongs, against the re-encoder itself.
+
+        var queued = await client.PostAsJsonAsync("/api/models/compression", new
+        {
+            sourceAssetId = source.Id,
+            name = "Heavy (smaller textures)",
+            colourSize = 2048,
+            dataSize = 1024,
+            quality = 90,
+            format = "jpeg",
+        });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        Assert.Equal("Smaller textures", job.Kind);
+
+        var finished = await RunAsync(factory, job.Id);
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.NotNull(finished.OutputAssetId);
+
+        // Three steps and no export: the re-encoder writes a model directly,
+        // because it rewrites the file rather than reopening it in a mesh
+        // library -- which is the whole reason a rigged asset survives it.
+        Assert.Equal(["review-views", "compress-textures", "review-views"],
+            compiler.Calls.Select(call => call.Stage).ToArray());
+        Assert.DoesNotContain("browser-payload", compiler.Calls.Select(call => call.Stage));
+        Assert.Equal("2048", compiler.Options["compress-textures"]["colour-size"]);
+        Assert.Equal("1024", compiler.Options["compress-textures"]["data-size"]);
+        // The compiler's own option name, not the one a person would say. A
+        // wrong name here is refused by the stage's argument parser and is only
+        // ever found by running it, which is exactly how this one was found.
+        Assert.Equal("jpeg", compiler.Options["compress-textures"]["texture-format"]);
+        Assert.DoesNotContain("format", compiler.Options["compress-textures"].Keys
+            .Where(key => key != "texture-format"));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var before = await db.Assets.SingleAsync(asset => asset.Id == source.Id);
+        var after = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+
+        Assert.Equal(before.RevisionFamilyId, after.RevisionFamilyId);
+        Assert.True(before.IsCurrentRevision);
+        Assert.Null(after.PreparationAcceptedAt);
+        Assert.Contains("Textures re-encoded from", after.Notes, StringComparison.Ordinal);
+        Assert.Contains("MB down to", after.RevisionPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ASettingThisReEncoderDoesNotOfferIsRefusedBeforeAnythingRuns()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "settings.glb", ModelFixtures.DenseProp());
+
+        foreach (var body in new object[]
+        {
+            new { sourceAssetId = source.Id, name = "Odd size", colourSize = 1500 },
+            new { sourceAssetId = source.Id, name = "Odd quality", quality = 0 },
+        })
+        {
+            var refused = await client.PostAsJsonAsync("/api/models/compression", body);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
+        var wrongFormat = await client.PostAsJsonAsync("/api/models/compression", new
+        {
+            sourceAssetId = source.Id, name = "Odd format", format = "tga",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, wrongFormat.StatusCode);
+        Assert.Contains("jpeg", await wrongFormat.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task AReEncodeThatWouldGrowTheFileFailsTheJobAndLeavesTheSourceAlone()
+    {
+        // The compiler refuses to write a bigger file. That refusal has to
+        // arrive as a failed job with its reason, not as a delivered asset
+        // nobody asked for.
+        var compiler = new ControlledCompiler { FailingStage = "compress-textures" };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "already-small.glb", ModelFixtures.DenseProp());
+
+        var queued = await client.PostAsJsonAsync("/api/models/compression", new
+        {
+            sourceAssetId = source.Id, name = "No smaller",
+        });
+        queued.EnsureSuccessStatusCode();
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.Id);
+
+        Assert.Equal(JobState.Failed, finished.State);
+        Assert.Null(finished.OutputAssetId);
+        Assert.Contains("compress-textures", finished.Error, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var kept = await db.Assets.SingleAsync(asset => asset.Id == source.Id);
+        Assert.Equal(source.ContentHash, kept.ContentHash);
+        // No stack invented around a model that never had one: a refusal should
+        // leave the library exactly as it found it.
+        Assert.Null(kept.RevisionFamilyId);
     }
 
     private static async Task RetryAsync(StudioApiFactory factory, Guid jobId)

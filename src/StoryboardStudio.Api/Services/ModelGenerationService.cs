@@ -42,11 +42,13 @@ public sealed class ModelGenerationService(
     public const string SurveySurfacesStage = "survey-surfaces";
     public const string BakeDetailStage = "bake-detail";
     public const string AssignSurfacesStage = "assign-surfaces";
+    public const string CompressTexturesStage = "compress-textures";
 
     /// <summary>Which of the two things a frozen packet is asking for.</summary>
     public const string GenerateWork = "generate";
     public const string PrepareWork = "prepare";
     public const string SurfaceWork = "surface";
+    public const string CompressWork = "compress";
 
     /// <summary>
     /// What a reference image goes through to become something a browser can
@@ -122,6 +124,25 @@ public sealed class ModelGenerationService(
         new(ReviewViewsStage),
     ];
 
+    /// <summary>
+    /// What a model goes through to carry the same pictures in fewer bytes.
+    ///
+    /// Three steps and no export: the re-encoder writes a model directly,
+    /// because it rewrites the file around new image bytes rather than opening
+    /// it in a mesh library. That is the whole reason a rigged asset survives
+    /// this, and putting a round trip through Blender on the end would undo it.
+    /// </summary>
+    private static readonly RouteStepPlan[] CompressionPlan =
+    [
+        new(ReviewViewsStage, ReadsOriginal: true),
+        new(CompressTexturesStage, ReadsOriginal: true),
+        new(ReviewViewsStage),
+    ];
+
+    /// <summary>Every stage re-encoding needs, for the capability check.</summary>
+    public static readonly string[] CompressionRoute =
+        [.. CompressionPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
+
     /// <summary>Every stage surfacing needs, for the capability check.</summary>
     public static readonly string[] SurfacingRoute =
         [.. SurfacingPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
@@ -159,6 +180,7 @@ public sealed class ModelGenerationService(
         [ReviewViewsStage] = "Rendering the views a person judges it by",
         [BakeDetailStage] = "Baking the detail its own shape already implies",
         [AssignSurfacesStage] = "Giving each part the surface it should be",
+        [CompressTexturesStage] = "Re-encoding its textures",
     };
 
     /// <summary>
@@ -201,7 +223,8 @@ public sealed class ModelGenerationService(
         int SourceRevisionNumber, RouteStep[] Route, string? CompilerVersion, DateTimeOffset FrozenAt,
         string Size, double SizeAdjust, string? GlassColour,
         string Work = GenerateWork, int TriangleBudget = 0,
-        ModelSurfaceAssignment[]? Assignments = null, int BakeResolution = 0, double EdgeWear = 0);
+        ModelSurfaceAssignment[]? Assignments = null, int BakeResolution = 0, double EdgeWear = 0,
+        int ColourSize = 0, int DataSize = 0, int Quality = 0, string? TextureFormat = null);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -247,6 +270,10 @@ public sealed class ModelGenerationService(
     /// </summary>
     public Task<ModelGenerationReadiness> PreparationPreflightAsync(CancellationToken cancellationToken) =>
         PreflightAsync(PreparationRoute, "Preparing a derivative", cancellationToken);
+
+    /// <summary>The same question again, for the route that re-encodes textures.</summary>
+    public Task<ModelGenerationReadiness> CompressionPreflightAsync(CancellationToken cancellationToken) =>
+        PreflightAsync(CompressionRoute, "Re-encoding textures", cancellationToken);
 
     /// <summary>The same question again, for the route that changes surfaces.</summary>
     public Task<ModelGenerationReadiness> SurfacingPreflightAsync(CancellationToken cancellationToken) =>
@@ -575,6 +602,88 @@ public sealed class ModelGenerationService(
             ? [.. found.EnumerateArray().Select(value => value.GetString() ?? "")] : [];
 
     /// <summary>
+    /// Queues a re-encode of one model's textures.
+    ///
+    /// The cheapest change available to a finished asset: nothing about the
+    /// mesh, the UVs or the rig moves, and the same pictures arrive in a
+    /// fraction of the bytes. It still comes back as a revision beside the
+    /// source rather than in place, because "the same pictures" is a claim
+    /// somebody should be able to check by looking.
+    /// </summary>
+    public async Task<RepositoryResult<JobSummary>> EnqueueCompressionAsync(
+        CreateModelCompressionRequest request, CancellationToken cancellationToken)
+    {
+        var source = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(asset => asset.Id == request.SourceAssetId, cancellationToken);
+        if (source is null) return RepositoryResult<JobSummary>.NotFound();
+        if (source.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<JobSummary>.Invalid("Textures are re-encoded on a model.");
+        if (source.IsArchived)
+            return RepositoryResult<JobSummary>.Invalid(
+                "That model is archived. Restore it before re-encoding it.");
+
+        var name = (request.Name ?? "").Trim();
+        if (name.Length is 0 or > 120)
+            return RepositoryResult<JobSummary>.Invalid("This needs a name of 1 to 120 characters.");
+
+        var colour = request.ColourSize ?? 2048;
+        var data = request.DataSize ?? 1024;
+        foreach (var (size, what) in new[] { (colour, "colour"), (data, "data") })
+            if (size is not (0 or 512 or 1024 or 2048 or 4096))
+                return RepositoryResult<JobSummary>.Invalid(
+                    $"A {what} map is capped at 512, 1024, 2048 or 4096, or 0 to keep what came in.");
+        var quality = request.Quality ?? 90;
+        if (quality is < 1 or > 100)
+            return RepositoryResult<JobSummary>.Invalid("Quality runs from 1 to 100.");
+        var format = string.IsNullOrWhiteSpace(request.Format) ? "jpeg" : request.Format.Trim().ToLowerInvariant();
+        if (format is not ("jpeg" or "webp" or "png"))
+            return RepositoryResult<JobSummary>.Invalid(
+                "A texture is re-encoded as jpeg, webp or png. jpeg is the one every reader understands.");
+
+        var readiness = await CompressionPreflightAsync(cancellationToken);
+        if (!readiness.CanRun)
+            return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+
+        var now = timeProvider.GetUtcNow();
+        var packet = new FrozenModelRequest(
+            FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
+            source.RevisionNumber ?? 1,
+            [.. CompressionPlan.Select(step => new RouteStep(
+                step.Stage,
+                readiness.Suffixes?.GetValueOrDefault(step.Stage) ?? ".glb",
+                step.ReadsOriginal))],
+            readiness.CompilerVersion, now,
+            Size: "", SizeAdjust: 1.0, GlassColour: null,
+            Work: CompressWork, TriangleBudget: 0,
+            Assignments: null, BakeResolution: 0, EdgeWear: 0,
+            ColourSize: colour, DataSize: data, Quality: quality, TextureFormat: format);
+        var requestJson = JsonSerializer.Serialize(packet, Json);
+
+        var jobId = Guid.NewGuid();
+        var job = new JobRecord
+        {
+            Id = jobId,
+            ShotId = Guid.Empty,
+            ShotCode = name,
+            Kind = "Smaller textures",
+            WorkType = ModelWorkType,
+            State = JobState.Queued.ToString(),
+            Progress = 0,
+            Phase = "Frozen model queued",
+            Backend = "Reference Asset Compiler",
+            AdapterId = string.Join(" then ", CompressionPlan.Select(step => step.Stage)),
+            RequestJson = requestJson,
+            IdempotencyKey = IdempotencyKey(requestJson, jobId),
+            CreatedAt = now,
+            LastHeartbeatAt = now,
+            Attempt = 1,
+        };
+        db.Jobs.Add(job);
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<JobSummary>.Ok(Map(job));
+    }
+
+    /// <summary>
     /// Freezes the artist's answers about what each part should be, and queues
     /// the work. Same shape as a preparation: what comes back is a revision
     /// beside the source, and the source stays the current one until somebody
@@ -701,7 +810,8 @@ public sealed class ModelGenerationService(
         // deliver a revision beside it. What differs is the route, not what
         // happens to the answer.
         var derivative = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal);
+            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal);
         var preparing = derivative;
         var sourceWord = derivative ? "model" : "reference";
         var source = await db.Assets.AsNoTracking()
@@ -804,7 +914,10 @@ public sealed class ModelGenerationService(
 
         // The last step of a preparation is evidence, not a model. The model is
         // the last step that exported one.
-        var payloadStep = completed.LastOrDefault(step => step.Stage == BrowserPayloadStage);
+        // Whichever step last wrote a model. A re-encode writes one directly,
+        // because it rewrites the file rather than reopening it.
+        var payloadStep = completed.LastOrDefault(
+            step => step.Stage is BrowserPayloadStage or CompressTexturesStage);
         if (payloadStep is null)
             return await FailAsync(job, "This job's route never exported a model.", cancellationToken);
         var payloadPath = payloadStep.OutputPath;
@@ -933,6 +1046,22 @@ public sealed class ModelGenerationService(
         // One --assign per part, which is why a stage's options are a sequence
         // of pairs rather than a dictionary: a dictionary would keep the last
         // and silently drop the rest.
+        // A colour map is looked at and a data map is read as numbers by a
+        // shader, so they are two questions rather than one setting.
+        CompressTexturesStage => new Dictionary<string, string>
+        {
+            ["colour-size"] = (packet.ColourSize == 0 ? 2048 : packet.ColourSize)
+                .ToString(CultureInfo.InvariantCulture),
+            ["data-size"] = (packet.DataSize == 0 ? 1024 : packet.DataSize)
+                .ToString(CultureInfo.InvariantCulture),
+            ["quality"] = (packet.Quality == 0 ? 90 : packet.Quality)
+                .ToString(CultureInfo.InvariantCulture),
+            // The compiler's own name for it. "format" is what a person would
+            // say and is not what the stage answers to, and a wrong option name
+            // is only found by running it.
+            ["texture-format"] = string.IsNullOrWhiteSpace(packet.TextureFormat)
+                ? "jpeg" : packet.TextureFormat,
+        },
         AssignSurfacesStage => (packet.Assignments ?? [])
             .Select(entry => new KeyValuePair<string, string>(
                 "assign", $"{entry.Part}={entry.Surface}")),
@@ -970,12 +1099,21 @@ public sealed class ModelGenerationService(
             || before.Profile.VertexCount != after.Profile.VertexCount;
 
         var note = new StringBuilder()
-            .Append(string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
-                ? "Resurfaced from " : "Runtime derivative of ")
+            .Append(packet.Work switch
+            {
+                SurfaceWork => "Resurfaced from ",
+                CompressWork => "Textures re-encoded from ",
+                _ => "Runtime derivative of ",
+            })
             .Append(packet.SourceName)
             .Append(" revision ").Append(packet.SourceRevisionNumber)
             .Append(" (").Append(packet.SourceContentHash[..12]).Append("…)");
-        if (string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal))
+        if (string.Equals(packet.Work, CompressWork, StringComparison.Ordinal))
+            note.Append(": ").Append((source.Bytes / 1024d / 1024d).ToString("0.0", CultureInfo.InvariantCulture))
+                .Append(" MB down to ")
+                .Append((derivative.Bytes / 1024d / 1024d).ToString("0.0", CultureInfo.InvariantCulture))
+                .Append(" MB, same geometry");
+        else if (string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal))
             note.Append(": ").Append(string.Join(", ", (packet.Assignments ?? [])
                 .Select(entry => $"{entry.Part} as {entry.Surface}")));
         else if (before.Profile is not null && after.Profile is not null)
@@ -1025,11 +1163,13 @@ public sealed class ModelGenerationService(
         var asset = await db.Assets.SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
         if (asset is null) return;
         var preparing = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal);
+            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal);
         var opening = packet.Work switch
         {
             PrepareWork => "Prepared for runtime from ",
             SurfaceWork => "Resurfaced from ",
+            CompressWork => "Textures re-encoded from ",
             _ => "Generated from ",
         };
         var lineage = new StringBuilder()
@@ -1100,7 +1240,8 @@ public sealed class ModelGenerationService(
         // views, and both are judged the same way.
         if (packet is null
             || !(string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
-                || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)))
+                || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
+                || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)))
             return RepositoryResult<ModelPreparationEvidence>.Invalid(
                 "This job did not produce a before-and-after to compare.");
 

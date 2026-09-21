@@ -252,6 +252,16 @@ public sealed record CreateModelGenerationRequest(
 /// could run is still uncommissioned until the artist says otherwise.
 /// </summary>
 /// <summary>
+/// Re-encode a model's textures, leaving everything else about it alone.
+///
+/// A finished asset is mostly texture, and almost all of it arrives
+/// uncompressed. Nothing about the mesh, the UVs or the rig is touched.
+/// </summary>
+public sealed record CreateModelCompressionRequest(
+    Guid SourceAssetId, string? Name,
+    int? ColourSize, int? DataSize, int? Quality, string? Format);
+
+/// <summary>
 /// What a model is currently made of, part by part.
 ///
 /// A painter answers in one material, so a whole model arrives as one surface
