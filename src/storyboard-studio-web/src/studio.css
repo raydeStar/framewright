@@ -926,6 +926,14 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
    be choosing which side counted. */
 .model-comparison-views { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .model-comparison-views img { width: 100%; aspect-ratio: 1; object-fit: contain; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+/* What survived the reduction. A lost row is marked, because fewer triangles
+   is the point and fewer maps is a loss. */
+.model-integrity { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
+.model-integrity caption { text-align: left; padding-bottom: 4px; color: var(--muted); font-weight: 650; }
+.model-integrity th, .model-integrity td { padding: 3px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+.model-integrity thead th { color: var(--quiet); font-weight: 650; }
+.model-integrity tbody th { text-align: left; color: var(--muted); font-weight: 500; }
+.model-integrity tr[data-lost="true"] td:last-child { color: #e6a15f; font-weight: 650; }
 .jobs-queue { position: absolute; z-index: 25; right: 16px; bottom: 13px; display: grid; justify-items: end; gap: 7px; }
 .jobs-queue .jobs-dock { position: static; }
 .jobs-queue-panel { width: 360px; max-width: 86vw; border: 1px solid var(--line-strong); border-radius: 8px; background: rgba(28,33,30,.97); backdrop-filter: blur(12px); box-shadow: 0 14px 34px rgba(0,0,0,.36); padding: 9px 10px; display: grid; gap: 7px; }

@@ -339,7 +339,12 @@ public sealed record ModelProfileSummary(
     double[] BoundsMin, double[] BoundsMax, double[] Dimensions,
     ModelSupportLimits Limits,
     ModelRigSummary? Rig = null,
-    ModelClipSummary[]? Clips = null);
+    ModelClipSummary[]? Clips = null,
+    // What a derivative is checked against for UV integrity. A mesh with no
+    // UVs cannot show the texture it already has, and until this was reported
+    // a derivative that had lost its map looked exactly like one that kept it.
+    int[]? UvChannels = null,
+    int PrimitivesWithoutUvs = 0);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AssetKind

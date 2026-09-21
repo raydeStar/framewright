@@ -273,7 +273,9 @@ public sealed class AssetStore
             new ModelSupportLimits(limits.MaxBytes, limits.MaxVertices, limits.MaxTriangles, limits.MaxEmbeddedTextureBytes,
                 limits.MaxNodes, limits.MaxMaterials, limits.MaxImages, limits.SupportedRequiredExtensions),
             Describe(profile.Rig),
-            [.. profile.Clips.Select(Describe)]));
+            [.. profile.Clips.Select(Describe)],
+            profile.UvChannels,
+            profile.PrimitivesWithoutUvs));
     }
 
     /// <summary>One clip as the artist reads it, without its keyframes.</summary>

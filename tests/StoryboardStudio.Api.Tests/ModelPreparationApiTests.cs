@@ -531,6 +531,136 @@ public sealed class ModelPreparationApiTests
         Assert.Null(none.Derivative);
     }
 
+    [Fact]
+    public async Task ANoteAnchoredToTheOldSurfaceGoesStaleRatherThanMovingToTheNewOne()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "placed.glb", ModelFixtures.DenseProp());
+
+        // The reviewed model is placed in a scene and annotated on its surface.
+        var scene = await client.PostAsJsonAsync("/api/scenes", new { name = "Anchor test" });
+        scene.EnsureSuccessStatusCode();
+        var made = await scene.Content.ReadFromJsonAsync<SceneSummary>() ?? throw new InvalidOperationException();
+        var instanceId = Guid.NewGuid();
+        var camera = new SceneCameraSummary(0.6, 0.3, 4, [0, 0.5, 0], 45);
+        var saved = await client.PutAsJsonAsync($"/api/scenes/{made.Id}", new
+        {
+            expectedVersion = made.Version,
+            name = made.Name,
+            camera,
+            environment = new SceneEnvironmentSummary(1, 0.5, 0.6, 0.3),
+            instances = new[]
+            {
+                new
+                {
+                    id = instanceId, assetId = source.Id, name = "The prop",
+                    position = new[] { 0.0, 0.0, 0.0 },
+                    rotation = new[] { 0.0, 0.0, 0.0 },
+                    scale = new[] { 1.0, 1.0, 1.0 },
+                },
+            },
+        });
+        saved.EnsureSuccessStatusCode();
+
+        var noted = await client.PostAsJsonAsync($"/api/scenes/{made.Id}/annotations", new
+        {
+            instanceId,
+            anchor = new[] { 0.4, 0.2, 0.1 },
+            camera,
+            body = "This ridge reads too soft from the front.",
+        });
+        noted.EnsureSuccessStatusCode();
+
+        var before = await client.GetFromJsonAsync<SceneAnnotationSummary[]>($"/api/scenes/{made.Id}/annotations")
+            ?? throw new InvalidOperationException();
+        Assert.False(before.Single().Stale);
+
+        // Now prepare a derivative and pin the same instance to it.
+        var job = await QueueAsync(client, source.Id, "Placed (runtime)");
+        var finished = await RunAsync(factory, job.Id);
+        var current = await client.GetFromJsonAsync<SceneSummary>($"/api/scenes/{made.Id}")
+            ?? throw new InvalidOperationException();
+        var repinned = await client.PutAsJsonAsync($"/api/scenes/{made.Id}", new
+        {
+            expectedVersion = current.Version,
+            name = current.Name,
+            camera,
+            environment = new SceneEnvironmentSummary(1, 0.5, 0.6, 0.3),
+            instances = new[]
+            {
+                new
+                {
+                    id = instanceId, assetId = finished.OutputAssetId, name = "The prop",
+                    position = new[] { 0.0, 0.0, 0.0 },
+                    rotation = new[] { 0.0, 0.0, 0.0 },
+                    scale = new[] { 1.0, 1.0, 1.0 },
+                },
+            },
+        });
+        repinned.EnsureSuccessStatusCode();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var derivative = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.True(derivative.PreparationTopologyChanged);
+
+        // The anchor was measured against geometry that no longer exists at
+        // that point, so the note is reported stale rather than quietly moved
+        // to a spot on the new surface that means something else.
+        var after = await client.GetFromJsonAsync<SceneAnnotationSummary[]>($"/api/scenes/{made.Id}/annotations")
+            ?? throw new InvalidOperationException();
+        var note = after.Single();
+        Assert.True(note.Stale);
+        Assert.Equal(source.Id, note.AssetId);
+        Assert.Contains("ridge reads too soft", note.Body, StringComparison.Ordinal);
+
+        // And nothing about the source's standing came with it. The derivative
+        // is in the scene because a person put it there, not because anything
+        // decided it had inherited the old surface's approval.
+        Assert.Null(derivative.PreparationAcceptedAt);
+    }
+
+    [Fact]
+    public async Task WhatSurvivedTheReductionIsMeasuredFromTheStoredBytes()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "integrity.glb", ModelFixtures.DenseProp());
+        var job = await QueueAsync(client, source.Id, "Integrity (runtime)");
+        var finished = await RunAsync(factory, job.Id);
+
+        var before = await client.GetFromJsonAsync<ModelProfileSummary>(
+            $"/api/assets/{source.Id}/model-profile") ?? throw new InvalidOperationException();
+        var after = await client.GetFromJsonAsync<ModelProfileSummary>(
+            $"/api/assets/{finished.OutputAssetId}/model-profile") ?? throw new InvalidOperationException();
+
+        // Fewer triangles is what was asked for.
+        Assert.True(after.TriangleCount < before.TriangleCount);
+
+        // The UV map is not, and until this was reported a derivative that had
+        // lost its map looked exactly like one that kept it.
+        Assert.NotNull(before.UvChannels);
+        Assert.NotNull(after.UvChannels);
+        Assert.Equal([0], before.UvChannels!);
+        Assert.Equal([0], after.UvChannels!);
+        Assert.Equal(0, before.PrimitivesWithoutUvs);
+        Assert.Equal(0, after.PrimitivesWithoutUvs);
+        Assert.Equal(before.Materials.Length, after.Materials.Length);
+
+        // And a model that genuinely has no map says so. Without a mesh like
+        // this in the comparison, a reader that simply claimed every primitive
+        // carried channel 0 would be indistinguishable from one that looked.
+        var bare = await ImportModelAsync(client, "no-uvs.glb", ModelFixtures.AsymmetricBlock());
+        var bareProfile = await client.GetFromJsonAsync<ModelProfileSummary>(
+            $"/api/assets/{bare.Id}/model-profile") ?? throw new InvalidOperationException();
+        Assert.Empty(bareProfile.UvChannels!);
+        Assert.Equal(bareProfile.PrimitiveCount, bareProfile.PrimitivesWithoutUvs);
+        Assert.True(bareProfile.PrimitivesWithoutUvs > 0);
+    }
+
     private static async Task RetryAsync(StudioApiFactory factory, Guid jobId)
     {
         using var scope = factory.Services.CreateScope();

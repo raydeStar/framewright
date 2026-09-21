@@ -39,6 +39,9 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
   const [job, setJob] = useState<JobSummary>()
   const [evidence, setEvidence] = useState<ModelPreparationEvidence>()
   const [pass, setPass] = useState<'beauty' | 'matcap'>('beauty')
+  // The source's own numbers, so a loss is a comparison rather than a
+  // figure the artist has to remember from the other revision.
+  const [origin, setOrigin] = useState<ModelProfileSummary>()
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -60,8 +63,18 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
   useEffect(() => {
     let live = true
     setEvidence(undefined); setJob(undefined); setNote('')
+    setOrigin(undefined)
     studioApi.assetPreparationEvidence(asset.id)
-      .then(found => { if (live) setEvidence(found) })
+      .then(async found => {
+        if (!live) return
+        setEvidence(found)
+        // Measured from the source's own stored bytes, not from what the
+        // compiler said it did, so the comparison is of two real files.
+        if (found.sourceAssetId && found.sourceAssetId !== asset.id) {
+          try { const before = await studioApi.modelProfile(found.sourceAssetId); if (live) setOrigin(before) }
+          catch { if (live) setOrigin(undefined) }
+        }
+      })
       .catch(() => { if (live) setEvidence(undefined) })
     return () => { live = false }
   }, [asset.id])
@@ -112,6 +125,13 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
   }
 
   const running = job !== undefined && job.state !== 'Completed' && job.state !== 'Failed'
+  // Fewer triangles is what was asked for. Fewer maps, materials or
+  // textures is a loss nobody asked for, and is called one.
+  const lostUvs = origin !== undefined
+    && ((origin.uvChannels?.length ?? 0) > (profile.uvChannels?.length ?? 0)
+      || profile.primitivesWithoutUvs > origin.primitivesWithoutUvs)
+  const lostMaterials = origin !== undefined && profile.materials.length < origin.materials.length
+  const lostTextures = origin !== undefined && profile.imageCount < origin.imageCount
   const views = (of: 'source' | 'derivative') =>
     (of === 'source' ? evidence?.source : evidence?.derivative)?.views
       .filter(view => view.pass === pass) ?? []
@@ -173,6 +193,33 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
         </div>
       </figure>)}
 
+      {origin && <table className="model-integrity" data-testid="model-integrity">
+        <caption>What survived the reduction</caption>
+        <thead><tr><th scope="col"></th><th scope="col">Reviewed</th><th scope="col">Derivative</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Triangles</th>
+            <td>{origin.triangleCount.toLocaleString()}</td>
+            <td>{profile.triangleCount.toLocaleString()}</td></tr>
+          <tr><th scope="row">Vertices</th>
+            <td>{origin.vertexCount.toLocaleString()}</td>
+            <td>{profile.vertexCount.toLocaleString()}</td></tr>
+          <tr data-lost={lostUvs ? 'true' : 'false'}><th scope="row">UV maps</th>
+            <td>{describeUvs(origin)}</td>
+            <td>{describeUvs(profile)}</td></tr>
+          <tr data-lost={lostMaterials ? 'true' : 'false'}><th scope="row">Materials</th>
+            <td>{origin.materials.length}</td>
+            <td>{profile.materials.length}</td></tr>
+          <tr data-lost={lostTextures ? 'true' : 'false'}><th scope="row">Textures</th>
+            <td>{origin.imageCount}</td>
+            <td>{profile.imageCount}</td></tr>
+        </tbody>
+      </table>}
+      {(lostUvs || lostMaterials || lostTextures) && <p className="model-note" data-testid="model-integrity-loss">
+        <TriangleAlert size={14} /> The derivative carries less than its source did. Fewer triangles
+        is the point; fewer maps, materials or textures is a loss, and the views above are where
+        you can see what it cost.
+      </p>}
+
       <label className="model-size">
         <span>What you saw</span>
         <textarea rows={2} value={note} data-testid="model-preparation-note"
@@ -215,4 +262,12 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
 /** Half, rounded to something a person would have typed, and never below the floor. */
 function suggested(triangles: number) {
   return Math.max(1000, Math.round(triangles / 2 / 500) * 500)
+}
+
+/** UV maps in the terms a loss is read in: how many channels, or none at all. */
+function describeUvs(profile: ModelProfileSummary) {
+  const channels = profile.uvChannels?.length ?? 0
+  if (channels === 0) return 'None'
+  const gaps = profile.primitivesWithoutUvs
+  return gaps > 0 ? `${channels} · ${gaps} without` : String(channels)
 }

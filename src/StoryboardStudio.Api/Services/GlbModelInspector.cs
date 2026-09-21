@@ -49,6 +49,16 @@ public sealed record GlbModelProfile(
     int VertexCount,
     int TriangleCount,
     int ImageCount,
+    /// <summary>
+    /// Which texture coordinate channels the geometry actually carries, as
+    /// TEXCOORD_n numbers, and how many primitives carry none.
+    ///
+    /// A mesh with no UVs cannot be painted and cannot show the texture it
+    /// already has. Nothing here reported that, so a derivative that had lost
+    /// its map looked identical to one that kept it until somebody rendered it.
+    /// </summary>
+    int[] UvChannels,
+    int PrimitivesWithoutUvs,
     long EmbeddedTextureBytes,
     long BinaryChunkBytes,
     string[] DeclaredExtensions,
@@ -184,6 +194,8 @@ public static class GlbModelInspector
         long vertexCount = 0;
         long triangleCount = 0;
         var primitiveCount = 0;
+        var uvChannels = new SortedSet<int>();
+        var primitivesWithoutUvs = 0;
         foreach (var mesh in meshes)
         {
             foreach (var primitive in Array(mesh, "primitives"))
@@ -199,6 +211,16 @@ public static class GlbModelInspector
                 var vertices = Int(accessors[position], "count", 0);
                 if (vertices <= 0) return Failure("This model has a mesh primitive with no vertices.");
                 vertexCount += vertices;
+
+                // Counted per primitive rather than per mesh: one primitive
+                // losing its map is a hole in the paint, not a rounding error.
+                var carriedUvs = 0;
+                for (var channel = 0; attributes.TryGetProperty($"TEXCOORD_{channel}", out _); channel++)
+                {
+                    uvChannels.Add(channel);
+                    carriedUvs++;
+                }
+                if (carriedUvs == 0) primitivesWithoutUvs++;
 
                 var indexed = primitive.TryGetProperty("indices", out var indicesIndex) && indicesIndex.TryGetInt32(out var indices)
                     && indices >= 0 && indices < accessors.Length
@@ -236,6 +258,8 @@ public static class GlbModelInspector
             VertexCount: (int)vertexCount,
             TriangleCount: (int)triangleCount,
             ImageCount: images.Length,
+            UvChannels: [.. uvChannels],
+            PrimitivesWithoutUvs: primitivesWithoutUvs,
             EmbeddedTextureBytes: embeddedTextureBytes,
             BinaryChunkBytes: binaryChunkBytes,
             DeclaredExtensions: StringArray(root, "extensionsUsed"),

@@ -255,5 +255,8 @@ export interface ModelProfileSummary {
   limits: ModelSupportLimits
   rig?: ModelRigSummary | null
   clips?: ModelClipSummary[] | null
+  /** Which TEXCOORD_n channels the geometry carries, and how many primitives carry none. */
+  uvChannels?: number[] | null
+  primitivesWithoutUvs: number
 }
 export interface AgentActivityEntry { id: number; tool: string; state: 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'; message: string; at: string }
