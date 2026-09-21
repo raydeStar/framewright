@@ -66,7 +66,13 @@ public sealed class ModelGenerationApiTests
             Checkout: "C:/checkout", Blender: "C:/blender.exe",
             Stages: [Stage("geometry"), Stage("stage-mesh"), Stage("remesh"),
                      Stage("uv-unwrap"), Stage("texture"), Stage("glass"),
-                     Stage("browser-payload")]);
+                     Stage("browser-payload"), Stage("paint-head"), Stage("compress-textures")]);
+
+        /// <summary>A compiler from before heads could be painted on their own.</summary>
+        public static CompilerCapabilities WithoutHero => Ready with
+        {
+            Stages = [.. Ready.Stages.Where(stage => stage.Stage is not ("paint-head" or "compress-textures"))],
+        };
 
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
@@ -490,6 +496,111 @@ public sealed class ModelGenerationApiTests
         Assert.Equal(6, steps.Length);
         Assert.All(steps, step => Assert.False(string.IsNullOrWhiteSpace(
             step.GetProperty("receiptSha256").GetString())));
+    }
+
+    [Fact]
+    public async Task AHeroIsRebuiltLargerPaintedLargerAndHasItsHeadPaintedTwice()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "hero-reference.png");
+
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/generation/readiness")
+            ?? throw new InvalidOperationException();
+        // Offered in the artist's terms, and only where the compiler can do it.
+        Assert.Equal(["set", "hero"],
+            readiness.RootElement.GetProperty("details").EnumerateArray()
+                .Select(choice => choice.GetProperty("detail").GetString()));
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Hero", size = "head", detail = "hero" });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.Equal(["geometry", "stage-mesh", "remesh", "uv-unwrap", "texture", "paint-head",
+                      "browser-payload", "compress-textures"],
+            compiler.Calls.Select(call => call.Stage));
+        // The head is painted on the body's own paint, and what is compressed
+        // is exactly what would otherwise have been delivered.
+        Assert.Equal("step-5-texture.glb", compiler.Calls[5].Source);
+        Assert.Equal("step-6-paint-head.glb", compiler.Calls[6].Source);
+        Assert.Equal("step-7-browser-payload.glb", compiler.Calls[7].Source);
+
+        // Every number a hero stands for reaches the stage that applies it.
+        Assert.Equal("384", compiler.Options["geometry"]["octree-resolution"]);
+        Assert.Equal("80000", compiler.Options["remesh"]["triangle-budget"]);
+        Assert.Equal("72000", compiler.Options["remesh"]["target-triangles"]);
+        Assert.Equal("640", compiler.Options["remesh"]["voxel-resolution"]);
+        Assert.Equal("2", compiler.Options["remesh"]["smooth-iterations"]);
+        Assert.Equal("4096", compiler.Options["texture"]["atlas"]);
+        Assert.Equal("4096", compiler.Options["paint-head"]["atlas"]);
+        Assert.Equal("0.78", compiler.Options["paint-head"]["head-from"]);
+        // The head pass crops the same picture itself; nobody hands it a crop.
+        Assert.Equal(compiler.Options["texture"]["reference"], compiler.Options["paint-head"]["reference"]);
+        Assert.Equal("4096", compiler.Options["compress-textures"]["colour-size"]);
+        Assert.Equal("2048", compiler.Options["compress-textures"]["data-size"]);
+        Assert.Equal("92", compiler.Options["compress-textures"]["quality"]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == finished.Id);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.Equal("hero", result.RootElement.GetProperty("detail").GetString());
+        // The delivered model says what it was made as.
+        var delivered = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.Contains("Made as a hero", delivered.Notes, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SetDressingIsTheDefaultAndStillPaintsLossless()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "set-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Set", size = "knee" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.DoesNotContain("paint-head", compiler.Calls.Select(call => call.Stage));
+        Assert.DoesNotContain("compress-textures", compiler.Calls.Select(call => call.Stage));
+        // A 2048 sheet, but through the runner that writes it lossless: the
+        // painter's own JPEG was the first of three lossy passes.
+        Assert.Equal("2048", compiler.Options["texture"]["atlas"]);
+        Assert.Equal("256", compiler.Options["geometry"]["octree-resolution"]);
+    }
+
+    [Fact]
+    public async Task AHeroIsRefusedWhereTheCompilerCannotPaintAHeadOnItsOwn()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithoutHero };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "no-hero-reference.png");
+
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/generation/readiness")
+            ?? throw new InvalidOperationException();
+        Assert.True(readiness.RootElement.GetProperty("canRun").GetBoolean());
+        Assert.Equal(["set"],
+            readiness.RootElement.GetProperty("details").EnumerateArray()
+                .Select(choice => choice.GetProperty("detail").GetString()));
+
+        var refused = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Hero", size = "head", detail = "hero" });
+        // Refused before anything is queued, by name, rather than an hour in.
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("paint-head", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+
+        var nonsense = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Hero", size = "head", detail = "cinematic" });
+        Assert.Equal(HttpStatusCode.BadRequest, nonsense.StatusCode);
     }
 
     [Fact]

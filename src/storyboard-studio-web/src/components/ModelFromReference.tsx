@@ -38,6 +38,9 @@ export default function ModelFromReference({ asset, onQueued }: {
   const [readiness, setReadiness] = useState<ModelGenerationReadiness>()
   const [size, setSize] = useState('')
   const [glass, setGlass] = useState('')
+  // Set dressing unless asked: most generated things are seen from a distance,
+  // and a hero costs several minutes more of GPU.
+  const [detail, setDetail] = useState('set')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -53,7 +56,7 @@ export default function ModelFromReference({ asset, onQueued }: {
     setBusy(true); setError(undefined)
     try {
       const job = await studioApi.generateModel(
-        asset.id, asset.displayName, size, glass === '' ? undefined : glass)
+        asset.id, asset.displayName, size, glass === '' ? undefined : glass, detail)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -79,6 +82,18 @@ export default function ModelFromReference({ asset, onQueued }: {
             </select>
             <span className="model-note">
               Standing next to it, where would it come up to?
+            </span>
+          </label>}
+          {readiness.canRun && readiness.details && readiness.details.length > 1 && <label className="model-size">
+            <span>How close will the camera get?</span>
+            <select value={detail} onChange={event => setDetail(event.target.value)}
+              data-testid="model-detail">
+              {readiness.details.map(choice => <option key={choice.detail} value={choice.detail}>
+                {choice.description}
+              </option>)}
+            </select>
+            <span className="model-note">
+              {readiness.details.find(choice => choice.detail === detail)?.cost}
             </span>
           </label>}
           {readiness.canRun && readiness.colours && <label className="model-size">

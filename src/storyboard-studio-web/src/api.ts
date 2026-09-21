@@ -122,12 +122,15 @@ export const studioApi = {
     return response.json() as Promise<AssetSummary>
   },
   modelGenerationReadiness: () => request<ModelGenerationReadiness>('/api/models/generation/readiness'),
-  generateModel: (sourceAssetId: string, name: string, size: string, glassColour?: string) =>
-    request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, size, glassColour }) }),
+  generateModel: (sourceAssetId: string, name: string, size: string, glassColour?: string, detail?: string) =>
+    request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, size, glassColour, detail }) }),
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
   modelPreparationReadiness: () => request<ModelGenerationReadiness>('/api/models/preparation/readiness'),
   prepareModel: (sourceAssetId: string, name: string, triangleBudget: number) =>
     request<JobSummary>('/api/models/preparation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, triangleBudget }) }),
+  modelCullReadiness: () => request<ModelGenerationReadiness>('/api/models/cull/readiness'),
+  cullModel: (sourceAssetId: string, name: string, ignoreTransparency: boolean) =>
+    request<JobSummary>('/api/models/cull', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, ignoreTransparency }) }),
   preparationEvidence: (jobId: string) => request<ModelPreparationEvidence>(`/api/jobs/${jobId}/preparation-evidence`),
   assetPreparationEvidence: (assetId: string) => request<ModelPreparationEvidence>(`/api/assets/${assetId}/preparation-evidence`),
   setPreparationAcceptance: (assetId: string, accepted: boolean, note: string) =>

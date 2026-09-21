@@ -43,12 +43,56 @@ public sealed class ModelGenerationService(
     public const string BakeDetailStage = "bake-detail";
     public const string AssignSurfacesStage = "assign-surfaces";
     public const string CompressTexturesStage = "compress-textures";
+    public const string CullUnseenStage = "cull-unseen";
+    public const string PaintHeadStage = "paint-head";
 
     /// <summary>Which of the two things a frozen packet is asking for.</summary>
     public const string GenerateWork = "generate";
     public const string PrepareWork = "prepare";
     public const string SurfaceWork = "surface";
     public const string CompressWork = "compress";
+    public const string CullWork = "cull";
+
+    /// <summary>
+    /// How close the camera will get. Everything that follows from it is a
+    /// number the compiler is told; this is the one question the artist is
+    /// asked, in the terms they would ask it.
+    /// </summary>
+    public const string SetDetail = "set";
+    public const string HeroDetail = "hero";
+
+    /// <summary>
+    /// What a hero is made of, measured on a ninja.
+    ///
+    /// Triangles: at 20,000 a hand is two hundred triangles and its facets are
+    /// the silhouette; 80,000 is where a character stops being a polygon
+    /// count. The remesh grid goes finer with it (640 rather than 420, so
+    /// fingers survive the rebuild) and smooths less (two passes rather than
+    /// five, which was eroding exactly the small features the budget now
+    /// affords). The generator's octree goes to 384 so there is detail for
+    /// the grid to keep. The sheet doubles to 4096: twelve views at 768, each
+    /// enhanced fourfold and baked at 2048, carry more than 2048 can hold. And
+    /// the head is painted a second time on its own, cropped to match, because
+    /// the face is what a close-up is of.
+    ///
+    /// Delivered as JPEG at 92 on a 4096 sheet with 2048 data maps: a lossless
+    /// hero is sixty megabytes, and the whole route's masters stay on disk.
+    /// </summary>
+    private const string HeroOctreeResolution = "384";
+    private const string HeroTriangleBudget = "80000";
+    private const string HeroTargetTriangles = "72000";
+    private const string HeroVoxelResolution = "640";
+    private const string HeroSmoothIterations = "2";
+    private const string HeroAtlas = "4096";
+    private const string SetAtlas = "2048";
+    private const string HeadFrom = "0.78";
+    private const string HeadFeather = "0.03";
+    private const int HeroColourSize = 4096;
+    private const int HeroDataSize = 2048;
+    private const int HeroTextureQuality = 92;
+
+    /// <summary>The stages a hero needs beyond the ordinary route.</summary>
+    private static readonly string[] HeroExtraStages = [PaintHeadStage, CompressTexturesStage];
 
     /// <summary>
     /// What a reference image goes through to become something a browser can
@@ -139,6 +183,28 @@ public sealed class ModelGenerationService(
         new(ReviewViewsStage),
     ];
 
+    /// <summary>
+    /// What a model goes through to lose the faces nothing can see.
+    ///
+    /// The cull writes a model directly, the same way the re-encoder does, so
+    /// there is no export step on the end. That is deliberate rather than
+    /// convenient: this stage only ever deletes faces, and a round trip
+    /// through an exporter is exactly how a mesh acquires vertex data it did
+    /// not arrive with. The fixed views are rendered from the source and from
+    /// the result, because "you cannot see the difference" is the claim being
+    /// made and somebody has to be able to check it.
+    /// </summary>
+    private static readonly RouteStepPlan[] CullPlan =
+    [
+        new(ReviewViewsStage, ReadsOriginal: true),
+        new(CullUnseenStage, ReadsOriginal: true),
+        new(ReviewViewsStage),
+    ];
+
+    /// <summary>Every stage the cull needs, for the capability check.</summary>
+    public static readonly string[] CullRoute =
+        [.. CullPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
+
     /// <summary>Every stage re-encoding needs, for the capability check.</summary>
     public static readonly string[] CompressionRoute =
         [.. CompressionPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
@@ -160,10 +226,23 @@ public sealed class ModelGenerationService(
     /// anyway would have to guess which colour was a window -- turning an
     /// ordinary painted surface see-through.
     /// </summary>
-    private static string[] RouteFor(string? glassColour) =>
-        string.IsNullOrWhiteSpace(glassColour)
-            ? ReferenceToModelRoute
-            : [.. ReferenceToModelRoute[..^1], GlassStage, ReferenceToModelRoute[^1]];
+    private static string[] RouteFor(string? glassColour, string detail = SetDetail)
+    {
+        var hero = string.Equals(detail, HeroDetail, StringComparison.Ordinal);
+        var route = new List<string>
+        {
+            GeometryStage, StageMeshStage, RemeshStage, UvUnwrapStage, TextureStage,
+        };
+        // The head is painted again straight after the body, on the body's
+        // own paint, before anything else touches the file.
+        if (hero) route.Add(PaintHeadStage);
+        if (!string.IsNullOrWhiteSpace(glassColour)) route.Add(GlassStage);
+        route.Add(BrowserPayloadStage);
+        // Re-encoded last, from the exported payload, so what is compressed is
+        // exactly what would otherwise have been delivered.
+        if (hero) route.Add(CompressTexturesStage);
+        return [.. route];
+    }
 
     /// <summary>What each step is doing, in words an artist reading a queue would use.</summary>
     private static readonly Dictionary<string, string> StagePhase = new(StringComparer.Ordinal)
@@ -181,6 +260,8 @@ public sealed class ModelGenerationService(
         [BakeDetailStage] = "Baking the detail its own shape already implies",
         [AssignSurfacesStage] = "Giving each part the surface it should be",
         [CompressTexturesStage] = "Re-encoding its textures",
+        [CullUnseenStage] = "Looking from every side, and dropping what nothing sees",
+        [PaintHeadStage] = "Painting the head again, on its own, up close",
     };
 
     /// <summary>
@@ -199,6 +280,23 @@ public sealed class ModelGenerationService(
     /// </summary>
     private const string BrowserOctreeResolution = "256";
 
+    /// <summary>
+    /// What the painter is asked for, rather than what it defaults to.
+    ///
+    /// The painter's own defaults are six views at 512, and they are what makes
+    /// a generated character fall apart the moment somebody pans in. Measured
+    /// on a ninja: at six views the hands carry dark smears where the diffusion
+    /// never saw between the fingers and guessed, and 512 is the resolution
+    /// every one of those guesses is made at before being upscaled into a 2048
+    /// atlas. Twelve views at 768 costs about a minute more on this hardware
+    /// and removes most of both.
+    ///
+    /// These are the painter's ceiling, not a preference: it accepts 6 to 12
+    /// views and either 512 or 768, and asking for more is refused.
+    /// </summary>
+    private const string PaintViews = "12";
+    private const string PaintResolution = "768";
+
     /// <summary>The V1 cohort contract's ceiling, which the library also enforces.</summary>
     private const string RuntimeTriangleBudget = "20000";
 
@@ -210,7 +308,14 @@ public sealed class ModelGenerationService(
     // 5 packet named no work at all, and defaulting one would be guessing at
     // an answer the artist gave; there are only ever a handful in flight, and
     // asking again costs a click.
-    private const int FrozenPacketVersion = 7;
+    // Version 8 carries what the cull is allowed to remove. A version 7 packet
+    // could never be asking for one, so nothing is lost by refusing it -- and
+    // there are only ever a handful in flight.
+    // Version 9 carries how close the camera will get. A version 8 packet
+    // could only have been asking for set dressing, and defaulting it would
+    // be right -- but a packet that says nothing and a packet that says "set"
+    // should not be the same bytes, so it is asked for again.
+    private const int FrozenPacketVersion = 9;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>
@@ -224,7 +329,10 @@ public sealed class ModelGenerationService(
         string Size, double SizeAdjust, string? GlassColour,
         string Work = GenerateWork, int TriangleBudget = 0,
         ModelSurfaceAssignment[]? Assignments = null, int BakeResolution = 0, double EdgeWear = 0,
-        int ColourSize = 0, int DataSize = 0, int Quality = 0, string? TextureFormat = null);
+        double Relief = 0,
+        int ColourSize = 0, int DataSize = 0, int Quality = 0, string? TextureFormat = null,
+        int Directions = 0, double Most = 0, double LargestPart = 0,
+        bool IgnoreTransparency = false, string Detail = SetDetail);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -260,7 +368,7 @@ public sealed class ModelGenerationService(
 
     /// <summary>Can this workstation do the work, and is it allowed to?</summary>
     public Task<ModelGenerationReadiness> PreflightAsync(CancellationToken cancellationToken) =>
-        PreflightAsync(ReferenceToModelRoute, "Model generation", cancellationToken);
+        PreflightAsync(ReferenceToModelRoute, "Model generation", cancellationToken, offerDetails: true);
 
     /// <summary>
     /// The same question for the preparation route, which shares this
@@ -271,6 +379,10 @@ public sealed class ModelGenerationService(
     public Task<ModelGenerationReadiness> PreparationPreflightAsync(CancellationToken cancellationToken) =>
         PreflightAsync(PreparationRoute, "Preparing a derivative", cancellationToken);
 
+    /// <summary>The same question again, for the route that drops unseen faces.</summary>
+    public Task<ModelGenerationReadiness> CullPreflightAsync(CancellationToken cancellationToken) =>
+        PreflightAsync(CullRoute, "Dropping unseen faces", cancellationToken);
+
     /// <summary>The same question again, for the route that re-encodes textures.</summary>
     public Task<ModelGenerationReadiness> CompressionPreflightAsync(CancellationToken cancellationToken) =>
         PreflightAsync(CompressionRoute, "Re-encoding textures", cancellationToken);
@@ -280,7 +392,7 @@ public sealed class ModelGenerationService(
         PreflightAsync(SurfacingRoute, "Changing a model's surfaces", cancellationToken);
 
     private async Task<ModelGenerationReadiness> PreflightAsync(
-        string[] route, string work, CancellationToken cancellationToken)
+        string[] route, string work, CancellationToken cancellationToken, bool offerDetails = false)
     {
         var capabilities = await compiler.DescribeAsync(cancellationToken);
         // Every step, not just the last one. A route whose first stage cannot
@@ -314,7 +426,27 @@ public sealed class ModelGenerationService(
             Colours: capabilities.Stages
                 .FirstOrDefault(candidate => candidate.Stage == GlassStage)?.Colours
                 ?.Select(colour => new ModelColourChoice(colour.Colour, colour.Description))
-                .ToArray());
+                .ToArray(),
+            Details: offerDetails ? DetailChoices(capabilities) : null);
+    }
+
+    /// <summary>
+    /// Set dressing is always offered. A hero needs the compiler to paint a
+    /// head on its own and to re-encode, and is offered only where it can:
+    /// offering it and then failing an hour in would be the worse answer.
+    /// </summary>
+    private static ModelDetailChoice[] DetailChoices(CompilerCapabilities capabilities)
+    {
+        var choices = new List<ModelDetailChoice>
+        {
+            new(SetDetail, "Seen from a distance: set dressing, background props",
+                "20,000 triangles, a 2048 sheet"),
+        };
+        if (HeroExtraStages.All(capabilities.CanRun))
+            choices.Add(new(HeroDetail, "Shot up close: a character, a held prop",
+                "80,000 triangles, a 4096 sheet, the head painted a second time on its own; "
+                + "several minutes longer"));
+        return [.. choices];
     }
 
     // The route is named in the artist's terms, because the two share this
@@ -387,15 +519,32 @@ public sealed class ModelGenerationService(
                 $"The compiler does not offer {glassColour} as a glass colour. "
                 + $"It offers: {string.Join(", ", offered.Select(colour => colour.Colour))}.");
 
+        // How close the camera gets. Unnamed is set dressing, which is what
+        // most generated things are; a hero is asked for, and only where the
+        // compiler can actually do the extra work it stands for.
+        var detail = string.IsNullOrWhiteSpace(request.Detail) ? SetDetail : request.Detail.Trim().ToLowerInvariant();
+        if (detail is not (SetDetail or HeroDetail))
+            return RepositoryResult<JobSummary>.Invalid(
+                $"Detail is \"{SetDetail}\" or \"{HeroDetail}\", not \"{request.Detail}\".");
+        var hero = detail == HeroDetail;
+        if (hero && !(readiness.Details?.Any(choice => choice.Detail == HeroDetail) ?? false))
+            return RepositoryResult<JobSummary>.Invalid(
+                "This compiler cannot make a hero yet: it needs the paint-head and compress-textures stages. "
+                + "Generate it as set dressing, or update the compiler.");
+
         var now = timeProvider.GetUtcNow();
         var packet = new FrozenModelRequest(
             FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
             source.RevisionNumber ?? 1,
-            [.. RouteFor(glassColour).Select(stage => new RouteStep(
+            [.. RouteFor(glassColour, detail).Select(stage => new RouteStep(
                 stage,
                 readiness.Suffixes?.GetValueOrDefault(stage) ?? ".glb"))],
             readiness.CompilerVersion, now, size, request.SizeAdjust ?? 1.0, glassColour,
-            GenerateWork);
+            GenerateWork, Detail: detail,
+            // The hero's delivery encoding, frozen with the rest: a lossless
+            // 4096 hero is sixty megabytes, and the masters stay on disk.
+            ColourSize: hero ? HeroColourSize : 0, DataSize: hero ? HeroDataSize : 0,
+            Quality: hero ? HeroTextureQuality : 0, TextureFormat: hero ? "jpeg" : null);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -410,7 +559,7 @@ public sealed class ModelGenerationService(
             Progress = 0,
             Phase = "Frozen reference queued",
             Backend = "Reference Asset Compiler",
-            AdapterId = string.Join(" then ", ReferenceToModelRoute),
+            AdapterId = string.Join(" then ", packet.Route.Select(step => step.Stage)),
             RequestJson = requestJson,
             // The same frozen request queued twice is the same work, and the
             // job identity says so rather than two stages racing each other.
@@ -602,6 +751,93 @@ public sealed class ModelGenerationService(
             ? [.. found.EnumerateArray().Select(value => value.GetString() ?? "")] : [];
 
     /// <summary>
+    /// Queues a cull of the faces nothing outside a model can see.
+    ///
+    /// How much this finds is a fact about the subject, not about how it was
+    /// made. Measured here: a hollow lantern loses 47% of its faces, a rigged
+    /// character with a body modelled under its clothing 35%, and a generated
+    /// ninja -- one closed surface over everything, nothing inside it -- five
+    /// faces out of eighteen thousand. Nothing is wrong in that last case;
+    /// there was simply nothing sealed inside to find.
+    ///
+    /// The other thing worth saying about the defaults: they are guards, not
+    /// dials. A model that loses more than <c>Most</c> of itself is almost
+    /// always inside out rather than hollow, and a connected part larger than
+    /// <c>LargestPart</c> disappearing whole is something somebody modelled
+    /// rather than debris. Both refuse; neither quietly trims what it finds.
+    /// </summary>
+    public async Task<RepositoryResult<JobSummary>> EnqueueCullAsync(
+        CreateModelCullRequest request, CancellationToken cancellationToken)
+    {
+        var source = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(asset => asset.Id == request.SourceAssetId, cancellationToken);
+        if (source is null) return RepositoryResult<JobSummary>.NotFound();
+        if (source.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<JobSummary>.Invalid("Faces are culled from a model.");
+        if (source.IsArchived)
+            return RepositoryResult<JobSummary>.Invalid(
+                "That model is archived. Restore it before culling it.");
+
+        var name = (request.Name ?? "").Trim();
+        if (name.Length is 0 or > 120)
+            return RepositoryResult<JobSummary>.Invalid("This needs a name of 1 to 120 characters.");
+
+        var directions = request.Directions ?? 64;
+        if (directions is < 8 or > 512)
+            return RepositoryResult<JobSummary>.Invalid(
+                "Look from 8 to 512 directions. 64 is enough for anything in this library.");
+        var most = request.Most ?? 0.6;
+        var largest = request.LargestPart ?? 0.1;
+        foreach (var (share, what) in new[] { (most, "share this may remove"), (largest, "largest part") })
+            if (share is <= 0 or > 1)
+                return RepositoryResult<JobSummary>.Invalid($"The {what} runs above 0 and up to 1.");
+
+        var readiness = await CullPreflightAsync(cancellationToken);
+        if (!readiness.CanRun)
+            return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+
+        var now = timeProvider.GetUtcNow();
+        var packet = new FrozenModelRequest(
+            FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
+            source.RevisionNumber ?? 1,
+            [.. CullPlan.Select(step => new RouteStep(
+                step.Stage,
+                readiness.Suffixes?.GetValueOrDefault(step.Stage) ?? ".glb",
+                step.ReadsOriginal))],
+            readiness.CompilerVersion, now,
+            Size: "", SizeAdjust: 1.0, GlassColour: null,
+            Work: CullWork, TriangleBudget: 0,
+            Assignments: null, BakeResolution: 0, EdgeWear: 0,
+            ColourSize: 0, DataSize: 0, Quality: 0, TextureFormat: null,
+            Directions: directions, Most: most, LargestPart: largest,
+            IgnoreTransparency: request.IgnoreTransparency ?? false);
+        var requestJson = JsonSerializer.Serialize(packet, Json);
+
+        var jobId = Guid.NewGuid();
+        var job = new JobRecord
+        {
+            Id = jobId,
+            ShotId = Guid.Empty,
+            ShotCode = name,
+            Kind = "Fewer faces",
+            WorkType = ModelWorkType,
+            State = JobState.Queued.ToString(),
+            Progress = 0,
+            Phase = "Frozen model queued",
+            Backend = "Reference Asset Compiler",
+            AdapterId = string.Join(" then ", CullPlan.Select(step => step.Stage)),
+            RequestJson = requestJson,
+            IdempotencyKey = IdempotencyKey(requestJson, jobId),
+            CreatedAt = now,
+            LastHeartbeatAt = now,
+            Attempt = 1,
+        };
+        db.Jobs.Add(job);
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<JobSummary>.Ok(Map(job));
+    }
+
+    /// <summary>
     /// Queues a re-encode of one model's textures.
     ///
     /// The cheapest change available to a finished asset: nothing about the
@@ -684,6 +920,30 @@ public sealed class ModelGenerationService(
     }
 
     /// <summary>
+    /// What the cull is told. The transparency flag is only ever sent when it
+    /// is true, because an absent flag and a false one mean the same thing to
+    /// the stage and sending "false" would read like a decision somebody made.
+    /// </summary>
+    private static List<KeyValuePair<string, string>> CullOptions(FrozenModelRequest packet)
+    {
+        // Hyphenated, because the gateway turns a name straight into "--name"
+        // and the compiler's flags are spelled the way a person would say them.
+        var options = new List<KeyValuePair<string, string>>
+        {
+            new("directions", (packet.Directions == 0 ? 64 : packet.Directions)
+                .ToString(CultureInfo.InvariantCulture)),
+            new("most", (packet.Most == 0 ? 0.6 : packet.Most)
+                .ToString(CultureInfo.InvariantCulture)),
+            new("largest-part", (packet.LargestPart == 0 ? 0.1 : packet.LargestPart)
+                .ToString(CultureInfo.InvariantCulture)),
+        };
+        // A switch, so it carries no value: passing one would make the compiler
+        // read the next flag as this one's argument.
+        if (packet.IgnoreTransparency) options.Add(new("ignore-transparency", ""));
+        return options;
+    }
+
+    /// <summary>
     /// Freezes the artist's answers about what each part should be, and queues
     /// the work. Same shape as a preparation: what comes back is a revision
     /// beside the source, and the source stays the current one until somebody
@@ -726,6 +986,18 @@ public sealed class ModelGenerationService(
         var edgeWear = request.EdgeWear ?? 0;
         if (edgeWear is < 0 or > 1)
             return RepositoryResult<JobSummary>.Invalid("Edge wear runs from 0 to 1.");
+        // Some relief by default: the painter writes no normal map at all, so a
+        // model that asks for nothing here has no fine detail whatsoever and
+        // cloth reads as painted plastic at close range.
+        //
+        // 0.3 rather than more, chosen by looking. The derivation multiplies a
+        // luminance gradient by 32, so at 0.7 the cloth picks up a specular
+        // sheen from normal variation finer than the weave it is supposed to
+        // be describing -- cotton that reads as satin. At 0.3 the folds gain
+        // depth and the fabric stays fabric.
+        var relief = request.Relief ?? 0.3;
+        if (relief is < 0 or > 1)
+            return RepositoryResult<JobSummary>.Invalid("Relief runs from 0 to 1.");
 
         var readiness = await SurfacingPreflightAsync(cancellationToken);
         if (!readiness.CanRun)
@@ -742,7 +1014,8 @@ public sealed class ModelGenerationService(
             readiness.CompilerVersion, now,
             Size: "", SizeAdjust: 1.0, GlassColour: null,
             Work: SurfaceWork, TriangleBudget: 0,
-            Assignments: assignments, BakeResolution: resolution, EdgeWear: edgeWear);
+            Assignments: assignments, BakeResolution: resolution, EdgeWear: edgeWear,
+            Relief: relief);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -811,7 +1084,8 @@ public sealed class ModelGenerationService(
         // happens to the answer.
         var derivative = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
             || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal);
+            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, CullWork, StringComparison.Ordinal);
         var preparing = derivative;
         var sourceWord = derivative ? "model" : "reference";
         var source = await db.Assets.AsNoTracking()
@@ -917,7 +1191,7 @@ public sealed class ModelGenerationService(
         // Whichever step last wrote a model. A re-encode writes one directly,
         // because it rewrites the file rather than reopening it.
         var payloadStep = completed.LastOrDefault(
-            step => step.Stage is BrowserPayloadStage or CompressTexturesStage);
+            step => step.Stage is BrowserPayloadStage or CompressTexturesStage or CullUnseenStage);
         if (payloadStep is null)
             return await FailAsync(job, "This job's route never exported a model.", cancellationToken);
         var payloadPath = payloadStep.OutputPath;
@@ -970,6 +1244,7 @@ public sealed class ModelGenerationService(
             size = packet.Size,
             sizeAdjust = packet.SizeAdjust,
             glassColour = packet.GlassColour,
+            detail = packet.Work == GenerateWork ? packet.Detail : null,
             triangleBudget = packet.TriangleBudget == 0 ? (int?)null : packet.TriangleBudget,
             topologyChanged = preparing ? topologyChanged : (bool?)null,
             rerunAfterIncompleteAnswer = rerunAfterPartial,
@@ -1009,7 +1284,7 @@ public sealed class ModelGenerationService(
     {
         GeometryStage => new Dictionary<string, string>()
         {
-            ["octree-resolution"] = BrowserOctreeResolution,
+            ["octree-resolution"] = packet.Detail == HeroDetail ? HeroOctreeResolution : BrowserOctreeResolution,
             // Otherwise the workspace is named after the reference's content
             // hash, which is what the stored file is called.
             ["asset-name"] = job.ShotCode,
@@ -1022,13 +1297,41 @@ public sealed class ModelGenerationService(
         // Rebuilt on a uniform grid rather than collapsed: a generator's
         // surface has no topology worth preserving, and collapsing it keeps
         // the noise as slivers and spikes.
-        RemeshStage => new Dictionary<string, string> { ["triangle-budget"] = RuntimeTriangleBudget },
+        RemeshStage => packet.Detail == HeroDetail
+            ? new Dictionary<string, string>
+            {
+                ["triangle-budget"] = HeroTriangleBudget,
+                ["target-triangles"] = HeroTargetTriangles,
+                ["voxel-resolution"] = HeroVoxelResolution,
+                ["smooth-iterations"] = HeroSmoothIterations,
+            }
+            : new Dictionary<string, string> { ["triangle-budget"] = RuntimeTriangleBudget },
         // A generated prop is an approved static triangle mesh: it is unfolded
         // as it stands rather than welded or remeshed, which would change the
         // geometry the reduction gate already measured.
         UvUnwrapStage => new Dictionary<string, string> { ["allow-triangulated-glb"] = "" },
         // The paint is conditioned on the same picture the geometry came from.
-        TextureStage => new Dictionary<string, string> { ["reference"] = referencePath },
+        TextureStage => new Dictionary<string, string>
+        {
+            ["reference"] = referencePath,
+            ["views"] = PaintViews,
+            ["resolution"] = PaintResolution,
+            // Naming the sheet also names the runner that writes it lossless.
+            // Without this the painter's maps left as JPEG and were then
+            // re-encoded twice more on the way to a browser.
+            ["atlas"] = packet.Detail == HeroDetail ? HeroAtlas : SetAtlas,
+        },
+        // The same picture and the same painter, cropped to the head by the
+        // stage itself from the figure's own silhouette.
+        PaintHeadStage => new Dictionary<string, string>
+        {
+            ["reference"] = referencePath,
+            ["views"] = PaintViews,
+            ["resolution"] = PaintResolution,
+            ["atlas"] = HeroAtlas,
+            ["head-from"] = HeadFrom,
+            ["feather"] = HeadFeather,
+        },
         GlassStage => new Dictionary<string, string> { ["colour"] = packet.GlassColour ?? "" },
         // A preparation exists to keep what a reviewed mesh already has, so a
         // mesh with no UV layer is refused by name rather than delivered as a
@@ -1042,10 +1345,14 @@ public sealed class ModelGenerationService(
             ["resolution"] = (packet.BakeResolution == 0 ? 1024 : packet.BakeResolution)
                 .ToString(CultureInfo.InvariantCulture),
             ["edge-wear"] = packet.EdgeWear.ToString(CultureInfo.InvariantCulture),
+            // The painter writes no normal map, so without this a surface has
+            // no relief at all and close-up cloth reads as painted plastic.
+            ["relief-from-paint"] = packet.Relief.ToString(CultureInfo.InvariantCulture),
         },
         // One --assign per part, which is why a stage's options are a sequence
         // of pairs rather than a dictionary: a dictionary would keep the last
         // and silently drop the rest.
+        CullUnseenStage => CullOptions(packet),
         // A colour map is looked at and a data map is read as numbers by a
         // shader, so they are two questions rather than one setting.
         CompressTexturesStage => new Dictionary<string, string>
@@ -1103,12 +1410,21 @@ public sealed class ModelGenerationService(
             {
                 SurfaceWork => "Resurfaced from ",
                 CompressWork => "Textures re-encoded from ",
+                CullWork => "Unseen faces dropped from ",
                 _ => "Runtime derivative of ",
             })
             .Append(packet.SourceName)
             .Append(" revision ").Append(packet.SourceRevisionNumber)
             .Append(" (").Append(packet.SourceContentHash[..12]).Append("…)");
-        if (string.Equals(packet.Work, CompressWork, StringComparison.Ordinal))
+        if (string.Equals(packet.Work, CullWork, StringComparison.Ordinal)
+            && before.Profile is not null && after.Profile is not null)
+            // "Nothing moved" is the claim worth recording, because it is the
+            // one that separates this from every other way of losing triangles.
+            note.Append(": ").Append(before.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture))
+                .Append(" triangles down to ")
+                .Append(after.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture))
+                .Append(", nothing moved");
+        else if (string.Equals(packet.Work, CompressWork, StringComparison.Ordinal))
             note.Append(": ").Append((source.Bytes / 1024d / 1024d).ToString("0.0", CultureInfo.InvariantCulture))
                 .Append(" MB down to ")
                 .Append((derivative.Bytes / 1024d / 1024d).ToString("0.0", CultureInfo.InvariantCulture))
@@ -1164,12 +1480,14 @@ public sealed class ModelGenerationService(
         if (asset is null) return;
         var preparing = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
             || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal);
+            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, CullWork, StringComparison.Ordinal);
         var opening = packet.Work switch
         {
             PrepareWork => "Prepared for runtime from ",
             SurfaceWork => "Resurfaced from ",
             CompressWork => "Textures re-encoded from ",
+            CullWork => "Unseen faces dropped from ",
             _ => "Generated from ",
         };
         var lineage = new StringBuilder()
@@ -1182,6 +1500,9 @@ public sealed class ModelGenerationService(
         if (stale)
             lineage.Append(" That reference has changed since; this model is a candidate from the older source (now ")
                 .Append(source.ContentHash[..12]).Append("…).");
+        if (packet.Work == GenerateWork && packet.Detail == HeroDetail)
+            lineage.Append(" Made as a hero: rebuilt at 80,000 triangles, painted onto a 4096 sheet, "
+                           + "the head painted a second time on its own.");
         asset.Notes = string.IsNullOrWhiteSpace(asset.Notes) ? lineage.ToString() : asset.Notes + "\n" + lineage;
         // A generated model's revision note is this sentence, because nothing
         // else has written one. A prepared derivative already has a better one --
@@ -1241,7 +1562,8 @@ public sealed class ModelGenerationService(
         if (packet is null
             || !(string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
                 || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
-                || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)))
+                || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)
+                || string.Equals(packet.Work, CullWork, StringComparison.Ordinal)))
             return RepositoryResult<ModelPreparationEvidence>.Invalid(
                 "This job did not produce a before-and-after to compare.");
 

@@ -1510,8 +1510,13 @@ Results by evidence class (D/A/H/L/V/P):
      textures intact; eight fixed views of the source and eight of the derivative, each bound to the
      hash of the bytes it is a picture of. A second run at 6,000 triangles through the panel took
      about twenty seconds end to end. The glazed lantern is refused at 97 mm maximum deviation on a
-     424 mm object, which is the right answer -- collapsing folds its glass panes -- and nothing was
-     delivered.
+     424 mm object, and nothing was delivered.
+     CORRECTED 2026-09-21: the reason given here for that refusal -- "collapsing folds its glass
+     panes" -- was wrong. The real cause was that glTF splits a vertex at every UV seam, so the
+     lantern arrived reading as 12,358 boundary edges, and a repair filled 5,115 of those "holes"
+     and invented surface. Welded by position first, the same lantern reduces at 4.5 mm and the
+     sword passes the strict gate outright at 1.71 mm. The refusal was right; the explanation was
+     not, and it would have sent the next person after the glass.
   V: NOT RECORDED. This is what M09 still wants. The derivative is in the library as revision 3 of
      the Ayric sword, unaccepted, with its source still the current revision and its comparison
      views reachable from the asset itself. The artist has not yet pressed accept or refuse.
@@ -1554,6 +1559,69 @@ Checkpoint: see the M09 commits on feature/director-mode, and 5b285a0 on the com
 Next dependency-ready milestone: M14, once M09's verdict is recorded.
 ```
 
+### Texture quality record (between M09 and M14)
+
+```text
+Work / status / date: Production-grade texture chain for generated characters / DELIVERED, awaiting the artist's
+  verdict on the hero ninja / 2026-09-21.
+Why: the artist judged the generated ninja "good, not great" up close. The complaint was measured rather than
+  argued with, on the ninja itself, and the chain turned out to be leaking in five places before the painter's
+  own limit was reached.
+Found by measuring, each with the number that found it:
+  1. UV unwrap left 66.7% of every atlas as gutter (601 islands, 33.3% occupied) and wrote the figure into its
+     own receipt each time. Blender's own packer over the same islands: 55.1%. Compiler.
+  2. The studio never told the painter anything but the reference, so its 512/6 floor defaults stood. 768/12.
+  3. `--relief-from-paint` existed and was never passed: no generated model had ever had a normal map. Wired,
+     default 0.3 chosen by looking (0.7 gives cotton a satin sheen; the gain is 32x a luminance gradient).
+  4. The painter computed a 4096 atlas and saved it at 2048, as JPEG; the bake then re-encoded the changed
+     JPEG as JPEG again (730 KB to 298 KB). Now: studio runner keeps 4096, writes PNG; the bake writes the base
+     colour once, as PNG.
+  5. The derived normal read every UV island's edge as a cliff and outlined all 601 of them -- the "drawn on
+     triangles" look around the eyes. The gutter is filled from the islands before measuring and uncovered
+     texels are left flat (mean tilt 6.62 to 4.88 with the real relief kept).
+  6. Python-run compiler stages were handed their three paths and no options: everything the studio chose for
+     the re-encoder ran as the script's defaults. Fixed with a test.
+  7. The compiler's hi-res paint variant loaded the mesh with maintain_order=True, one UV per OBJ position, so a
+     third of all faces (6,134 of 18,000) spanned the atlas and were painted with whatever the sliver crossed.
+     The 2026-09-05 experiment's "olive spread across the face" was this, not the painter. Caught only because
+     the head stage's own UV mask came out covering 92% of a sheet. Fixed: force="mesh", no merging; 13,862
+     vertices, zero spanning faces, gate passes at 9e-8.
+The face itself: twelve views at 768 of a 1.75 m figure give it ~90 px of each, and nothing downstream can put
+  back what the diffusion never saw. New compiler stage `paint-head`: cut every face above 0.78 of the height,
+  crop the reference to the same band from its own silhouette (rembg, bounding box, square), paint it again
+  through the same launcher, lay it over the body in UV space (same UVs, so it lands where the first paint did;
+  0.03 feather across the cut; body texels byte for byte). No Blender in it. 182 s on the RTX 4090.
+Studio: a "hero" detail tier on the generation request (packet v9). Hero = octree 384, remesh to 80,000
+  triangles (target 72,000, voxel grid 640, two smoothing passes rather than five), atlas 4096, paint-head,
+  then compress-textures (4096 colour at JPEG 92, 2048 data). Set dressing keeps 20,000 / 256 / 2048 and now
+  paints lossless. Offered only where the compiler has both extra stages; refused by name otherwise. Viewers
+  sample textures at the GPU's maximum anisotropy (three's default is 1).
+Commands and checks actually run: compiler pytest 563 passed (new: paint_relief, head_detail, option
+  plumbing, atlas/runner); backend 270 passed (new: hero route and options, set default, hero refusal);
+  tsc and eslint clean; live readiness offers set and hero against the real compiler; real GPU runs of the
+  studio paint (4096 PNG, gate 9e-8), the seam-free bake, and the head pass on the ninja.
+Hero route end to end, through the live studio against the real compiler (job 9a01d339, 2026-09-21): octree
+  384 gave 417,138 raw triangles; the voxel grid at 640 gave 1,060,854; collapsed to 72,000 (36,000 vertices).
+  Unwrap packed 29.4% as cut to 53.8%. Body paint 4 min, head pass 4.5 min, whole route 12 min 27 s. Delivered
+  4.85 MB: 72,000 triangles, 4096 base colour as JPEG 92, 2048 metallic-roughness. The face has two eyes and
+  brows where the set-dressing ninja had a smear; the hood edge is a curve rather than a polygon.
+Found while it ran: the model viewer was torn down and the model reloaded on every parent render, and the
+  workspace re-renders every 700 ms while any job is queued -- the model "blinked in and out" for as long as
+  anything was running. The viewer now depends on the three dimension numbers rather than the array; an e2e
+  check renames the model while looking at it and expects the same canvas.
+Artist's verdict on the hero (2026-09-21): "a LOT better"; pinned as good; one critique -- the skin was far
+  too shiny. Measured under the head mask: the painter had guessed skin at roughness 0.30 and metallic up to
+  0.41 while the cloth beside it sat at 0.92 and 0.15. The head stage now floors roughness at 0.55 and sets
+  metallic to 0 before laying the head down (both options; a negative metallic keeps the painter's guess).
+Playwright, full suite after the GPU work: 123 passed, 6 skipped, 1 failed -- the generation journey on
+  desktop, on a stray 400 from another test sharing the stand-in server; it passes alone in 26 s and was one
+  of the three failures already seen at the start of the session. Recorded as a cross-test flake, not fixed.
+Checks NOT RUN at the time of this record: none required.
+Known limits: the head band is a height fraction, right for a standing humanoid and wrong for a crouching
+  one; a hero's reference crop keeps whatever the silhouette's top 22% holds (here hood and shoulders, which
+  share the head's cloth); the hi-res provenance runner keeps its fault, recorded in the catalog.
+```
+
 ### Acceptance record template
 
 ```text
@@ -1586,6 +1654,7 @@ Do not claim verification of a later commit when only an earlier code state was 
 | D04 | Typed proposals with user application; explicit generation | Preserve current repository permission and approval boundaries. |
 | D05 | One supported GLB/profile/provider/render route first | Prove narrow useful support before expanding breadth. |
 | D06 | Reuse Reference Asset Compiler through a bounded adapter | Verify each reused operation; retain its human gates and receipts. |
+| D07 | Two detail tiers on generation, asked as "how close will the camera get" | Set dressing at 20,000 triangles / 2048 is right for most things and a hero costs minutes more of GPU; the numbers each answer stands for live in one place in the service, not in the form. Hero is offered only where the compiler can paint a head on its own. |
 
 ### Deferred work
 

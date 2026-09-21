@@ -913,6 +913,13 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
 .model-preparation h2 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--text-xs); }
 .model-preparation > button { justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--text-2xs); font-weight: 650; cursor: pointer; }
 .model-preparation > button:disabled { opacity: .55; cursor: not-allowed; }
+/* The second way to make a derivative, set apart by a rule rather than a
+   heading: it is the same job with a different question, not a new section. */
+.model-cull { display: grid; gap: 7px; padding-top: 9px; border-top: 1px solid var(--line); }
+.model-cull > button { justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--text-2xs); font-weight: 650; cursor: pointer; }
+.model-cull > button:disabled { opacity: .55; cursor: not-allowed; }
+.model-through-glass { display: flex; align-items: flex-start; gap: 7px; color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
+.model-through-glass input { margin-top: 2px; flex: none; }
 .model-preparation .model-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
 .model-preparation input[type="number"], .model-preparation textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-size: var(--text-2xs); font-family: inherit; }
 .model-comparison { display: grid; gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }

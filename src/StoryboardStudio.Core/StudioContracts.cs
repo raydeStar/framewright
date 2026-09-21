@@ -242,9 +242,17 @@ public sealed record RigPoseSummary(
 /// invented to get past a prompt would be worse than none, because every
 /// measurement after it would be taken against a lie.
 /// </summary>
+/// <param name="Detail">
+/// How close the camera will get: "set" for something seen from a distance,
+/// "hero" for something shot up close -- a character, a held prop. A hero is
+/// rebuilt at four times the triangles, painted onto a 4096 sheet, and has its
+/// head painted a second time on its own, because a full-body paint gives a
+/// face about ninety pixels of each view and nothing after the diffusion can
+/// put back what it never saw. Unnamed means set.
+/// </param>
 public sealed record CreateModelGenerationRequest(
     Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null,
-    string? GlassColour = null);
+    string? GlassColour = null, string? Detail = null);
 
 /// <summary>
 /// Whether model generation can run on this workstation, and whether it is
@@ -260,6 +268,24 @@ public sealed record CreateModelGenerationRequest(
 public sealed record CreateModelCompressionRequest(
     Guid SourceAssetId, string? Name,
     int? ColourSize, int? DataSize, int? Quality, string? Format);
+
+/// <summary>
+/// Delete the faces nothing outside this model can see.
+///
+/// A generated mesh carries interior shells, the inward faces of a hollow
+/// body, and fragments sealed inside -- on a raw decoded lantern, 47% of it.
+/// Faces are deleted and never moved, so creases stay as sharp as they were
+/// and no UV shifts.
+/// </summary>
+/// <param name="IgnoreTransparency">
+/// A ray cannot tell glass from brass, so a model with anything see-through is
+/// refused by default: culling it would delete exactly what you look at
+/// through the panes. This says, in as many words, that nothing behind those
+/// surfaces is meant to be seen.
+/// </param>
+public sealed record CreateModelCullRequest(
+    Guid SourceAssetId, string? Name,
+    int? Directions, double? Most, double? LargestPart, bool? IgnoreTransparency);
 
 /// <summary>
 /// What a model is currently made of, part by part.
@@ -295,9 +321,18 @@ public sealed record ModelSurfaceAssignment(string Part, string Surface);
 /// occlusion its own geometry already implies. Nothing about the source is
 /// touched; what comes back is a revision beside it.
 /// </summary>
+/// <param name="Relief">
+/// How hard to lift a normal map out of the paint, 0 to 1. The painter makes
+/// an albedo, a metallic and a roughness map and no normal map at all, so
+/// without this a model has no surface relief whatsoever: every fold is
+/// geometry or it is nothing, and at close range cloth reads as painted
+/// plastic. This is not measured detail and does not pretend to be -- it is
+/// the paint's own luminance read as height, which is right for weave and
+/// stitching and wrong for anything whose shading came from lighting.
+/// </param>
 public sealed record CreateModelSurfacingRequest(
     Guid SourceAssetId, string? Name, ModelSurfaceAssignment[] Assignments,
-    int? Resolution, double? EdgeWear);
+    int? Resolution, double? EdgeWear, double? Relief);
 
 /// <summary>
 /// Prepare an existing library model for browser or runtime use: the same
@@ -331,7 +366,17 @@ public sealed record ModelGenerationReadiness(
     bool Installed, bool Commissioned, bool CanRun,
     string? CompilerVersion, string? Checkout, string? Blender,
     string[] Missing, string Detail, ModelSizeChoice[]? Sizes = null,
-    IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null);
+    IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null,
+    ModelDetailChoice[]? Details = null);
+
+/// <summary>
+/// How close the camera will get to a generated model, offered in those terms
+/// rather than as triangle counts and sheet sizes. The studio owns this
+/// vocabulary because it is the studio's question: the compiler is told the
+/// numbers each answer stands for. Hero is only offered when the compiler can
+/// paint a head on its own.
+/// </summary>
+public sealed record ModelDetailChoice(string Detail, string Description, string Cost);
 
 /// <summary>
 /// A colour a model's glass might have been painted, offered the way a person

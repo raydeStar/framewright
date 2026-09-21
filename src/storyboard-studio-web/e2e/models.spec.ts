@@ -78,6 +78,14 @@ test('a supported model imports, reports its real measurements, and inspects wit
   // The 3D view really opens, and orbiting moves the inspection camera only.
   await expect(page.getByTestId('model-viewer')).toHaveAttribute('data-state', 'ready')
   await expect(page.locator('.model-stage canvas')).toHaveCount(1)
+  // The surface survives its parent re-rendering. Typing in the inspector
+  // re-renders the workspace; the viewer used to be torn down and the model
+  // loaded again on every such render, which with a job polling every 700 ms
+  // made the model blink in and out for as long as anything was queued.
+  await page.locator('.model-stage canvas').evaluate(canvas => { canvas.dataset.sameSurface = 'yes' })
+  await page.getByLabel('Name').fill('Renamed while looking')
+  await expect(page.locator('.model-stage canvas')).toHaveCount(1)
+  await expect(page.locator('.model-stage canvas')).toHaveAttribute('data-same-surface', 'yes')
   const openingOrbit = await page.getByTestId('model-viewer-orbit').innerText()
   const stage = page.getByTestId('model-stage')
   await stage.focus()

@@ -51,6 +51,10 @@ test('a reference becomes a model candidate that names where it came from', asyn
   // panes, so the default answer is that there are none.
   await expect(panel.getByTestId('model-glass')).toHaveValue('')
   await panel.getByTestId('model-glass').selectOption('teal')
+  // How close the camera gets is asked in those terms, and set dressing is
+  // the answer unless somebody says otherwise: a hero costs minutes more.
+  await expect(panel.getByTestId('model-detail')).toHaveValue('set')
+  await expect(panel.getByTestId('model-detail').locator('option')).toHaveCount(2)
   await panel.getByTestId('model-generate').click()
   await expect(page.getByText(/keeps going if you leave this screen/)).toBeVisible()
 

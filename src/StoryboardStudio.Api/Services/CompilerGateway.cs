@@ -198,19 +198,29 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
         // The compiler answers in one JSON payload carrying its own receipt, so
         // a caller reads one answer rather than an answer and then a file.
         string? receipt = null;
-        string? error = run.ExitCode == 0 ? null : Tail(run.StandardError) ?? $"The stage exited with code {run.ExitCode}.";
+        string? reason = null;
         try
         {
             using var document = JsonDocument.Parse(run.StandardOutput);
             if (document.RootElement.TryGetProperty("receipt", out var payload))
                 receipt = payload.GetRawText();
             if (document.RootElement.TryGetProperty("error", out var reported))
-                error ??= reported.GetString();
+                reason = reported.GetString();
         }
         catch (JsonException)
         {
-            error ??= "The compiler's stage report could not be read as JSON.";
+            reason ??= "The compiler's stage report could not be read as JSON.";
         }
+
+        // The compiler's own words first. Every stage refuses by naming what it
+        // refused and why -- glass it cannot see through, a part too large to be
+        // debris, a budget that would not reduce anything -- and the generic
+        // fallback was winning over all of it, so an artist was told "the stage
+        // exited with code 1" and nothing else. That is the message those
+        // refusals were written to replace.
+        string? error = run.ExitCode == 0 && receipt is not null
+            ? null
+            : reason ?? Tail(run.StandardError) ?? $"The stage exited with code {run.ExitCode}.";
 
         var ok = run.ExitCode == 0 && receipt is not null;
         return new CompilerStageRun(ok, stage, run.ExitCode, seconds,

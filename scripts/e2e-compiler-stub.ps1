@@ -136,6 +136,28 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
                     options   = @('textures')
                     available = $true
                     missing   = @()
+                },
+                # The two stages a hero needs beyond the ordinary route, so the
+                # studio offers the choice and the journey can exercise it.
+                [ordered]@{
+                    stage     = 'paint-head'
+                    runner    = 'python'
+                    summary   = 'Paint the head again on its own, at head scale, and lay it over the body paint.'
+                    produces  = 'reference-asset-compiler.head-detail-paint.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('reference', 'views', 'resolution', 'atlas', 'head_from', 'feather')
+                    available = $true
+                    missing   = @()
+                },
+                [ordered]@{
+                    stage     = 'compress-textures'
+                    runner    = 'python'
+                    summary   = 'Re-encode a model textures, without touching anything else about it.'
+                    produces  = 'reference-asset-compiler.compressed-textures.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('colour_size', 'data_size', 'quality', 'texture_format')
+                    available = $true
+                    missing   = @()
                 }
             )
         }
@@ -144,7 +166,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     $stage = $arguments[1]
-    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'glass', 'browser-payload')) {
+    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'glass', 'browser-payload', 'paint-head', 'compress-textures')) {
         Write-Error "RAC_ERROR unknown stage: $stage"
         exit 2
     }
@@ -178,6 +200,8 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         'uv-unwrap'   { 'reference-asset-compiler.texture-uv-transport.v1' }
         'glass'       { 'reference-asset-compiler.transparent-material.v1' }
         'texture'     { 'reference-asset-compiler.paint-validation.v1' }
+        'paint-head'  { 'reference-asset-compiler.head-detail-paint.v1' }
+        'compress-textures' { 'reference-asset-compiler.compressed-textures.v1' }
         default       { 'reference-asset-compiler.browser-payload.v1' }
     }
     $stageReceipt = [ordered]@{

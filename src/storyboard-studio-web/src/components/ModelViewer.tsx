@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Mesh, MeshStandardMaterial, PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type Material, type Object3D } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { sharpenTextures } from './textureQuality'
 
 /**
  * An isolated inspection surface for one model revision.
@@ -51,6 +52,12 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
   const drag = useRef<{ pointerId: number; x: number; y: number; panning: boolean } | undefined>(undefined)
   const reportError = useRef(onError)
   reportError.current = onError
+  // The three numbers, not the array. A parent that rebuilds the array on
+  // every render -- and the inspection workspace does, every 700 ms while a
+  // job is running -- would otherwise tear this whole surface down and load
+  // the model again each time: the model blinked in and out for as long as
+  // anything was in the queue.
+  const [width, height, depth] = dimensions
 
   useEffect(() => {
     const container = host.current
@@ -70,7 +77,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
     let disposed = false
     const scene = new Scene()
     const camera = new PerspectiveCamera(38, 1, 0.01, 1000)
-    const span = Math.max(dimensions[0], dimensions[1], dimensions[2], 0.001)
+    const span = Math.max(width, height, depth, 0.001)
     let loaded: Object3D | undefined
 
     view.current = { yaw: openingYaw, pitch: openingPitch, distance: span * 2.6, target: new Vector3() }
@@ -203,6 +210,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
         if (disposed) { release(gltf.scene); return }
         loaded = gltf.scene
         scene.add(loaded)
+        sharpenTextures(loaded, renderer)
         dress(loaded)
         show()
         setState('ready')
@@ -261,7 +269,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
       renderer.dispose()
       renderer.forceContextLoss()
     }
-  }, [contentUrl, dimensions])
+  }, [contentUrl, width, height, depth])
 
   const orbitBy = (yaw: number, pitch: number) => {
     view.current.yaw += yaw

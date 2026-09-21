@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, LoaderCircle, Scaling, TriangleAlert, X } from 'lucide-react'
+import { Check, Eye, LoaderCircle, Scaling, TriangleAlert, X } from 'lucide-react'
 import { studioApi } from '../api'
 import type {
   AssetSummary,
@@ -27,6 +27,14 @@ import type {
  *
  * Accepting is the only thing that promotes it. Refusing keeps it, with the
  * reason, because the reason is how the next budget gets chosen.
+ *
+ * Two ways to make one, and they are not alternatives -- they answer different
+ * questions. A budget says how many triangles this may cost, and the reduction
+ * spends them, moving vertices to do it. The cull says nothing about cost: it
+ * deletes the faces nothing outside the model can see and moves nothing at
+ * all, so a crease is exactly as sharp afterwards. On a generated mesh that is
+ * often half the model, and doing it first means the budget gets spent on the
+ * silhouette rather than on the inside of a hollow body.
  */
 export default function ModelPreparation({ asset, profile, onQueued, onDecided }: {
   asset: AssetSummary
@@ -35,6 +43,11 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
   onDecided: (message: string) => void
 }) {
   const [readiness, setReadiness] = useState<ModelGenerationReadiness>()
+  const [cullReadiness, setCullReadiness] = useState<ModelGenerationReadiness>()
+  // Only ever consulted when the compiler has already refused for this reason.
+  // A ray cannot see through glass, so culling a lantern empties it through the
+  // panes, and this is the artist saying nothing behind them is meant to show.
+  const [throughGlass, setThroughGlass] = useState(false)
   const [budget, setBudget] = useState(() => suggested(profile.triangleCount))
   const [job, setJob] = useState<JobSummary>()
   const [evidence, setEvidence] = useState<ModelPreparationEvidence>()
@@ -51,6 +64,9 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
     studioApi.modelPreparationReadiness()
       .then(answer => { if (live) setReadiness(answer) })
       .catch(() => { if (live) setReadiness(undefined) })
+    studioApi.modelCullReadiness()
+      .then(answer => { if (live) setCullReadiness(answer) })
+      .catch(() => { if (live) setCullReadiness(undefined) })
     return () => { live = false }
   }, [])
 
@@ -109,6 +125,18 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
     } finally { setBusy(false) }
   }
 
+  const cull = async () => {
+    setBusy(true); setError(undefined); setEvidence(undefined)
+    try {
+      const queued = await studioApi.cullModel(
+        asset.id, `${asset.displayName} (unseen faces dropped)`, throughGlass)
+      setJob(queued)
+      onQueued(`${queued.shotCode} queued. It keeps going if you leave this screen.`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'That cull could not be queued.')
+    } finally { setBusy(false) }
+  }
+
   const decide = async (accepted: boolean) => {
     const derivative = evidence?.derivativeAssetId
     if (!derivative) return
@@ -125,6 +153,11 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
   }
 
   const running = job !== undefined && job.state !== 'Completed' && job.state !== 'Failed'
+  // The opt-in only appears once the compiler has refused for this reason.
+  // Offered up front it would be a checkbox nobody understands, on a model
+  // that mostly has no glass in it at all.
+  const refusedForGlass = job?.state === 'Failed'
+    && (job.error ?? '').includes('see past')
   // Fewer triangles is what was asked for. Fewer maps, materials or
   // textures is a loss nobody asked for, and is called one.
   const lostUvs = origin !== undefined
@@ -161,6 +194,27 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
             <Scaling size={15} />{running ? 'Preparing…' : 'Prepare for runtime'}
           </button>
         </>}
+
+    {cullReadiness?.canRun && <div className="model-cull" data-testid="model-cull-section">
+      <p className="model-note">
+        Or drop the faces nothing outside this model can see. Nothing moves, so every crease
+        stays exactly as sharp as it is now. How much goes depends on the subject rather than
+        on how it was made: a hollow lantern loses half, a figure with a body modelled under
+        its clothes about a third, and a solid single-surface mesh nothing at all.
+      </p>
+      {refusedForGlass && <label className="model-through-glass">
+        <input type="checkbox" checked={throughGlass} data-testid="model-cull-through-glass"
+          onChange={event => setThroughGlass(event.target.checked)} />
+        <span>
+          Cull it anyway. A ray cannot see through glass, so whatever is behind those
+          surfaces will go with it.
+        </span>
+      </label>}
+      <button type="button" className="secondary" data-testid="model-cull"
+        disabled={busy || running} onClick={() => void cull()}>
+        <Eye size={15} />{running ? 'Looking…' : 'Drop unseen faces'}
+      </button>
+    </div>}
 
     {job && <p className="model-note" data-testid="model-preparation-progress">
       {job.state === 'Failed'

@@ -208,7 +208,10 @@ export interface ModelGenerationReadiness {
   compilerVersion: string | null; checkout: string | null; blender: string | null
   missing: string[]; detail: string; sizes: ModelSizeChoice[] | null
   colours: ModelColourChoice[] | null
+  /** How close the camera will get; hero is offered only where the compiler can paint a head on its own. */
+  details: ModelDetailChoice[] | null
 }
+export interface ModelDetailChoice { detail: string; description: string; cost: string }
 /** The fixed views one preparation rendered, of the source and of what it made. */
 export interface ModelPreparationEvidence {
   jobId: string; sourceAssetId: string | null; derivativeAssetId: string | null

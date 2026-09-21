@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, LoopOnce, LoopRepeat, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SkinnedMesh, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type BufferGeometry, type Object3D } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { sharpenTextures } from './textureQuality'
 // A skinned mesh cannot be cloned with Object3D.clone: the copies would share
 // one skeleton and pose identically, which is the opposite of two instances.
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -222,6 +223,7 @@ export default function SceneViewport({ instances, camera, environment, selected
         // One load per model revision; every instance of it is a clone.
         new GLTFLoader().load(instance.contentUrl, gltf => {
           if (disposed) { release(gltf.scene); return }
+          sharpenTextures(gltf.scene, renderer)
           loaded.set(instance.assetId ?? '', gltf.scene)
           sync(next, selected)
           // The scene graph arrives before its textures finish decoding, and

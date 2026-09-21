@@ -60,7 +60,8 @@ public sealed class ModelPreparationApiTests
             Checkout: "C:/checkout", Blender: "C:/blender.exe",
             Stages: [Stage("adopt-mesh"), Stage("reduce-mesh"), Stage("review-views"),
                      Stage("browser-payload"), Stage("bake-detail"), Stage("assign-surfaces"),
-                     Stage("survey-surfaces"), Stage("compress-textures")]);
+                     Stage("survey-surfaces"), Stage("compress-textures"),
+                     Stage("cull-unseen")]);
 
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
@@ -801,6 +802,151 @@ public sealed class ModelPreparationApiTests
         });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Equal(0, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task ACullDeliversARevisionAndSaysWhatItDroppedWithoutMovingAnything()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "hollow.glb", ModelFixtures.DenseProp());
+
+        var queued = await client.PostAsJsonAsync("/api/models/cull", new
+        {
+            sourceAssetId = source.Id,
+            name = "Hollow (unseen faces dropped)",
+            directions = 64,
+        });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        Assert.Equal("Fewer faces", job.Kind);
+
+        var finished = await RunAsync(factory, job.Id);
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.NotNull(finished.OutputAssetId);
+
+        // Three steps and no export. The cull writes a model directly, and an
+        // export on the end is how a mesh acquires vertex data it did not
+        // arrive with -- which on a bare-position mesh more than undid the cull.
+        Assert.Equal(["review-views", "cull-unseen", "review-views"],
+            compiler.Calls.Select(call => call.Stage).ToArray());
+        Assert.DoesNotContain("browser-payload", compiler.Calls.Select(call => call.Stage));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var before = await db.Assets.SingleAsync(asset => asset.Id == source.Id);
+        var after = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+
+        Assert.Equal(before.RevisionFamilyId, after.RevisionFamilyId);
+        Assert.True(before.IsCurrentRevision);
+        Assert.Null(after.PreparationAcceptedAt);
+        Assert.Contains("Unseen faces dropped from", after.Notes, StringComparison.Ordinal);
+        Assert.Contains("nothing moved", after.RevisionPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheCullIsToldItsLimitsByTheNamesTheStageAnswersTo()
+    {
+        // The re-encoder shipped asking for "format" against a parser that
+        // wanted "texture-format", and only a live run found it. These are the
+        // same kind of name, pinned here rather than discovered there.
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "names.glb", ModelFixtures.DenseProp());
+
+        var queued = await client.PostAsJsonAsync("/api/models/cull", new
+        {
+            sourceAssetId = source.Id, name = "Named", directions = 96,
+            most = 0.5, largestPart = 0.05, ignoreTransparency = true,
+        });
+        queued.EnsureSuccessStatusCode();
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        await RunAsync(factory, job.Id);
+
+        var told = compiler.Options["cull-unseen"];
+        Assert.Equal("96", told["directions"]);
+        Assert.Equal("0.5", told["most"]);
+        Assert.Equal("0.05", told["largest-part"]);
+        // A switch: present and empty. A value here would be read as the next flag.
+        Assert.Equal("", told["ignore-transparency"]);
+    }
+
+    [Fact]
+    public async Task GlassIsNotWavedThroughUnlessSomebodySaysSo()
+    {
+        // A ray cannot tell glass from brass, so culling a glazed lantern
+        // deletes exactly what you look at through the panes. The flag is only
+        // ever sent when it is true: an absent flag and a false one mean the
+        // same thing, and sending "false" would read like somebody's decision.
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "glazed.glb", ModelFixtures.DenseProp());
+
+        var queued = await client.PostAsJsonAsync("/api/models/cull", new
+        {
+            sourceAssetId = source.Id, name = "Left alone",
+        });
+        queued.EnsureSuccessStatusCode();
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        await RunAsync(factory, job.Id);
+
+        Assert.DoesNotContain("ignore-transparency", compiler.Options["cull-unseen"].Keys);
+    }
+
+    [Fact]
+    public async Task ALimitThisCullDoesNotOfferIsRefusedBeforeAnythingRuns()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "limits.glb", ModelFixtures.DenseProp());
+
+        foreach (var body in new object[]
+        {
+            new { sourceAssetId = source.Id, name = "Too few", directions = 2 },
+            new { sourceAssetId = source.Id, name = "Too many", directions = 4096 },
+            new { sourceAssetId = source.Id, name = "All of it", most = 1.5 },
+            new { sourceAssetId = source.Id, name = "None of it", most = 0.0 },
+            new { sourceAssetId = source.Id, name = "Odd part", largestPart = -0.2 },
+        })
+        {
+            var refused = await client.PostAsJsonAsync("/api/models/cull", body);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
+        Assert.Equal(0, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task ACullTheCompilerRefusesFailsTheJobAndLeavesTheSourceAlone()
+    {
+        // The stage refuses a model that would lose most of itself, one whose
+        // parts vanish whole, and one shadowed by something else in the file.
+        // Every one of those has to arrive as a failed job with its reason.
+        var compiler = new ControlledCompiler { FailingStage = "cull-unseen" };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "solid.glb", ModelFixtures.DenseProp());
+
+        var queued = await client.PostAsJsonAsync("/api/models/cull", new
+        {
+            sourceAssetId = source.Id, name = "Nothing hidden",
+        });
+        queued.EnsureSuccessStatusCode();
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.Id);
+
+        Assert.Equal(JobState.Failed, finished.State);
+        Assert.Null(finished.OutputAssetId);
+        Assert.Contains("cull-unseen", finished.Error, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var kept = await db.Assets.SingleAsync(asset => asset.Id == source.Id);
+        Assert.Equal(source.ContentHash, kept.ContentHash);
+        Assert.Null(kept.RevisionFamilyId);
     }
 
     [Fact]
