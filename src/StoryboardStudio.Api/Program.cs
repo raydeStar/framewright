@@ -415,6 +415,25 @@ app.MapPut("/api/asset-collections/{collectionId:guid}", async Task<IResult> (Gu
     => ToHttpResult(await assets.UpdateCollectionAsync(collectionId, request, cancellationToken)));
 app.MapDelete("/api/asset-collections/{collectionId:guid}", async (Guid collectionId, AssetStore assets, CancellationToken cancellationToken)
     => await assets.DeleteCollectionAsync(collectionId, cancellationToken) ? Results.NoContent() : Results.NotFound());
+// A model's thumbnail. Rendered once by whichever browser first needs it and
+// kept by content hash, so the library shows what a model looks like without
+// this studio ever opening a 3D file on the server.
+app.MapGet("/api/assets/posters", async (AssetStore assets, CancellationToken cancellationToken)
+    => Results.Ok(await assets.PosteredAssetsAsync(cancellationToken)));
+app.MapGet("/api/assets/{assetId:guid}/poster", async Task<IResult> (
+    Guid assetId, AssetStore assets, CancellationToken cancellationToken) =>
+{
+    var path = await assets.PosterFileAsync(assetId, cancellationToken);
+    return path is null ? Results.NotFound() : Results.File(path, "image/png");
+});
+app.MapPut("/api/assets/{assetId:guid}/poster", async Task<IResult> (
+    Guid assetId, HttpRequest request, AssetStore assets, CancellationToken cancellationToken)
+    => ToHttpResult(await assets.SavePosterAsync(assetId, request.Body, cancellationToken)));
+
+// Where everything is used, in one answer, so the library grid can mark what
+// is in play without asking a question per card.
+app.MapGet("/api/assets/usage", async (AssetStore assets, CancellationToken cancellationToken)
+    => Results.Ok(await assets.UsageAsync(cancellationToken)));
 app.MapGet("/api/asset-placements", async (Guid? assetId, Guid? shotId, AssetStore assets, CancellationToken cancellationToken)
     => Results.Ok(await assets.ListPlacementsAsync(assetId, shotId, cancellationToken)));
 app.MapPost("/api/assets/{assetId:guid}/placements", async Task<IResult> (Guid assetId, CreateAssetPlacementRequest request, AssetStore assets, CancellationToken cancellationToken)

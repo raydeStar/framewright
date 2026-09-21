@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Archive, ArrowLeft, ArrowRight, BadgeCheck, Box, Check, Clapperboard, Download, Folder, FolderOpen, GitCompare, Grid2X2, Image, ImagePlus, Library, List, LoaderCircle, Music2, Pause, PenLine, Play, Plus, Search, SlidersHorizontal, Sparkles, Upload, Video, WandSparkles, X } from 'lucide-react'
 import { studioApi } from '../api'
 import ModelFromReference from './ModelFromReference'
-import type { AssetCollectionSummary, AssetGenerationDraft, AssetGenerationReference, AssetPlacementSummary, AssetReviewNoteSummary, AssetSummary, JobSummary, ReferenceSummary, ShotSummary, StudioSnapshot } from '../types'
+import type { AssetCollectionSummary, AssetGenerationDraft, AssetGenerationReference, AssetPlacementSummary, AssetReviewNoteSummary, AssetSummary, AssetUsageSummary, JobSummary, ReferenceSummary, ShotSummary, StudioSnapshot } from '../types'
 import Dialog from './Dialog'
 import ModelInspectionWorkspace from './ModelInspectionWorkspace'
 import AssetReviewPins from './AssetReviewPins'
@@ -20,6 +20,9 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   const [assets, setAssets] = useState<AssetSummary[]>([])
   const [collections, setCollections] = useState<AssetCollectionSummary[]>([])
   const [placements, setPlacements] = useState<AssetPlacementSummary[]>([])
+  const [usage, setUsage] = useState<Map<string, AssetUsageSummary>>(new Map())
+  const [postered, setPostered] = useState<Set<string>>(new Set())
+  const [rendering, setRendering] = useState<number>()
   const [view, setView] = useState<LibraryView>('all')
   const [query, setQuery] = useState('')
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
@@ -42,9 +45,18 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   const refreshSequence = useRef(0)
   const refresh = useCallback(async () => {
     const ticket = ++refreshSequence.current
-    const [nextAssets, nextCollections, nextPlacements] = await Promise.all([studioApi.assets(true), studioApi.assetCollections(), studioApi.assetPlacements()])
+    const [nextAssets, nextCollections, nextPlacements, nextUsage, nextPosters] = await Promise.all([
+      studioApi.assets(true), studioApi.assetCollections(), studioApi.assetPlacements(),
+      // Where things are used is asked once for the whole library rather
+      // than once per card, and a failure to answer leaves the grid drawn
+      // rather than empty: not knowing is worse than the library not opening.
+      studioApi.assetUsage().catch(() => [] as AssetUsageSummary[]),
+      studioApi.assetPosters().catch(() => [] as string[]),
+    ])
     if (ticket !== refreshSequence.current) return
     setAssets(nextAssets); setCollections(nextCollections); setPlacements(nextPlacements)
+    setUsage(new Map(nextUsage.map(entry => [entry.assetId, entry])))
+    setPostered(new Set(nextPosters))
   }, [])
   useEffect(() => { void refresh().catch(reason => setError(reason instanceof Error ? reason.message : 'Could not open the asset library.')).finally(() => setLoading(false)) }, [refresh])
   useEffect(() => {
@@ -76,6 +88,29 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     if (normalized && ![asset.displayName, asset.originalFileName, asset.source, asset.notes, ...asset.tags].join(' ').toLowerCase().includes(normalized)) return false
     return true
   }).sort((a, b) => sort === 'name' ? a.displayName.localeCompare(b.displayName) : sort === 'type' ? a.kind.localeCompare(b.kind) || a.displayName.localeCompare(b.displayName) : b.createdAt.localeCompare(a.createdAt)), [libraryAssets, normalized, sort, view])
+
+  // Models nobody has opened, so nobody has a picture of. Rendering one means
+  // pulling the whole model down, so it is offered rather than done: doing it
+  // automatically put a library's worth of geometry ahead of everything the
+  // artist was actually waiting for.
+  const missingPosters = useMemo(
+    () => libraryAssets.filter(asset => asset.kind === 'Model' && !asset.isArchived && !postered.has(asset.id)),
+    [libraryAssets, postered])
+
+  const renderMissingPosters = async () => {
+    const pending = [...missingPosters]
+    setRendering(pending.length)
+    try {
+      const { renderModelPoster } = await import('./modelPoster')
+      for (const asset of pending) {
+        await renderModelPoster(asset.id, asset.contentUrl, asset.bytes)
+        setRendering(count => (count ?? 1) - 1)
+      }
+      await refresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not render those thumbnails.')
+    } finally { setRendering(undefined) }
+  }
 
   const importFiles = async (files?: FileList | File[]) => {
     if (!files?.length || busy) return
@@ -152,6 +187,13 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
         {activeCollection && <div className="asset-collection-actions"><button onClick={() => setCollectionEditor(activeCollection)}>Rename</button><button className="danger-text" onClick={async () => { if (!window.confirm(`Delete the ${activeCollection.name} collection? Its assets will move to Unfiled.`)) return; await studioApi.deleteAssetCollection(activeCollection.id); setView('all'); await refresh(); onToast('Collection removed; its assets are still safe in Unfiled.') }}>Delete</button></div>}
       </aside>
       <section className="asset-browser">
+        {missingPosters.length > 0 && <div className="asset-thumbnail-prompt">
+          <span>{missingPosters.length} model{missingPosters.length === 1 ? ' has' : 's have'} no thumbnail yet.</span>
+          <button type="button" disabled={rendering !== undefined} data-testid="render-thumbnails"
+            onClick={() => void renderMissingPosters()}>
+            {rendering === undefined ? 'Render them' : `Rendering… ${rendering} left`}
+          </button>
+        </div>}
         <div className="asset-toolbar">
           <label className="asset-search"><Search size={16} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search names, tags, notes, or source" aria-label="Search assets" />{query && <button onClick={() => setQuery('')} aria-label="Clear asset search"><X size={14} /></button>}</label>
           <label className="asset-sort"><SlidersHorizontal size={15} /><select aria-label="Sort assets" value={sort} onChange={event => setSort(event.target.value as typeof sort)}><option value="newest">Newest</option><option value="name">Name</option><option value="type">Media type</option></select></label>
@@ -159,7 +201,7 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
         </div>
         {error && <p className="asset-error" role="alert"><span>{error}</span><button onClick={() => setError(undefined)}><X size={15} /></button></p>}
         {loading ? <div className="asset-loading"><LoaderCircle className="spin" /><span>Opening the media pool…</span></div> : view === 'authorities' ? <AuthorityLibrary references={studio.references} query={normalized} onEdit={onEditAuthority} /> : visible.length === 0 ? <AssetEmpty view={view} query={query} onCreate={() => setCreateOpen(true)} onImport={() => fileRef.current?.click()} /> : <div className={`asset-items ${layout}`}>
-          {visible.map(asset => <AssetCard key={asset.id} asset={asset} placementCount={placements.filter(item => item.assetId === asset.id).length} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />)}
+          {visible.map(asset => <AssetCard key={asset.id} asset={asset} usage={usage.get(asset.id)} hasPoster={postered.has(asset.id)} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />)}
         </div>}
       </section>
       {selected && <AssetInspector asset={selected} collections={collections} placements={placements.filter(item => item.assetId === selected.id)} originJob={studio.jobs.find(job => job.outputAssetId === selected.id && job.workType === 'Shot')} shots={studio.shots} onClose={() => setSelectedId(undefined)} onSaved={updated => { setAssets(current => current.map(item => item.id === updated.id ? updated : item)); void refresh(); onToast(`${updated.displayName} metadata saved.`) }} onPlacementsChanged={() => void refresh()} onOpenGeneration={() => onOpenGeneration({ id: crypto.randomUUID(), name: `${selected.displayName} variation`, initialPrompt: `Create a new reusable variation of ${selected.displayName}. Preserve its defining identity and design while following my composition notes.`, route: 'fast', underlayAssetId: selected.id, references: generationReferences, revisionFamilyId: selected.revisionFamilyId, parentAssetId: selected.id })} onOpenSequence={onOpenSequence} />}
@@ -169,12 +211,21 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   </main>
 }
 
-function AssetCard({ asset, placementCount, selected, onSelect }: { asset: AssetSummary; placementCount: number; selected: boolean; onSelect: () => void }) {
+function AssetCard({ asset, usage, hasPoster, selected, onSelect }: { asset: AssetSummary; usage?: AssetUsageSummary; hasPoster: boolean; selected: boolean; onSelect: () => void }) {
   const [playing, setPlaying] = useState(false)
   return <article className={`asset-card ${selected ? 'selected' : ''}`} draggable={!asset.isArchived} onDragStart={event => { event.dataTransfer.setData('text/asset-id', asset.id); event.dataTransfer.effectAllowed = 'move' }}>
     <button className="asset-card-open" onClick={onSelect} aria-label={`Open ${asset.displayName}`}>
-      <div className={`asset-thumbnail ${asset.kind.toLowerCase()}`}>{asset.kind === 'Image' ? <img src={asset.contentUrl} alt="" /> : asset.kind === 'Video' ? <video src={asset.contentUrl} muted preload="metadata" /> : asset.kind === 'Model' ? <Box size={26} /> : <><Music2 /><div className="asset-wave">{[2,5,3,7,4,8,3,6,2,5,7,3].map((height, index) => <i key={index} style={{ height: `${height * 8}%` }} />)}</div></>}<span>{asset.kind}</span></div>
-      <div className="asset-card-copy"><strong>{asset.displayName}</strong><small>{asset.source} · {formatSize(asset.bytes)}</small><div>{asset.tags.slice(0, 2).map(tag => <em key={tag}>{tag}</em>)}{placementCount > 0 && <em className="used"><Clapperboard size={11} />{placementCount}</em>}</div></div>
+      <div className={`asset-thumbnail ${asset.kind.toLowerCase()}`}>{asset.kind === 'Image' ? <img src={asset.contentUrl} alt="" /> : asset.kind === 'Video' ? <video src={asset.contentUrl} muted preload="metadata" /> : asset.kind === 'Model' ? (hasPoster ? <img src={`/api/assets/${asset.id}/poster`} alt="" /> : <Box size={26} />) : <><Music2 /><div className="asset-wave">{[2,5,3,7,4,8,3,6,2,5,7,3].map((height, index) => <i key={index} style={{ height: `${height * 8}%` }} />)}</div></>}<span>{asset.kind}</span></div>
+      <div className="asset-card-copy">
+        <strong title={asset.displayName}>{asset.displayName}</strong>
+        <small>{describeAsset(asset)}</small>
+        <div>
+          {asset.tags.slice(0, 2).map(tag => <em key={tag}>{tag}</em>)}
+          {usage
+            ? <em className="used" title={`Used in ${usage.where.join(", ")}`}><Clapperboard size={11} />{usage.shots + usage.scenes + usage.clips}</em>
+            : <em className="unused">Unused</em>}
+        </div>
+      </div>
     </button>
     {asset.kind === 'Audio' && <button className="asset-quick-play" onClick={event => { event.stopPropagation(); const audio = event.currentTarget.parentElement?.querySelector('audio'); if (!audio) return; if (playing) audio.pause(); else void audio.play(); setPlaying(!playing) }} aria-label={`${playing ? 'Pause' : 'Play'} ${asset.displayName}`}>{playing ? <Pause size={14} /> : <Play size={14} />}<audio src={asset.contentUrl} onEnded={() => setPlaying(false)} /></button>}
   </article>
@@ -322,3 +373,21 @@ function AssetEmpty({ view, query, onCreate, onImport }: { view: LibraryView; qu
 
 function formatSize(bytes: number) { return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB` }
 function formatDuration(seconds: number) { const minutes = Math.floor(seconds / 60); const rest = Math.round(seconds % 60); return `${minutes}:${String(rest).padStart(2, '0')}` }
+
+/**
+ * The one line under a name, said in whatever terms that kind of asset is
+ * actually judged by. A file size tells an artist nothing about a model;
+ * how long a piece of audio runs tells them everything about it.
+ */
+function describeAsset(asset: AssetSummary) {
+  const size = formatSize(asset.bytes)
+  if (asset.kind === 'Audio' || asset.kind === 'Video') {
+    const seconds = asset.durationSeconds
+    if (seconds === undefined || seconds <= 0) return `${asset.source} · ${size}`
+    const minutes = Math.floor(seconds / 60)
+    return `${minutes}:${String(Math.round(seconds % 60)).padStart(2, '0')} · ${size}`
+  }
+  if (asset.kind === 'Image' && asset.width && asset.height) return `${asset.width} × ${asset.height} · ${size}`
+  return `${asset.source} · ${size}`
+}
+

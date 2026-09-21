@@ -1390,8 +1390,15 @@ dialog.studio-dialog.edit-dialog.music-library { width: min(1180px, calc(100vw -
 .asset-view-toggle button { width: 38px; height: 36px; display: grid; place-items: center; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--quiet); cursor: pointer; }
 .asset-view-toggle button:first-child { border-left: 0; }
 .asset-view-toggle button[aria-pressed="true"] { background: var(--surface-3); color: var(--accent-strong); }
+.asset-thumbnail-prompt { display: flex; align-items: center; gap: 10px; margin: 0 16px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); font-size: var(--text-2xs); color: var(--muted); }
+.asset-thumbnail-prompt button { min-height: 28px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--text-2xs); font-weight: 650; cursor: pointer; }
+.asset-thumbnail-prompt button:disabled { opacity: .6; cursor: progress; }
 .asset-items { min-height: 0; overflow-y: auto; padding: 16px; align-content: start; }
-.asset-items.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 13px; }
+/* max-content, not auto: auto rows in a scrolling grid were sharing the
+   container's height between them, so every card was squashed to about a
+   third of its content and `overflow: hidden` cut the name off. The whole
+   library showed as a wall of unlabelled thumbnails. */
+.asset-items.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); grid-auto-rows: max-content; gap: 13px; }
 .asset-items.list { display: grid; grid-template-columns: 1fr; gap: 5px; }
 .asset-card { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-card); overflow: hidden; transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
 .asset-card:hover { border-color: var(--line-strong); transform: translateY(-1px); box-shadow: 0 8px 22px rgba(0,0,0,.18); }
@@ -1409,6 +1416,7 @@ dialog.studio-dialog.edit-dialog.music-library { width: min(1180px, calc(100vw -
 .asset-card-copy small { color: var(--quiet); font-size: var(--text-2xs); }
 .asset-card-copy > div { min-height: 20px; display: flex; gap: 5px; overflow: hidden; }
 .asset-card-copy em { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; background: var(--surface-3); color: var(--muted); font-size: var(--text-2xs); font-style: normal; }
+.asset-card-copy em.unused { margin-left: auto; color: var(--quiet); background: transparent; border: 1px dashed var(--line); }
 .asset-card-copy em.used { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; color: var(--authority); background: var(--authority-bg); }
 .asset-quick-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--accent-line); border-radius: 50%; background: rgba(15,29,34,.9); color: var(--accent-strong); cursor: pointer; }
 .asset-items.list .asset-card-open { display: grid; grid-template-columns: 126px minmax(0, 1fr); }

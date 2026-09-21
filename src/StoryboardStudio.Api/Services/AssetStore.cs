@@ -557,6 +557,50 @@ public sealed class AssetStore
     /// derivative was refused is the reason the next one is asked for
     /// differently.
     /// </summary>
+    /// <summary>
+    /// Where every asset in the library is used, in one answer.
+    ///
+    /// One query rather than one per card: a library of a few hundred assets
+    /// would otherwise ask a few hundred questions to draw a grid, and the
+    /// grid is the first thing an artist sees.
+    /// </summary>
+    public async Task<IReadOnlyList<AssetUsageSummary>> UsageAsync(CancellationToken cancellationToken)
+    {
+        var placements = await db.AssetPlacements.AsNoTracking()
+            .Join(db.Shots.AsNoTracking(), placement => placement.ShotId, shot => shot.Id,
+                (placement, shot) => new { placement.AssetId, Name = shot.Code })
+            .ToArrayAsync(cancellationToken);
+        // A model is used by standing in a scene, which is the ordinary way a
+        // model is used and the one thing nothing was counting.
+        var instances = await db.SceneInstances.AsNoTracking()
+            .Where(instance => instance.AssetId != null)
+            .Join(db.Scenes.AsNoTracking(), instance => instance.SceneId, scene => scene.Id,
+                (instance, scene) => new { AssetId = instance.AssetId!.Value, Name = scene.Name })
+            .ToArrayAsync(cancellationToken);
+        var clips = await db.SceneInstances.AsNoTracking()
+            .Where(instance => instance.ClipAssetId != null)
+            .Join(db.Scenes.AsNoTracking(), instance => instance.SceneId, scene => scene.Id,
+                (instance, scene) => new { AssetId = instance.ClipAssetId!.Value, Name = scene.Name })
+            .ToArrayAsync(cancellationToken);
+
+        var used = new Dictionary<Guid, Tally>();
+        Tally For(Guid assetId)
+        {
+            if (!used.TryGetValue(assetId, out var tally)) used[assetId] = tally = new Tally();
+            return tally;
+        }
+
+        foreach (var row in placements) { var tally = For(row.AssetId); tally.Shots++; tally.Where.Add(row.Name); }
+        foreach (var row in instances) { var tally = For(row.AssetId); tally.Scenes++; tally.Where.Add(row.Name); }
+        foreach (var row in clips) { var tally = For(row.AssetId); tally.Clips++; tally.Where.Add(row.Name); }
+
+        return [.. used.Select(entry => new AssetUsageSummary(
+            entry.Key, entry.Value.Shots, entry.Value.Scenes, entry.Value.Clips,
+            // A handful of names is enough to answer "used where?" on hover.
+            // The full list belongs on the asset, not on a card.
+            [.. entry.Value.Where.Take(6)]))];
+    }
+
     public async Task<RepositoryResult<AssetSummary>> SetPreparationAcceptanceAsync(
         Guid assetId, SetPreparationAcceptanceRequest request, CancellationToken cancellationToken)
     {
@@ -712,6 +756,94 @@ public sealed class AssetStore
         var name = Path.GetFileName(value ?? "image").Trim();
         if (name.Length == 0) name = "image";
         return name.Length <= 180 ? name : name[..180];
+    }
+
+    /// <summary>The largest a stored poster may be. A thumbnail, not a picture.</summary>
+    private const int MaxPosterBytes = 512 * 1024;
+
+    /// <summary>
+    /// Where a model's thumbnail lives, keyed by the model's own content hash.
+    ///
+    /// Keyed by hash rather than by asset id on purpose: two revisions with
+    /// identical bytes are the same picture and should not be rendered twice,
+    /// and a model whose bytes change can never show a thumbnail of what it
+    /// used to look like. It also means no schema column and no migration --
+    /// the file being there is the whole fact.
+    /// </summary>
+    private string PosterPath(string contentHash) =>
+        Path.Combine(root, "posters", $"{contentHash}.png");
+
+    /// <summary>
+    /// Which models already have a thumbnail, in one answer.
+    ///
+    /// Asked once for the grid rather than probed per card: a HEAD per model
+    /// meant a 404 in the console for every model nobody had rendered yet,
+    /// which is most of them, and a console that always has errors in it is a
+    /// console nobody reads.
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> PosteredAssetsAsync(CancellationToken cancellationToken)
+    {
+        var models = await db.Assets.AsNoTracking()
+            .Where(asset => asset.Kind == nameof(AssetKind.Model))
+            .Select(asset => new { asset.Id, asset.ContentHash })
+            .ToArrayAsync(cancellationToken);
+        return [.. models.Where(model => File.Exists(PosterPath(model.ContentHash))).Select(model => model.Id)];
+    }
+
+    /// <summary>The stored thumbnail for this asset, or null when nobody has made one.</summary>
+    public async Task<string?> PosterFileAsync(Guid assetId, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
+        if (asset is null) return null;
+        var path = PosterPath(asset.ContentHash);
+        return File.Exists(path) ? path : null;
+    }
+
+    /// <summary>
+    /// Stores a thumbnail somebody rendered for a model.
+    ///
+    /// The bytes are checked rather than trusted: this is written by a browser
+    /// and read back into every grid, so anything that is not actually a small
+    /// PNG is refused rather than served later as one.
+    /// </summary>
+    public async Task<RepositoryResult<string>> SavePosterAsync(
+        Guid assetId, Stream input, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
+        if (asset is null) return RepositoryResult<string>.NotFound();
+        if (asset.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<string>.Invalid("Only a model needs a rendered thumbnail.");
+
+        using var buffer = new MemoryStream();
+        await input.CopyToAsync(buffer, cancellationToken);
+        var bytes = buffer.ToArray();
+        if (bytes.Length is 0 or > MaxPosterBytes)
+            return RepositoryResult<string>.Invalid(
+                $"A thumbnail must be between 1 byte and {MaxPosterBytes / 1024} KB.");
+        // The eight-byte PNG signature. A name ending in .png proves nothing.
+        ReadOnlySpan<byte> signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        if (bytes.Length < signature.Length || !bytes.AsSpan(0, signature.Length).SequenceEqual(signature))
+            return RepositoryResult<string>.Invalid("A thumbnail must be a PNG.");
+
+        var path = PosterPath(asset.ContentHash);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        // Written beside and moved into place, so a reader never sees half a
+        // picture if two tabs render the same model at once.
+        var staging = path + "." + Guid.NewGuid().ToString("N") + ".partial";
+        await File.WriteAllBytesAsync(staging, bytes, cancellationToken);
+        File.Move(staging, path, overwrite: true);
+        return RepositoryResult<string>.Ok($"/api/assets/{assetId}/poster");
+    }
+
+    /// <summary>One asset's running count while usage is gathered.</summary>
+    private sealed class Tally
+    {
+        public int Shots;
+        public int Scenes;
+        public int Clips;
+        public SortedSet<string> Where { get; } = new(StringComparer.Ordinal);
     }
 
     private static AssetSummary Map(AssetRecord x) => new(

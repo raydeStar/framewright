@@ -1,3 +1,4 @@
+using StoryboardStudio.Core;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -165,6 +166,103 @@ public sealed class ModelLibraryApiTests
         // The model's stack is untouched by the refusal.
         using var stack = await client.GetFromJsonAsync<JsonDocument>($"/api/assets/{modelId}/revisions") ?? throw new InvalidOperationException();
         Assert.Equal(1, stack.RootElement.GetArrayLength());
+    }
+
+    /// <summary>
+    /// A library nobody can read is a library nobody uses. These are the two
+    /// facts a grid needs about an asset beyond its name: whether anything is
+    /// using it, and what it looks like.
+    /// </summary>
+    [Fact]
+    public async Task UsageCountsAModelStandingInASceneAndNotOnlyShotPlacements()
+    {
+        using var factory = new StudioApiFactory(
+            Path.Combine(Path.GetTempPath(), "storyboard-studio-tests", Guid.NewGuid().ToString("N")), true);
+        using var client = factory.CreateClient();
+        var placed = await ImportAsync(client, ModelFixtures.AsymmetricBlock(), "in-a-scene.glb");
+        var idle = await ImportAsync(client, ModelFixtures.AsymmetricPost(), "on-the-shelf.glb");
+
+        var created = await client.PostAsJsonAsync("/api/scenes", new { name = "Courtyard" });
+        created.EnsureSuccessStatusCode();
+        var scene = await created.Content.ReadFromJsonAsync<SceneSummary>() ?? throw new InvalidOperationException();
+        var saved = await client.PutAsJsonAsync($"/api/scenes/{scene.Id}", new
+        {
+            expectedVersion = scene.Version,
+            name = scene.Name,
+            camera = new SceneCameraSummary(0.5, 0.3, 4, [0, 0.5, 0], 45),
+            environment = new SceneEnvironmentSummary(1, 0.5, 0.6, 0.3),
+            instances = new[]
+            {
+                new
+                {
+                    id = Guid.NewGuid(), assetId = placed, name = "The prop",
+                    position = new[] { 0.0, 0.0, 0.0 },
+                    rotation = new[] { 0.0, 0.0, 0.0 },
+                    scale = new[] { 1.0, 1.0, 1.0 },
+                },
+            },
+        });
+        saved.EnsureSuccessStatusCode();
+
+        var usage = await client.GetFromJsonAsync<AssetUsageSummary[]>("/api/assets/usage")
+            ?? throw new InvalidOperationException();
+
+        // Standing in a scene is the ordinary way a model is used, and the one
+        // thing the library never counted -- so every model read as unused.
+        var used = Assert.Single(usage, entry => entry.AssetId == placed);
+        Assert.Equal(1, used.Scenes);
+        Assert.Equal(0, used.Shots);
+        Assert.Contains("Courtyard", used.Where);
+
+        // And something nothing points at says nothing, rather than appearing
+        // with a count of zero that reads like a measurement.
+        Assert.DoesNotContain(usage, entry => entry.AssetId == idle);
+    }
+
+    [Fact]
+    public async Task AModelKeepsOneThumbnailPerSetOfBytesAndRefusesAnythingElse()
+    {
+        using var factory = new StudioApiFactory(
+            Path.Combine(Path.GetTempPath(), "storyboard-studio-tests", Guid.NewGuid().ToString("N")), true);
+        using var client = factory.CreateClient();
+        var model = await ImportAsync(client, ModelFixtures.AsymmetricBlock(), "needs-a-picture.glb");
+
+        // Nothing has rendered one yet, which is an ordinary answer.
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/assets/{model}/poster")).StatusCode);
+
+        var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, 0x02 };
+        Assert.Equal(HttpStatusCode.OK, (await PutPosterAsync(client, model, png)).StatusCode);
+
+        var fetched = await client.GetAsync($"/api/assets/{model}/poster");
+        Assert.Equal(HttpStatusCode.OK, fetched.StatusCode);
+        Assert.Equal("image/png", fetched.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(png, await fetched.Content.ReadAsByteArrayAsync());
+
+        // These bytes are written by a browser and read back into every grid,
+        // so what is not a PNG is refused now rather than served later as one.
+        var refused = await PutPosterAsync(client, model, "<html>not a picture</html>"u8.ToArray());
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(png, await (await client.GetAsync($"/api/assets/{model}/poster")).Content.ReadAsByteArrayAsync());
+
+        // Which models have one is asked once for the whole grid. Probing per
+        // card is what a browser would otherwise do, and a HEAD to a GET-only
+        // route falls through to the single-page fallback and answers 200 with
+        // an HTML document -- so every card concluded it already had a picture
+        // and none was ever rendered.
+        var bare = await ImportAsync(client, ModelFixtures.AsymmetricPost(), "no-picture.glb");
+        var index = await client.GetFromJsonAsync<Guid[]>("/api/assets/posters")
+            ?? throw new InvalidOperationException();
+        Assert.Contains(model, index);
+        Assert.DoesNotContain(bare, index);
+    }
+
+    private static async Task<HttpResponseMessage> PutPosterAsync(HttpClient client, Guid assetId, byte[] bytes)
+    {
+        using var content = new ByteArrayContent(bytes);
+        content.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/assets/{assetId}/poster") { Content = content };
+        request.Headers.Add("X-Storyboard-Studio", "1");
+        return await client.SendAsync(request);
     }
 
     private static async Task<Guid> ImportAsync(HttpClient client, byte[] bytes, string fileName)

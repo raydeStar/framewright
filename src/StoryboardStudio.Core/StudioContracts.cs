@@ -1289,6 +1289,16 @@ public sealed record AuthorityGenerationTarget(
     string LockedConstraint);
 public sealed record AddAssetRevisionRequest(Guid AssetId, string Prompt = "Imported revision", string Engine = "Imported");
 public sealed record CreateAssetPlacementRequest(Guid ShotId, string Role);
+/// <summary>
+/// Where one asset is actually being used, across everything that can use one.
+///
+/// The library only ever counted shot placements, which meant a model standing
+/// in a scene -- the main way a model is used at all -- showed as unused, and
+/// an artist tidying up had no way to tell what was safe to archive.
+/// </summary>
+public sealed record AssetUsageSummary(
+    Guid AssetId, int Shots, int Scenes, int Clips, string[] Where);
+
 public sealed record AssetPlacementSummary(Guid Id, Guid AssetId, Guid ShotId, string ShotCode, string ShotTitle, string Role, DateTimeOffset CreatedAt);
 
 public sealed record CreateCommentRequest(double X, double Y, string Body, string? ReferenceId = null);

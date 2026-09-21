@@ -59,6 +59,24 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
+  // A model being looked at has already been fetched to be drawn, so making
+  // its thumbnail here costs a cached read rather than a download. Rendering
+  // every card in the library speculatively was the other option, and it put
+  // a hundred and thirty-nine megabytes of geometry ahead of everything the
+  // artist was actually waiting for.
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      const existing = await studioApi.assetPosters().catch(() => [] as string[])
+      if (!live || existing.includes(activeId)) return
+      const revision = revisions.find(item => item.id === activeId) ?? asset
+      const { renderModelPoster } = await import('./modelPoster')
+      await renderModelPoster(activeId, revision.contentUrl, revision.bytes)
+    })()
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
+
   useEffect(() => {
     let live = true
     // A pose belongs to the revision it was calculated from, so switching
