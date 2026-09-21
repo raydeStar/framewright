@@ -272,6 +272,10 @@ app.MapPost("/api/jobs/{jobId:guid}/acknowledge", async Task<IResult> (
     return Results.NoContent();
 });
 
+app.MapGet("/api/jobs/{jobId:guid}", async Task<IResult> (
+    Guid jobId, StudioRepository repository, CancellationToken cancellationToken)
+    => ToHttpResult(await repository.JobAsync(jobId, cancellationToken)));
+
 app.MapPost("/api/jobs/{jobId:guid}/retry", async Task<IResult> (
     Guid jobId, GenerationOrchestrator orchestrator, AssetImageGenerationService assetGeneration,
     AudioGenerationJobService audioGeneration, StudioDbContext db, GenerationJobSignal queue,
@@ -505,6 +509,38 @@ app.MapPost("/api/models/generation", async Task<IResult> (
         await queue.QueueAsync(queued.Value.Id, cancellationToken);
     return ToHttpResult(queued);
 });
+// Preparing a derivative of a model already in the library: the same
+// compiler and the same commissioning as generation, a different route, and a
+// different question about what this workstation can do.
+app.MapGet("/api/models/preparation/readiness", async (ModelGenerationService models, CancellationToken cancellationToken)
+    => Results.Ok(await models.PreparationPreflightAsync(cancellationToken)));
+app.MapPost("/api/models/preparation", async Task<IResult> (
+    CreateModelPreparationRequest request, ModelGenerationService models, GenerationJobSignal queue, CancellationToken cancellationToken) =>
+{
+    var queued = await models.EnqueuePreparationAsync(request, cancellationToken);
+    if (queued.Kind == RepositoryResultKind.Ok && queued.Value is not null)
+        await queue.QueueAsync(queued.Value.Id, cancellationToken);
+    return ToHttpResult(queued);
+});
+// The fixed views of the source and of the derivative, which is what the
+// comparison is made of. Served from the job's own workspace rather than
+// imported into the library: sixteen pictures of one decision are evidence,
+// not assets somebody wants to browse.
+app.MapGet("/api/jobs/{jobId:guid}/preparation-evidence", async Task<IResult> (
+    Guid jobId, ModelGenerationService models, CancellationToken cancellationToken)
+    => ToHttpResult(await models.PreparationEvidenceAsync(jobId, cancellationToken)));
+app.MapGet("/api/jobs/{jobId:guid}/preparation-views/{step:int}/{file}", async Task<IResult> (
+    Guid jobId, int step, string file, ModelGenerationService models, CancellationToken cancellationToken) =>
+{
+    var found = await models.PreparationViewFileAsync(jobId, step, file, cancellationToken);
+    if (found.Kind != RepositoryResultKind.Ok) return ToHttpResult(found);
+    return Results.File(found.Value.Path, found.Value.ContentType);
+});
+// The gate nothing automatic may pass. Every compiler receipt says a person
+// still has to look; this is where looking is written down.
+app.MapPost("/api/assets/{assetId:guid}/preparation-acceptance", async Task<IResult> (
+    Guid assetId, SetPreparationAcceptanceRequest request, AssetStore assets, CancellationToken cancellationToken)
+    => ToHttpResult(await assets.SetPreparationAcceptanceAsync(assetId, request, cancellationToken)));
 app.MapPost("/api/webmcp/scene-blockouts", async (ProposeSceneBlockoutRequest request, SceneBlockoutService blockouts, CancellationToken cancellationToken)
     => Results.Ok(await blockouts.ProposeAsync(request, cancellationToken)));
 app.MapGet("/api/scene-blockouts", async Task<IResult> (Guid? referenceAssetId, SceneBlockoutService blockouts, CancellationToken cancellationToken)

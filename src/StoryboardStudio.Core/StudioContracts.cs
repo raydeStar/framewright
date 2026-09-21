@@ -251,6 +251,34 @@ public sealed record CreateModelGenerationRequest(
 /// allowed to. Capability and permission are separate answers: a route that
 /// could run is still uncommissioned until the artist says otherwise.
 /// </summary>
+/// <summary>
+/// Prepare an existing library model for browser or runtime use: the same
+/// compiler, a different route. Nothing about the source is touched.
+/// </summary>
+public sealed record CreateModelPreparationRequest(
+    Guid SourceAssetId, string? Name, int? TriangleBudget);
+
+/// <summary>
+/// The artist's verdict on a prepared derivative, recorded where it belongs --
+/// on the derivative. Refusing one says so rather than deleting it, because
+/// the reason a derivative was refused is worth keeping.
+/// </summary>
+public sealed record SetPreparationAcceptanceRequest(bool Accepted, string? Note);
+
+/// <summary>
+/// The fixed views a person compares a derivative to its source by, named so a
+/// studio can fetch them without knowing where a job kept its workspace.
+/// </summary>
+public sealed record ModelPreparationEvidence(
+    Guid JobId, Guid? SourceAssetId, Guid? DerivativeAssetId,
+    ModelPreparationViews? Source, ModelPreparationViews? Derivative);
+
+public sealed record ModelPreparationViews(
+    string Step, string SourceSha256, ModelPreparationView[] Views);
+
+public sealed record ModelPreparationView(
+    string View, string Pass, string Url, string Sha256);
+
 public sealed record ModelGenerationReadiness(
     bool Installed, bool Commissioned, bool CanRun,
     string? CompilerVersion, string? Checkout, string? Blender,
@@ -1190,7 +1218,18 @@ public sealed record AssetSummary(
     bool IsCurrentRevision = false,
     Guid? ParentAssetId = null,
     string RevisionPrompt = "",
-    string RevisionEngine = "");
+    string RevisionEngine = "",
+    // Acceptance is a fact about this one asset, which is what stops it being
+    // inherited. A prepared derivative is a new revision and therefore a new
+    // row, so it starts unaccepted however long its parent has been approved.
+    DateTimeOffset? PreparationAcceptedAt = null,
+    string PreparationAcceptedBy = "",
+    string PreparationAcceptanceNote = "",
+    // True when the derivative's triangle or vertex count differs from the
+    // revision it came from. A rig or an anchor agreed against the old surface
+    // cannot follow it across a change of topology, and a reader should not
+    // have to work that out by comparing two profiles.
+    bool PreparationTopologyChanged = false);
 
 public sealed record AssetCollectionSummary(
     Guid Id,

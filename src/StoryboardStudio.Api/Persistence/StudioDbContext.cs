@@ -537,6 +537,26 @@ public sealed class AssetRecord
     public Guid? ParentAssetId { get; set; }
     public string RevisionPrompt { get; set; } = "";
     public string RevisionEngine { get; set; } = "";
+
+    /// <summary>
+    /// When a person accepted this asset, and who said so.
+    ///
+    /// Acceptance lives on the asset that was accepted, and that is the whole
+    /// mechanism: a prepared derivative is a new revision and therefore a new
+    /// row, so it starts unaccepted however long its parent has been approved.
+    /// Nothing has to remember to clear anything.
+    /// </summary>
+    public DateTimeOffset? PreparationAcceptedAt { get; set; }
+    public string PreparationAcceptedBy { get; set; } = "";
+    public string PreparationAcceptanceNote { get; set; } = "";
+
+    /// <summary>
+    /// Set when a derivative's triangle or vertex count differs from the
+    /// revision it was prepared from. A rig or an anchor agreed against the
+    /// old surface cannot follow it across that, so it is recorded on the
+    /// asset rather than left for a reader to derive from two profiles.
+    /// </summary>
+    public bool PreparationTopologyChanged { get; set; }
 }
 
 public sealed class AssetCollectionRecord

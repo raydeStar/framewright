@@ -510,7 +510,11 @@ public sealed class AssetStore
             parent.RevisionFamilyId = familyId;
             parent.RevisionNumber = 1;
             parent.IsCurrentRevision = true;
-            parent.RevisionPrompt = string.IsNullOrWhiteSpace(parent.RevisionPrompt) ? "Original image" : parent.RevisionPrompt;
+            // A stack takes images and models both, and calling a model's first
+            // revision "Original image" said the wrong word about it.
+            parent.RevisionPrompt = string.IsNullOrWhiteSpace(parent.RevisionPrompt)
+                ? $"Original {parent.Kind.ToLowerInvariant()}"
+                : parent.RevisionPrompt;
             parent.RevisionEngine = string.IsNullOrWhiteSpace(parent.RevisionEngine) ? parent.Source : parent.RevisionEngine;
         }
         var family = await db.Assets.Where(x => x.RevisionFamilyId == familyId).ToListAsync(cancellationToken);
@@ -530,6 +534,73 @@ public sealed class AssetStore
         AddAudit("AssetRevisionAdded", "Asset", next.Id, new { familyId, next.RevisionNumber, next.ParentAssetId, next.RevisionEngine });
         await db.SaveChangesAsync(cancellationToken);
         return RepositoryResult<AssetSummary>.Ok(Map(next));
+    }
+
+    /// <summary>
+    /// Records what a person decided about one asset.
+    ///
+    /// This is the gate nothing automatic may pass. Every reducing and painting
+    /// stage in the compiler reports `mechanical_pass` and never approval, and
+    /// every receipt says a person still has to look. This is where looking is
+    /// written down.
+    ///
+    /// It is deliberately per-asset. A prepared derivative is a new revision
+    /// and therefore a new row, so it starts unaccepted however long its parent
+    /// has been approved, and nothing anywhere has to remember to clear
+    /// anything. Accepting one is also what makes it the current revision:
+    /// until somebody has looked, every scene and picker goes on reaching for
+    /// the mesh that was reviewed.
+    ///
+    /// A refusal is recorded rather than deleted, because the reason a
+    /// derivative was refused is the reason the next one is asked for
+    /// differently.
+    /// </summary>
+    public async Task<RepositoryResult<AssetSummary>> SetPreparationAcceptanceAsync(
+        Guid assetId, SetPreparationAcceptanceRequest request, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.SingleOrDefaultAsync(x => x.Id == assetId, cancellationToken);
+        if (asset is null) return RepositoryResult<AssetSummary>.NotFound();
+        if (asset.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<AssetSummary>.Invalid("Only a model is accepted this way.");
+        if (asset.IsArchived)
+            return RepositoryResult<AssetSummary>.Invalid("That model is archived. Restore it before deciding about it.");
+
+        var note = NormalizeRevisionText(request.Note, 2_000, "");
+        if (!request.Accepted && string.IsNullOrWhiteSpace(note))
+            return RepositoryResult<AssetSummary>.Invalid(
+                "Say what is wrong with it. A refusal without a reason tells the next attempt nothing.");
+
+        asset.PreparationAcceptanceNote = note;
+        if (request.Accepted)
+        {
+            asset.PreparationAcceptedAt = timeProvider.GetUtcNow();
+            // This studio has no accounts, so the only honest attribution is
+            // where it happened. A name invented here would read like evidence
+            // of something nobody checked.
+            asset.PreparationAcceptedBy = "the artist at this workstation";
+            if (asset.RevisionFamilyId is not null)
+            {
+                var family = await db.Assets
+                    .Where(x => x.RevisionFamilyId == asset.RevisionFamilyId)
+                    .ToListAsync(cancellationToken);
+                foreach (var member in family) member.IsCurrentRevision = member.Id == asset.Id;
+            }
+        }
+        else
+        {
+            asset.PreparationAcceptedAt = null;
+            asset.PreparationAcceptedBy = "";
+        }
+        asset.UpdatedAt = timeProvider.GetUtcNow();
+        AddAudit("AssetPreparationDecided", "Asset", asset.Id, new
+        {
+            accepted = request.Accepted,
+            asset.PreparationTopologyChanged,
+            asset.RevisionFamilyId,
+            asset.RevisionNumber,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<AssetSummary>.Ok(Map(asset));
     }
 
     public async Task<RepositoryResult<AssetSummary>> PromoteRevisionAsync(Guid assetId, CancellationToken cancellationToken)
@@ -647,7 +718,8 @@ public sealed class AssetStore
         string.IsNullOrWhiteSpace(x.DisplayName) ? Path.GetFileNameWithoutExtension(x.OriginalFileName) : x.DisplayName,
         x.CollectionId, JsonSerializer.Deserialize<string[]>(string.IsNullOrWhiteSpace(x.TagsJson) ? "[]" : x.TagsJson) ?? [],
         x.Notes ?? "", string.IsNullOrWhiteSpace(x.Source) ? "Imported" : x.Source, x.IsArchived, x.UpdatedAt == default ? x.CreatedAt : x.UpdatedAt,
-        x.RevisionFamilyId, x.RevisionNumber, x.IsCurrentRevision, x.ParentAssetId, x.RevisionPrompt ?? "", x.RevisionEngine ?? "");
+        x.RevisionFamilyId, x.RevisionNumber, x.IsCurrentRevision, x.ParentAssetId, x.RevisionPrompt ?? "", x.RevisionEngine ?? "",
+        x.PreparationAcceptedAt, x.PreparationAcceptedBy ?? "", x.PreparationAcceptanceNote ?? "", x.PreparationTopologyChanged);
 
     private void AddAudit(string type, string targetType, Guid targetId, object payload) => db.AuditEvents.Add(new AuditEventRecord { Id = Guid.NewGuid(), Type = type, TargetType = targetType, TargetId = targetId.ToString(), PayloadJson = JsonSerializer.Serialize(payload), CreatedAt = timeProvider.GetUtcNow() });
     private static string? ValidateCollection(string name, string color)

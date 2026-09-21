@@ -24,6 +24,7 @@ public static class StudioDatabaseInitializer
     private const string SceneBlockoutMigration = "20260919-scene-blockout-v13";
     private const string SceneMotionMigration = "20260919-scene-motion-v14";
     private const string AcknowledgedFailureMigration = "20260920-acknowledged-failures-v15";
+    private const string PreparedDerivativeMigration = "20260920-prepared-derivatives-v16";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -216,6 +217,23 @@ public static class StudioDatabaseInitializer
                 cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, PreparedDerivativeMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, PreparedDerivativeMigration, cancellationToken);
+                migrationBackupCreated = true;
+            }
+
+            await RunMigrationAsync(db, PreparedDerivativeMigration, async () =>
+            {
+                await EnsureColumnAsync(db, "Assets", "PreparationAcceptedAt", "TEXT NULL", cancellationToken);
+                await EnsureColumnAsync(db, "Assets", "PreparationAcceptedBy", "TEXT NOT NULL DEFAULT ''", cancellationToken);
+                await EnsureColumnAsync(db, "Assets", "PreparationAcceptanceNote", "TEXT NOT NULL DEFAULT ''", cancellationToken);
+                await EnsureColumnAsync(db, "Assets", "PreparationTopologyChanged", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+            }, cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -345,6 +363,7 @@ public static class StudioDatabaseInitializer
             SceneBlockoutMigration => "reference-bound-blockout-plans-and-placeholder-scene-objects",
             SceneMotionMigration => "per-instance-clip-bindings-and-rigid-part-pivot-motion",
             AcknowledgedFailureMigration => "a-failure-an-artist-has-seen-stays-seen",
+            PreparedDerivativeMigration => "per-asset-preparation-acceptance-and-topology-change-that-cannot-be-inherited",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

@@ -6,6 +6,9 @@ import type { AssetSummary, ModelProfileSummary, RigPoseSummary } from '../types
 // three.js only loads when an artist actually opens a model, so the ordinary
 // image and audio workflows keep their current start-up cost.
 const ModelViewer = lazy(() => import('./ModelViewer'))
+// Only a model worth reducing ever opens this, and it pulls its own
+// evidence images, so it loads with the model rather than with the app.
+const ModelPreparation = lazy(() => import('./ModelPreparation'))
 
 /**
  * The isolated inspection surface for one model: its revision stack, the
@@ -183,6 +186,15 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
             <p className="model-note">Scene space, +Y up, metres. Measured from the stored file, not from the view.</p>
             <p className="model-bounds">min ({profile.boundsMin.map(value => value.toFixed(2)).join(', ')}) · max ({profile.boundsMax.map(value => value.toFixed(2)).join(', ')})</p>
           </section>
+
+          <Suspense fallback={null}>
+            <ModelPreparation
+              asset={active}
+              profile={profile}
+              onQueued={message => onChanged?.(message)}
+              onDecided={message => { onChanged?.(message); void loadRevisions() }}
+            />
+          </Suspense>
 
           <section data-testid="model-statistics">
             <h2>Geometry</h2>

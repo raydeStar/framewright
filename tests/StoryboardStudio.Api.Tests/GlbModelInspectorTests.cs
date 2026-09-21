@@ -175,6 +175,10 @@ public static class ModelFixtures
     public static byte[] AsymmetricBlock() => File.ReadAllBytes(Path());
     public static byte[] AsymmetricPost() => File.ReadAllBytes(Path("asymmetric-post.glb"));
     public static byte[] RiggedFigure() => File.ReadAllBytes(Path("rigged-figure.glb"));
+    // Dense enough that reducing it means something: a runtime budget is at
+    // least a thousand triangles, so no budget can ever be smaller than a block.
+    public static byte[] DenseProp() => File.ReadAllBytes(Path("dense-prop.glb"));
+    public static byte[] DensePropRuntime() => File.ReadAllBytes(Path("dense-prop-runtime.glb"));
     public static byte[] RiggedWrongProfile() => File.ReadAllBytes(Path("rigged-wrong-profile.glb"));
     public static byte[] RiggedBrokenSkin() => File.ReadAllBytes(Path("rigged-broken-skin.glb"));
     public static byte[] ClipArmRaise() => File.ReadAllBytes(Path("clip-arm-raise.glb"));

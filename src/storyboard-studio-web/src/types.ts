@@ -92,7 +92,7 @@ export interface RuntimeReadinessSummary { status: 'Ready' | 'Degraded' | 'NotRe
 export interface ProductionExportReadiness { canExportProduction: boolean; blockers: string[]; warnings: string[]; shotCount: number; ratifiedShotCount: number; openNoteCount: number; activeJobCount: number; examinedAt: string }
 export interface AuthorityBinding { id: string; name: string; category: string; version: number }
 export interface GenerationManifestSummary { id: string; shotId: string; shotCode: string; shotVersion: number; sketchId: string; sketchRevision: number; route: GenerationRoute; purpose: GenerationPurpose; state: 'Prepared' | 'Dispatched' | 'Completed' | 'Failed' | 'Cancelled'; creativeBrief: string; authorities: AuthorityBinding[]; constraints: string[]; manifestHash: string; providerCallMade: boolean; compositionAssetId?: string; compositionAssetHash?: string; createdAt: string; lastFrameAssetId?: string; lastFrameAssetHash?: string; videoQuality?: VideoQuality; videoSeed?: number; videoTakeId?: string; promotedFromJobId?: string }
-export interface AssetSummary { id: string; projectId: string; kind: 'Image' | 'Video' | 'Audio' | 'Model'; originalFileName: string; mimeType: string; bytes: number; width?: number; height?: number; durationSeconds?: number; contentHash: string; contentUrl: string; createdAt: string; displayName: string; collectionId?: string; tags: string[]; notes: string; source: string; isArchived: boolean; updatedAt: string; revisionFamilyId?: string; revisionNumber?: number; isCurrentRevision: boolean; parentAssetId?: string; revisionPrompt: string; revisionEngine: string }
+export interface AssetSummary { id: string; projectId: string; kind: 'Image' | 'Video' | 'Audio' | 'Model'; originalFileName: string; mimeType: string; bytes: number; width?: number; height?: number; durationSeconds?: number; contentHash: string; contentUrl: string; createdAt: string; displayName: string; collectionId?: string; tags: string[]; notes: string; source: string; isArchived: boolean; updatedAt: string; revisionFamilyId?: string; revisionNumber?: number; isCurrentRevision: boolean; parentAssetId?: string; revisionPrompt: string; revisionEngine: string; preparationAcceptedAt?: string; preparationAcceptedBy: string; preparationAcceptanceNote: string; preparationTopologyChanged: boolean }
 export interface AssetCollectionSummary { id: string; projectId: string; name: string; color: string; sortOrder: number; assetCount: number; createdAt: string; updatedAt: string }
 export interface AssetPlacementSummary { id: string; assetId: string; shotId: string; shotCode: string; shotTitle: string; role: string; createdAt: string }
 export interface AssetGenerationReference { id: string; assetId: string; label: string; detail: string; imageUrl: string; source: 'Shot' | 'Asset' | 'Authority' }
@@ -207,6 +207,13 @@ export interface ModelGenerationReadiness {
   missing: string[]; detail: string; sizes: ModelSizeChoice[] | null
   colours: ModelColourChoice[] | null
 }
+/** The fixed views one preparation rendered, of the source and of what it made. */
+export interface ModelPreparationEvidence {
+  jobId: string; sourceAssetId: string | null; derivativeAssetId: string | null
+  source: ModelPreparationViews | null; derivative: ModelPreparationViews | null
+}
+export interface ModelPreparationViews { step: string; sourceSha256: string; views: ModelPreparationView[] }
+export interface ModelPreparationView { view: string; pass: string; url: string; sha256: string }
 /** A colour a model's glass might have been painted, named the way a person would. */
 export interface ModelColourChoice { colour: string; description: string }
 /** How big a thing is, said as where it comes up to on a person. */

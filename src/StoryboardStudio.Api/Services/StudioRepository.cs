@@ -2259,6 +2259,18 @@ public sealed class StudioRepository(
 
     private static CommentSummary MapComment(CommentRecord x) => new(x.Id, x.ShotId, x.Version, x.X, x.Y, x.Body, x.State, x.CreatedAt, x.ReferenceId, x.ReferenceVersion);
     private static AssetReviewNoteSummary MapAssetReviewNote(AssetReviewNoteRecord x) => new(x.Id, x.AssetId, x.X, x.Y, x.Body, x.State, x.CreatedAt);
+    /// <summary>
+    /// One job on its own. The API has always handed out /api/jobs/{id} as the
+    /// place to watch queued work; this is that place. A screen following a
+    /// single long job should not have to pull the whole studio snapshot to
+    /// find out how far it has got.
+    /// </summary>
+    public async Task<RepositoryResult<JobSummary>> JobAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        var job = await db.Jobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == jobId, cancellationToken);
+        return job is null ? RepositoryResult<JobSummary>.NotFound() : RepositoryResult<JobSummary>.Ok(MapJob(job));
+    }
+
     private static JobSummary MapJob(JobRecord x) => new(x.Id, x.ShotId, x.ShotCode, x.Kind, Enum.Parse<JobState>(x.State), x.Progress, x.Phase, x.Backend, x.CreatedAt, x.CompletedAt, x.Error, x.ManifestId, x.AdapterId, x.OutputAssetId, x.OutputAssetId is null ? null : $"/api/assets/{x.OutputAssetId}/content", x.ProviderRequestId, x.Attempt, x.RetryOfJobId, x.LastHeartbeatAt, x.WorkType, x.AcknowledgedAt);
 }
 

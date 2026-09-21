@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorShotView, ModelGenerationReadiness, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -125,6 +125,12 @@ export const studioApi = {
   generateModel: (sourceAssetId: string, name: string, size: string, glassColour?: string) =>
     request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, size, glassColour }) }),
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
+  modelPreparationReadiness: () => request<ModelGenerationReadiness>('/api/models/preparation/readiness'),
+  prepareModel: (sourceAssetId: string, name: string, triangleBudget: number) =>
+    request<JobSummary>('/api/models/preparation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, triangleBudget }) }),
+  preparationEvidence: (jobId: string) => request<ModelPreparationEvidence>(`/api/jobs/${jobId}/preparation-evidence`),
+  setPreparationAcceptance: (assetId: string, accepted: boolean, note: string) =>
+    request<AssetSummary>(`/api/assets/${assetId}/preparation-acceptance`, { method: 'POST', body: JSON.stringify({ accepted, note }) }),
   rigPose: (assetId: string, pose: { bone: string; rotation: number[] }[]) =>
     request<RigPoseSummary>(`/api/assets/${assetId}/rig-pose`, { method: 'POST', body: JSON.stringify({ pose }) }),
   scenes: () => request<SceneListItem[]>('/api/scenes'),
@@ -209,6 +215,7 @@ export const studioApi = {
   duplicateShot: (shotId: string) => request<ShotSummary>(`/api/shots/${shotId}/duplicate`, { method: 'POST' }),
   updateShot: (shotId: string, body: { expectedUpdatedAt: string; title: string; description: string; durationFrames: number; camera: string; action: string; referenceIds: string[]; constraints: string[] }) => request<ShotSummary>(`/api/shots/${shotId}`, { method: 'PUT', body: JSON.stringify(body) }),
   generationAdapters: () => request<GenerationAdapterSummary[]>('/api/generation/adapters'),
+  job: (jobId: string) => request<JobSummary>(`/api/jobs/${jobId}`),
   retryJob: (jobId: string) => request<JobSummary>(`/api/jobs/${jobId}/retry`, { method: 'POST' }),
   acknowledgeJob: (jobId: string) => request<void>(`/api/jobs/${jobId}/acknowledge`, { method: 'POST' }),
   backupStatus: () => request<BackupStatus>('/api/maintenance/status'),
