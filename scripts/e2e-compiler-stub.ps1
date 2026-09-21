@@ -80,9 +80,9 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
                     )
                 },
                 [ordered]@{
-                    stage     = 'reduce-mesh'
+                    stage     = 'remesh'
                     runner    = 'powershell'
-                    summary   = 'Collapse a staged mesh to a runtime budget, and measure what that cost.'
+                    summary   = 'Rebuild a generated surface on a uniform grid, then collapse it to a runtime budget.'
                     produces  = 'reference-asset-compiler.production-retopology-candidate.v1'
                     arguments = @('source', 'output', 'report')
                     options   = @('triangle_budget')
@@ -127,7 +127,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     $stage = $arguments[1]
-    if ($stage -notin @('geometry', 'stage-mesh', 'reduce-mesh', 'uv-unwrap', 'texture', 'browser-payload')) {
+    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'browser-payload')) {
         Write-Error "RAC_ERROR unknown stage: $stage"
         exit 2
     }
@@ -157,7 +157,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     $schema = switch ($stage) {
         'geometry'    { 'reference-asset-compiler.geometry-candidate.v1' }
         'stage-mesh'  { 'reference-asset-compiler.staged-mesh.v1' }
-        'reduce-mesh' { 'reference-asset-compiler.production-retopology-candidate.v1' }
+        'remesh'      { 'reference-asset-compiler.production-retopology-candidate.v1' }
         'uv-unwrap'   { 'reference-asset-compiler.texture-uv-transport.v1' }
         'texture'     { 'reference-asset-compiler.paint-validation.v1' }
         default       { 'reference-asset-compiler.browser-payload.v1' }
@@ -179,7 +179,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         ok        = $true
         schema    = 'reference-asset-compiler.stage-run.v1'
         stage     = $stage
-        runner    = $(if ($stage -in @('geometry', 'reduce-mesh')) { 'powershell' } else { 'blender' })
+        runner    = $(if ($stage -in @('geometry', 'remesh')) { 'powershell' } else { 'blender' })
         blender   = 'e2e-stand-in'
         exit_code = 0
         seconds   = 0.2

@@ -31,7 +31,7 @@ public sealed class ModelGenerationService(
     public const string ModelWorkType = "Model";
     public const string GeometryStage = "geometry";
     public const string StageMeshStage = "stage-mesh";
-    public const string ReduceMeshStage = "reduce-mesh";
+    public const string RemeshStage = "remesh";
     public const string UvUnwrapStage = "uv-unwrap";
     public const string TextureStage = "texture";
     public const string BrowserPayloadStage = "browser-payload";
@@ -45,8 +45,10 @@ public sealed class ModelGenerationService(
     /// sizeless: the first real run produced 2.4 million triangles at roughly
     /// two metres tall, whatever the subject. Staging gives it the size the
     /// artist said it is, which is what makes the reduction gate's millimetres
-    /// mean anything. Reduction collapses it to a runtime budget and measures
-    /// what that cost.
+    /// mean anything. The remesh rebuilds it on a uniform grid and collapses
+    /// that to a runtime budget, which is the difference between a clean
+    /// surface and a creased one: a generator's output has no topology worth
+    /// preserving, so compressing it only preserves the noise.
     ///
     /// What comes out of that is the right shape and the wrong colour: a
     /// generated mesh has none, and no UVs to put any on. Unwrapping gives it
@@ -56,7 +58,7 @@ public sealed class ModelGenerationService(
     /// </summary>
     public static readonly string[] ReferenceToModelRoute =
     [
-        GeometryStage, StageMeshStage, ReduceMeshStage,
+        GeometryStage, StageMeshStage, RemeshStage,
         UvUnwrapStage, TextureStage, BrowserPayloadStage,
     ];
 
@@ -65,7 +67,7 @@ public sealed class ModelGenerationService(
     {
         [GeometryStage] = "Making a mesh from the reference",
         [StageMeshStage] = "Setting its real size",
-        [ReduceMeshStage] = "Bringing it down to a size a browser can carry",
+        [RemeshStage] = "Rebuilding it evenly at a size a browser can carry",
         [UvUnwrapStage] = "Unfolding it so it can be painted",
         [TextureStage] = "Painting it from the reference",
         [BrowserPayloadStage] = "Preparing the mesh for the browser",
@@ -442,7 +444,10 @@ public sealed class ModelGenerationService(
             ["size"] = packet.Size,
             ["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture),
         },
-        ReduceMeshStage => new() { ["triangle-budget"] = RuntimeTriangleBudget },
+        // Rebuilt on a uniform grid rather than collapsed: a generator's
+        // surface has no topology worth preserving, and collapsing it keeps
+        // the noise as slivers and spikes.
+        RemeshStage => new() { ["triangle-budget"] = RuntimeTriangleBudget },
         // A generated prop is an approved static triangle mesh: it is unfolded
         // as it stands rather than welded or remeshed, which would change the
         // geometry the reduction gate already measured.

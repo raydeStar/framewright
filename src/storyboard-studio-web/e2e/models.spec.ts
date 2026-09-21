@@ -95,6 +95,25 @@ test('a supported model imports, reports its real measurements, and inspects wit
   await expect(stage).toHaveAttribute('data-loaded-min', '0,0,0')
   await expect(stage).toHaveAttribute('data-loaded-max', '2,1,0.75')
 
+  // Sliding the view is not orbiting it: the camera moves without turning, so
+  // a model taller than the frame can be read from top to bottom.
+  const orbitBeforePan = await page.getByTestId('model-viewer-orbit').innerText()
+  await stage.press('Shift+ArrowUp')
+  await expect(page.getByTestId('model-viewer-orbit')).toHaveText(orbitBeforePan)
+
+  // Paint and wire answer different questions, and a painted surface hides the
+  // topology that a decimated mesh's faults live in.
+  await expect(page.getByTestId('model-paint')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('model-paint').click()
+  await expect(page.getByTestId('model-paint')).toHaveAttribute('aria-pressed', 'false')
+  await page.getByTestId('model-wireframe').click()
+  await expect(page.getByTestId('model-wireframe')).toHaveAttribute('aria-pressed', 'true')
+  // Neither toggle edits the model: what the renderer loaded is unchanged.
+  await expect(stage).toHaveAttribute('data-loaded-min', '0,0,0')
+  await expect(stage).toHaveAttribute('data-loaded-max', '2,1,0.75')
+  await page.getByTestId('model-paint').click()
+  await page.getByTestId('model-wireframe').click()
+
   await page.getByRole('button', { name: 'Reset view' }).click()
   await expect(page.getByTestId('model-viewer-orbit')).toHaveText(openingOrbit)
   verifyConsole()

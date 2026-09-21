@@ -1773,6 +1773,7 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .model-viewer-bar{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:var(--text-xs)}
 .model-viewer-bar>div{display:flex;gap:7px}
 .model-viewer-bar button{min-height:40px;padding:0 13px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font-weight:650}
+.model-viewer-bar button.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 18%,var(--surface-2));color:var(--text)}
 .model-viewer-orbit{position:relative;z-index:1;margin:0;color:var(--quiet);font:var(--text-2xs) ui-monospace,monospace}
 .model-inspector{min-height:0;overflow-y:auto;padding:16px;border-left:1px solid var(--line);background:var(--surface-1);display:grid;gap:18px;align-content:start}
 .model-inspector h2{display:flex;align-items:center;gap:7px;margin:0 0 9px;font-size:var(--text-sm);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}

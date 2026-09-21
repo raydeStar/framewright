@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Mesh, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type Object3D } from 'three'
+import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Mesh, MeshStandardMaterial, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type Material, type Object3D } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 /**
  * An isolated inspection surface for one model revision.
  *
- * The inspection camera orbits around the model; the model itself is never
+ * The inspection camera orbits, pans and zooms; the model itself is never
  * touched. Every transform written here lands on the camera, so "I looked at it
- * from the other side" can never quietly become "I moved it".
+ * from the other side" can never quietly become "I moved it". Panning moves the
+ * point the camera looks at, which is the same promise: the model stays where
+ * the file put it.
+ *
+ * Paint can be turned off and the wire turned on, because they answer different
+ * questions. A textured surface hides its own topology, and a decimated mesh's
+ * spikes and creases live in the topology. Neither toggle edits anything: the
+ * file's own materials are kept and put back.
  *
  * Resources are released explicitly when the model changes or the surface
  * closes. A WebGL context left holding geometry is how a long session turns into
@@ -31,11 +38,16 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
   const [state, setState] = useState<ViewerState>('loading')
   const [detail, setDetail] = useState('Preparing the model surface')
   const [readout, setReadout] = useState({ yaw: openingYaw, pitch: openingPitch })
+  const [painted, setPainted] = useState(true)
+  const [wired, setWired] = useState(false)
+  // The renderer reads these rather than React state, because it runs inside an
+  // effect that must not be torn down and rebuilt to change how a surface looks.
+  const display = useRef({ painted: true, wired: false })
   // One camera, one source of truth. The renderer reads this; the pointer and
   // keyboard paths both write to it, so they can never drift apart.
   const view = useRef({ yaw: openingYaw, pitch: openingPitch, distance: 1, target: new Vector3() })
-  const surface = useRef<{ place: () => void; frame: () => void } | undefined>(undefined)
-  const drag = useRef<{ pointerId: number; x: number; y: number } | undefined>(undefined)
+  const surface = useRef<{ place: () => void; frame: () => void; show: () => void } | undefined>(undefined)
+  const drag = useRef<{ pointerId: number; x: number; y: number; panning: boolean } | undefined>(undefined)
   const reportError = useRef(onError)
   reportError.current = onError
 
@@ -107,7 +119,42 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
       container.dataset.loadedMax = [box.max.x, box.max.y, box.max.z].map(round).join(',')
     }
 
-    surface.current = { place, frame }
+    // The file's own materials are kept, never edited, so turning paint back on
+    // restores exactly what was delivered rather than an approximation of it.
+    const dressed: { mesh: Mesh; own: Material | Material[]; plain: Material }[] = []
+
+    const show = () => {
+      for (const { mesh, own, plain } of dressed) {
+        mesh.material = display.current.painted ? own : plain
+        for (const material of (Array.isArray(mesh.material) ? mesh.material : [mesh.material])) {
+          const surfaceMaterial = material as Material & { wireframe?: boolean }
+          if ('wireframe' in surfaceMaterial) surfaceMaterial.wireframe = display.current.wired
+        }
+      }
+      draw()
+    }
+
+    const dress = (root: Object3D) => {
+      root.traverse(node => {
+        if (!(node instanceof Mesh) || !node.material) return
+        const own = node.material as Material | Material[]
+        const first = (Array.isArray(own) ? own[0] : own) as MeshStandardMaterial
+        dressed.push({
+          mesh: node,
+          own,
+          // Unpainted clay, so the eye reads form and topology rather than the
+          // texture drawn over them.
+          plain: new MeshStandardMaterial({
+            color: 0xc9c5bd,
+            roughness: 0.82,
+            metalness: 0,
+            side: first?.side,
+          }),
+        })
+      })
+    }
+
+    surface.current = { place, frame, show }
 
     const resize = () => {
       const width = Math.max(1, container.clientWidth)
@@ -135,8 +182,10 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
         if (disposed) { release(gltf.scene); return }
         loaded = gltf.scene
         scene.add(loaded)
+        dress(loaded)
+        show()
         setState('ready')
-        setDetail('Drag or use the arrow keys to orbit. The model is not moved.')
+        setDetail('Drag to orbit, right-drag or shift-drag to move up and down, scroll to zoom. The model is not moved.')
         resize()
         frame()
         publishLoadedBounds()
@@ -177,6 +226,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
     return () => {
       disposed = true
       surface.current = undefined
+      for (const { plain } of dressed) plain.dispose()
       observer.disconnect()
       renderer.domElement.removeEventListener('wheel', wheel)
       if (loaded) { scene.remove(loaded); release(loaded) }
@@ -195,28 +245,50 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
     surface.current?.place()
   }
 
+  /**
+   * Slides what the camera looks at, in the plane it is looking through, so
+   * dragging up moves the model down the screen whatever angle it is seen from.
+   * Scaled by distance: the same gesture should cross the same fraction of the
+   * screen whether the camera is close in or far out.
+   */
+  const panBy = (across: number, up: number) => {
+    const { yaw, distance, target } = view.current
+    target.x -= Math.cos(yaw) * across * distance
+    target.z += Math.sin(yaw) * across * distance
+    target.y += up * distance
+    surface.current?.place()
+  }
+
   const nudge = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const step = event.shiftKey ? 0.25 : 0.08
     const moves: Record<string, [number, number]> = {
-      ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step],
+      ArrowLeft: [-0.08, 0], ArrowRight: [0.08, 0], ArrowUp: [0, 0.08], ArrowDown: [0, -0.08],
     }
     const move = moves[event.key]
     if (!move) return
     event.preventDefault()
-    orbitBy(move[0], move[1])
+    // Shift slides rather than turning, so the keyboard reaches everywhere the
+    // pointer does and a model taller than the frame can still be read.
+    if (event.shiftKey) panBy(-move[0] * 0.35, -move[1] * 0.35)
+    else orbitBy(move[0], move[1])
   }
 
   const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (state !== 'ready') return
     event.currentTarget.setPointerCapture(event.pointerId)
-    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+    // Right or middle button slides; so does shift, for a trackpad with one.
+    drag.current = {
+      pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+      panning: event.button === 1 || event.button === 2 || event.shiftKey,
+    }
   }
   const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return
     const deltaX = (event.clientX - drag.current.x) * 0.008
     const deltaY = (event.clientY - drag.current.y) * 0.008
-    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
-    orbitBy(-deltaX, deltaY)
+    const panning = drag.current.panning
+    drag.current = { ...drag.current, x: event.clientX, y: event.clientY }
+    if (panning) panBy(-deltaX * 0.35, deltaY * 0.35)
+    else orbitBy(-deltaX, deltaY)
   }
   const pointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId === event.pointerId) drag.current = undefined
@@ -228,17 +300,28 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
       className="model-stage"
       data-testid="model-stage"
       role="img"
-      aria-label={`${label}. Inspection view. Drag or use the arrow keys to orbit; the model itself is not moved.`}
+      aria-label={`${label}. Inspection view. Drag or use the arrow keys to orbit, right-drag or shift-drag to move up and down; the model itself is not moved.`}
       tabIndex={0}
       onKeyDown={nudge}
       onPointerDown={pointerDown}
       onPointerMove={pointerMove}
       onPointerUp={pointerUp}
       onPointerCancel={pointerUp}
+      onContextMenu={event => event.preventDefault()}
     />
     <div className="model-viewer-bar">
       <span data-testid="model-viewer-state" role="status">{detail}</span>
       <div>
+        <button type="button" className={painted ? 'is-on' : undefined}
+          data-testid="model-paint" aria-pressed={painted} disabled={state !== 'ready'}
+          onClick={() => { display.current.painted = !painted; setPainted(!painted); surface.current?.show() }}>
+          {painted ? 'Paint on' : 'Paint off'}
+        </button>
+        <button type="button" className={wired ? 'is-on' : undefined}
+          data-testid="model-wireframe" aria-pressed={wired} disabled={state !== 'ready'}
+          onClick={() => { display.current.wired = !wired; setWired(!wired); surface.current?.show() }}>
+          {wired ? 'Wire on' : 'Wire off'}
+        </button>
         <button type="button" disabled={state !== 'ready'} onClick={() => surface.current?.frame()}>Frame</button>
         <button type="button" disabled={state !== 'ready'} onClick={() => { view.current.yaw = openingYaw; view.current.pitch = openingPitch; surface.current?.frame() }}>Reset view</button>
       </div>
