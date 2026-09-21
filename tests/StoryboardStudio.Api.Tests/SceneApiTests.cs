@@ -1,7 +1,15 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Buffers.Binary;
+using System.Globalization;
+using System.IO.Compression;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using StoryboardStudio.Api.Persistence;
+using StoryboardStudio.Api.Services;
+using StoryboardStudio.Core;
 
 namespace StoryboardStudio.Api.Tests;
 
@@ -12,6 +20,165 @@ namespace StoryboardStudio.Api.Tests;
 /// </summary>
 public sealed class SceneApiTests
 {
+    [Fact]
+    public async Task ASceneStillFreezesItsInputsAndReopensInTheShotReviewPath()
+    {
+        var dataRoot = Path.Combine(Path.GetTempPath(), "framewright-scene-shot", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataRoot);
+        try
+        {
+            Guid sceneId;
+            Guid shotId;
+            Guid bindingId;
+            Guid stillAssetId;
+            string snapshotHash;
+            using (var factory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var client = factory.CreateClient())
+            {
+                var studio = await client.GetFromJsonAsync<StudioSnapshot>("/api/studio")
+                    ?? throw new InvalidOperationException();
+                var shotResponse = await client.PostAsJsonAsync("/api/shots", new CreateShotRequest(
+                    "SC-900", "Scene still", "A frozen scene becomes an ordinary review frame.",
+                    48, "Unbound", "Hold for review.", [], []));
+                shotResponse.EnsureSuccessStatusCode();
+                var shot = await shotResponse.Content.ReadFromJsonAsync<ShotSummary>()
+                    ?? throw new InvalidOperationException();
+                shotId = shot.Id;
+
+                var modelId = await ImportAsync(client, ModelFixtures.AsymmetricBlock(), "scene-still-block.glb");
+                sceneId = await CreateSceneAsync(client, "Still source");
+                var savedResponse = await SaveAsync(client, sceneId, 1, "Still source", [
+                    Instance(Guid.NewGuid(), modelId, "Hero block", [1, 0, -2], [0, 0.25, 0], [1, 1, 1]),
+                ]);
+                savedResponse.EnsureSuccessStatusCode();
+
+                var camera = new SceneCameraSummary(0.75, 0.35, 7.5, [0.25, 0.8, -0.5], 36);
+                using var rendered = await RenderStillAsync(
+                    client, sceneId, shotId, expectedSceneVersion: 2, expectedShotVersion: 1,
+                    camera, startTime: 0, endTime: 2, stillTime: 1,
+                    PngHeader(studio.Project.DeliveryWidth, studio.Project.DeliveryHeight));
+                rendered.EnsureSuccessStatusCode();
+                var binding = await rendered.Content.ReadFromJsonAsync<SceneShotBindingSummary>()
+                    ?? throw new InvalidOperationException();
+                bindingId = binding.Id;
+                stillAssetId = binding.StillAssetId;
+                snapshotHash = binding.SnapshotHash;
+                Assert.Equal(2, binding.SceneVersion);
+                Assert.Equal(2, binding.ShotVersion);
+                Assert.Equal(camera.Yaw, binding.Camera.Yaw);
+                Assert.Equal(camera.Pitch, binding.Camera.Pitch);
+                Assert.Equal(camera.Distance, binding.Camera.Distance);
+                Assert.Equal(camera.Target, binding.Camera.Target);
+                Assert.Equal(camera.FieldOfView, binding.Camera.FieldOfView);
+                Assert.Equal(studio.Project.DeliveryWidth, binding.DeliveryWidth);
+                Assert.Equal(studio.Project.DeliveryHeight, binding.DeliveryHeight);
+                Assert.Equal(64, binding.SnapshotHash.Length);
+
+                var afterRender = await client.GetFromJsonAsync<StudioSnapshot>("/api/studio")
+                    ?? throw new InvalidOperationException();
+                var reviewedShot = afterRender.Shots.Single(x => x.Id == shotId);
+                Assert.Equal(2, reviewedShot.Version);
+                Assert.Equal(ShotStage.Draft, reviewedShot.Stage);
+                Assert.Equal(ApprovalState.Working, reviewedShot.Approval);
+                Assert.Equal(stillAssetId, reviewedShot.CurrentAssetId);
+                Assert.Contains("Still source", reviewedShot.Camera, StringComparison.Ordinal);
+                var candidates = await client.GetFromJsonAsync<CandidateVersionSummary[]>($"/api/shots/{shotId}/candidates")
+                    ?? throw new InvalidOperationException();
+                Assert.Equal(2, candidates.Length);
+                Assert.Equal(stillAssetId, candidates.Single(x => x.IsCurrent).AssetId);
+
+                // Later scene work does not rewrite what this review frame used.
+                var newerScene = await SaveAsync(client, sceneId, 2, "Still source revised", [
+                    Instance(Guid.NewGuid(), modelId, "Moved block", [9, 0, 4], [0, 1, 0], [2, 2, 2]),
+                ]);
+                newerScene.EnsureSuccessStatusCode();
+                var listResponse = await client.GetAsync($"/api/scenes/{sceneId}/shot-stills");
+                Assert.True(listResponse.IsSuccessStatusCode, await listResponse.Content.ReadAsStringAsync());
+                var listed = await listResponse.Content.ReadFromJsonAsync<SceneShotBindingSummary[]>()
+                    ?? throw new InvalidOperationException();
+                var frozen = Assert.Single(listed);
+                Assert.Equal(bindingId, frozen.Id);
+                Assert.Equal("Still source", frozen.SceneName);
+                Assert.Equal(2, frozen.SceneVersion);
+                Assert.Equal(snapshotHash, frozen.SnapshotHash);
+
+                using var stale = await RenderStillAsync(
+                    client, sceneId, shotId, expectedSceneVersion: 2, expectedShotVersion: 2,
+                    camera, startTime: 0, endTime: 2, stillTime: 1,
+                    PngHeader(studio.Project.DeliveryWidth, studio.Project.DeliveryHeight, 0x5a));
+                Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+                Assert.Single(await client.GetFromJsonAsync<SceneShotBindingSummary[]>($"/api/scenes/{sceneId}/shot-stills")
+                    ?? throw new InvalidOperationException());
+
+                using var scope = factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+                var stored = await db.SceneShotBindings.AsNoTracking().SingleAsync(x => x.Id == bindingId);
+                using var snapshot = JsonDocument.Parse(stored.SnapshotJson);
+                var storedScene = snapshot.RootElement.GetProperty("scene");
+                Assert.Equal("Still source", storedScene.GetProperty("name").GetString());
+                Assert.Equal(1, storedScene.GetProperty("instances")[0].GetProperty("position")[0].GetDouble());
+
+                var exportResponse = await client.GetAsync("/api/export/working-package");
+                exportResponse.EnsureSuccessStatusCode();
+                using var package = new ZipArchive(
+                    new MemoryStream(await exportResponse.Content.ReadAsByteArrayAsync()),
+                    ZipArchiveMode.Read);
+                using var manifest = JsonDocument.Parse(package.GetEntry("production-manifest.json")!.Open());
+                Assert.Equal(4, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
+                Assert.Contains(manifest.RootElement.GetProperty("scenes").EnumerateArray(),
+                    item => item.GetProperty("id").GetGuid() == sceneId);
+                Assert.Contains(manifest.RootElement.GetProperty("sceneInstances").EnumerateArray(),
+                    item => item.GetProperty("sceneId").GetGuid() == sceneId);
+                var exportedBinding = Assert.Single(
+                    manifest.RootElement.GetProperty("sceneShotBindings").EnumerateArray(),
+                    item => item.GetProperty("id").GetGuid() == bindingId);
+                Assert.Equal(snapshotHash, exportedBinding.GetProperty("snapshotHash").GetString());
+                Assert.Contains(manifest.RootElement.GetProperty("assets").EnumerateArray(),
+                    item => item.GetProperty("id").GetGuid() == stillAssetId);
+            }
+
+            // Both the immutable binding and ordinary review image survive a full app restart.
+            using (var reopened = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var client = reopened.CreateClient())
+            {
+                var bindings = await client.GetFromJsonAsync<SceneShotBindingSummary[]>($"/api/scenes/{sceneId}/shot-stills")
+                    ?? throw new InvalidOperationException();
+                var binding = Assert.Single(bindings);
+                Assert.Equal(bindingId, binding.Id);
+                Assert.Equal(snapshotHash, binding.SnapshotHash);
+                Assert.Equal(stillAssetId, binding.StillAssetId);
+                var content = await client.GetAsync(binding.StillAssetUrl);
+                Assert.Equal(HttpStatusCode.OK, content.StatusCode);
+                var studio = await client.GetFromJsonAsync<StudioSnapshot>("/api/studio")
+                    ?? throw new InvalidOperationException();
+                Assert.Equal(stillAssetId, studio.Shots.Single(x => x.Id == shotId).CurrentAssetId);
+            }
+        }
+        finally { if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true); }
+    }
+
+    [Fact]
+    public async Task OverlappingSavesCannotOverwriteTheWinningScene()
+    {
+        using var factory = new StudioApiFactory();
+        using var client = factory.CreateClient();
+        var id = await CreateSceneAsync(client, "Concurrent scene");
+        using var staleScope = factory.Services.CreateScope();
+        var staleDb = staleScope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        // Keep the same tracked version that an overlapping request already read.
+        await staleDb.Scenes.SingleAsync(scene => scene.Id == id);
+        using var winning = await SaveAsync(client, id, 1, "Winning scene", []);
+        winning.EnsureSuccessStatusCode();
+        var result = await staleScope.ServiceProvider.GetRequiredService<SceneService>().SaveAsync(id,
+            new SaveSceneRequest(1, "Losing scene",
+                new SceneCameraSummary(0.9, 0.42, 6, [0, 0.5, 0], 38),
+                new SceneEnvironmentSummary(2.2, 0.8, 0.9, 1.4), []), CancellationToken.None);
+        Assert.Equal(RepositoryResultKind.Conflict, result.Kind);
+        using var stored = await client.GetFromJsonAsync<JsonDocument>($"/api/scenes/{id}") ?? throw new InvalidOperationException();
+        Assert.Equal("Winning scene", stored.RootElement.GetProperty("name").GetString());
+        Assert.Equal(2, stored.RootElement.GetProperty("version").GetInt32());
+    }
+
     [Fact]
     public async Task TwoInstancesOfOneModelMoveIndependentlyAndSurviveARestart()
     {
@@ -115,7 +282,7 @@ public sealed class SceneApiTests
         var renamed = await client.PutAsJsonAsync($"/api/assets/{modelId}", new
         {
             displayName = "Renamed in the library", collectionId = (string?)null,
-            tags = new[] { "renamed" }, notes = "Renaming must not move anything.",
+            tags = (string[])["renamed"], notes = "Renaming must not move anything.",
         });
         renamed.EnsureSuccessStatusCode();
 
@@ -242,7 +409,7 @@ public sealed class SceneApiTests
         client.PutAsJsonAsync($"/api/scenes/{sceneId}", new
         {
             expectedVersion, name,
-            camera = new { yaw = 1.25, pitch = 0.5, distance = 9.5, target = new[] { 0d, 0.75, 0d }, fieldOfView = 40d },
+            camera = new { yaw = 1.25, pitch = 0.5, distance = 9.5, target = (double[])[0d, 0.75, 0d], fieldOfView = 40d },
             environment = new { keyIntensity = 3.4, keyYaw = 0.6, keyPitch = 1.0, ambientIntensity = 1.1 },
             instances,
         });
@@ -259,5 +426,46 @@ public sealed class SceneApiTests
         response.EnsureSuccessStatusCode();
         using var asset = await response.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         return asset.RootElement.GetProperty("id").GetGuid();
+    }
+
+    private static async Task<HttpResponseMessage> RenderStillAsync(
+        HttpClient client,
+        Guid sceneId,
+        Guid shotId,
+        int expectedSceneVersion,
+        int expectedShotVersion,
+        SceneCameraSummary camera,
+        double startTime,
+        double endTime,
+        double stillTime,
+        byte[] png)
+    {
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(png);
+        file.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        content.Add(file, "file", "scene-still.png");
+        content.Add(new StringContent(shotId.ToString()), "shotId");
+        content.Add(new StringContent(expectedSceneVersion.ToString(CultureInfo.InvariantCulture)), "expectedSceneVersion");
+        content.Add(new StringContent(expectedShotVersion.ToString(CultureInfo.InvariantCulture)), "expectedShotVersion");
+        content.Add(new StringContent(startTime.ToString(CultureInfo.InvariantCulture)), "startTime");
+        content.Add(new StringContent(endTime.ToString(CultureInfo.InvariantCulture)), "endTime");
+        content.Add(new StringContent(stillTime.ToString(CultureInfo.InvariantCulture)), "stillTime");
+        content.Add(new StringContent(JsonSerializer.Serialize(camera)), "camera");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/scenes/{sceneId}/shot-stills") { Content = content };
+        request.Headers.Add("X-Storyboard-Studio", "1");
+        return await client.SendAsync(request);
+    }
+
+    private static byte[] PngHeader(int width, int height, byte marker = 0)
+    {
+        // AssetStore deliberately performs a bounded structural/header check;
+        // the browser journey below proves real canvas PNG encoding.
+        var bytes = new byte[25];
+        new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }.CopyTo(bytes, 0);
+        "IHDR"u8.CopyTo(bytes.AsSpan(12, 4));
+        BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(16, 4), width);
+        BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(20, 4), height);
+        bytes[24] = marker;
+        return bytes;
     }
 }

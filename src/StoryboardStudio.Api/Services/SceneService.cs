@@ -191,7 +191,13 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             PayloadJson = System.Text.Json.JsonSerializer.Serialize(new { scene.Version, instances = instances.Length }),
             CreatedAt = now,
         });
-        await db.SaveChangesAsync(cancellationToken);
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException)
+        {
+            db.ChangeTracker.Clear();
+            return RepositoryResult<SceneSummary>.Conflict(
+                "This scene changed while it was being saved. Reopen it before saving again.");
+        }
         return RepositoryResult<SceneSummary>.Ok(await DescribeAsync(scene, cancellationToken));
     }
 

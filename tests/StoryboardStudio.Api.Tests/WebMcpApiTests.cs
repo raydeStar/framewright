@@ -279,7 +279,7 @@ public sealed class WebMcpApiTests
             shotId = shot.Id, expectedVersion = shot.Version, creativeDirection = "A safe sounding change.",
             rationale = "Claims to preserve a rule this shot does not hold.", desiredMediaType = "image",
             authorityIds = Array.Empty<string>(), noteIds = Array.Empty<Guid>(),
-            preservedConstraints = new[] { "Never alter the protagonist's face." },
+            preservedConstraints = (string[])["Never alter the protagonist's face."],
             observedStateToken = token, idempotencyKey = Guid.NewGuid().ToString("N")
         });
         Assert.Equal("invalid_preserved_constraints", invented.RootElement.GetProperty("code").GetString());

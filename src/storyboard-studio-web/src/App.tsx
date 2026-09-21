@@ -69,7 +69,7 @@ export default function App() {
   const directorViewRef = useRef<DirectorViewQuery | undefined>(undefined)
   // What the Scene workspace has open, so browser tools can describe the
   // selected object rather than the last shot the artist looked at.
-  const sceneViewRef = useRef<{ sceneId: string; instanceId?: string; referenceAssetId?: string } | undefined>(undefined)
+  const sceneViewRef = useRef<{ sceneId: string; instanceId?: string; referenceAssetId?: string; directorMode?: boolean } | undefined>(undefined)
   const workspaceRef = useRef<Workspace>('shot')
   const [sceneProposalSignal, setSceneProposalSignal] = useState(0)
   const [sceneBlockoutSignal, setSceneBlockoutSignal] = useState(0)
@@ -144,9 +144,9 @@ export default function App() {
     window.addEventListener('keydown', keydown)
     return () => window.removeEventListener('keydown', keydown)
   }, [assistantOpen, directorMode])
-  // Leaving the shot would strand the artist in a full-view canvas that no
-  // longer matches the workspace, so full view never outlives its subject.
-  useEffect(() => { if (workspace !== 'shot') setDirectorMode(false) }, [workspace])
+  // Full view belongs to the visual surface currently being directed. Leaving
+  // both Shot and Scene exits it, so the shell never stays hidden elsewhere.
+  useEffect(() => { if (workspace !== 'shot' && workspace !== 'scene') setDirectorMode(false) }, [workspace])
 
   const selected = studio?.shots.find(x => x.id === selectedId) ?? studio?.shots[0]
   selectedShotRef.current = { id: selected?.id, version: selected?.version }
@@ -213,7 +213,7 @@ export default function App() {
       getDirectorView: () => {
         const scene = sceneViewRef.current
         return scene && workspaceRef.current === 'scene'
-          ? { kind: 'scene', sceneId: scene.sceneId, instanceId: scene.instanceId, referenceAssetId: scene.referenceAssetId, directorMode: true }
+          ? { kind: 'scene', sceneId: scene.sceneId, instanceId: scene.instanceId, referenceAssetId: scene.referenceAssetId, directorMode: scene.directorMode ?? false }
           : directorViewRef.current
       },
       // A scene proposal is acted on in the scene inspector, so do not open the
@@ -290,7 +290,7 @@ export default function App() {
   const active: Workspace = selected || workspace === 'assets' || workspace === 'world' || workspace === 'scene' || (workspace === 'authority' && selectedAuthority) ? workspace : 'board'
   const shotScoped = active === 'shot' || active === 'review' || active === 'sequence'
 
-  return <div className={`app-shell${directorMode && active === 'shot' ? ' director-mode' : ''}`}>
+  return <div className={`app-shell${directorMode && (active === 'shot' || active === 'scene') ? ' director-mode' : ''}`}>
     <a className="skip-link" href="#studio-workspace">Skip to workspace</a>
     <aside className="workspace-rail" aria-label="Workspaces">
       <button className="brand" onClick={() => setWorkspace('board')} aria-label="Framewright home" title="Framewright · Build every shot with intention"><div className="brand-glyph"><Film size={20} /></div><span>FRAME</span></button>
@@ -316,7 +316,7 @@ export default function App() {
         {active === 'board' && <BoardWorkspace studio={studio} selectedId={selected?.id ?? ''} initialView={boardView} onViewChange={setBoardView} onSelect={setSelectedId} onOpen={id => { setSelectedId(id); setWorkspace('shot') }} onCreateShot={initialImage => setEntityEditor({ kind: 'shot', initialImage })} onCreateAuthority={() => setEntityEditor({ kind: 'authority' })} onEditAuthority={authority => { setBoardView('authorities'); setSelectedAuthorityId(authority.id); setWorkspace('authority') }} onOpenLibrary={() => setLibraryOpen(true)} onChanged={message => { if (message) setToast(message); void refresh() }} />}
         {active === 'assets' && !assetGenerationDraft && <AssetWorkspace studio={studio} initialAssetId={assetLandingId} onEditAuthority={authority => { setSelectedAuthorityId(authority.id); setWorkspace('authority') }} onOpenGeneration={setAssetGenerationDraft} onOpenSequence={() => setWorkspace('sequence')} onJobQueued={acceptQueuedJob} onToast={setToast} />}
         {active === 'assets' && assetGenerationDraft && <Suspense fallback={<WorkspaceLoading label="Opening image workspace" />}><SketchWorkspace key={assetGenerationDraft.id} shot={selected ?? assetFallbackShot(assetGenerationDraft)} references={studio.references} assetDraft={assetGenerationDraft} onOpenFrame={() => setAssetGenerationDraft(undefined)} onJobQueued={() => undefined} onAssetJobQueued={job => { acceptQueuedJob(job); setAssetGenerationDraft(undefined); setToast(`${job.shotCode} queued. You can keep working while Framewright renders it.`) }} /></Suspense>}
-        {active === 'scene' && <Suspense fallback={<WorkspaceLoading label="Opening scenes" />}><SceneWorkspace onToast={setToast} proposalSignal={sceneProposalSignal} blockoutSignal={sceneBlockoutSignal} onDirectorView={view => { sceneViewRef.current = view }} /></Suspense>}
+        {active === 'scene' && <Suspense fallback={<WorkspaceLoading label="Opening scenes" />}><SceneWorkspace studio={studio} onToast={setToast} proposalSignal={sceneProposalSignal} blockoutSignal={sceneBlockoutSignal} directorMode={directorMode} onDirectorMode={setDirectorMode} onDirectorView={view => { sceneViewRef.current = view }} onShotRendered={shotId => { setSelectedId(shotId); setWorkspace('review'); void refresh() }} /></Suspense>}
         {active === 'world' && <WorldWorkspace project={studio.project} onSaved={(saved, message) => { setStudio(current => current ? { ...current, project: saved } : current); setToast(message) }} />}
         {active === 'authority' && selectedAuthority && !assetGenerationDraft && <AuthorityWorkspace studio={studio} authority={selectedAuthority} onBack={() => { setBoardView('authorities'); setWorkspace('board') }} onOpenGeneration={(draft, revision) => { setAuthorityGeneration({ authorityId: selectedAuthority.id, expectedVersion: selectedAuthority.version, ...revision }); setAssetGenerationDraft(draft) }} onJobQueued={acceptQueuedJob} onChanged={(saved, message) => { setSelectedAuthorityId(saved.id); setToast(message); void refresh() }} onDeleted={message => { setSelectedAuthorityId(undefined); setBoardView('authorities'); setWorkspace('board'); setToast(message); void refresh() }} />}
         {active === 'authority' && selectedAuthority && assetGenerationDraft && authorityGeneration && <Suspense fallback={<WorkspaceLoading label="Opening authority workspace" />}><SketchWorkspace key={assetGenerationDraft.id} shot={selected ?? assetFallbackShot(assetGenerationDraft)} references={studio.references} assetDraft={assetGenerationDraft} authorityTarget={{ referenceId: authorityGeneration.authorityId, expectedVersion: authorityGeneration.expectedVersion, description: authorityGeneration.description, lockedConstraint: authorityGeneration.lockedConstraint }} onOpenFrame={() => { setAssetGenerationDraft(undefined); setAuthorityGeneration(undefined) }} onJobQueued={() => undefined} onAssetJobQueued={job => { acceptQueuedJob(job); setAssetGenerationDraft(undefined); setAuthorityGeneration(undefined); setToast(`${job.shotCode} queued. Its new authority version will attach automatically when ready.`) }} /></Suspense>}

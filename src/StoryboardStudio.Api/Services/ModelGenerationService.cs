@@ -509,7 +509,7 @@ public sealed class ModelGenerationService(
         // ordinary one: most props have no glass at all.
         var glassColour = string.IsNullOrWhiteSpace(request.GlassColour) ? null : request.GlassColour.Trim();
 
-        var readiness = await PreflightAsync(cancellationToken);
+        var readiness = await PreflightAsync(RouteFor(glassColour), "Model generation", cancellationToken, offerDetails: true);
         if (!readiness.CanRun)
             return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
         if (glassColour is not null
@@ -1199,6 +1199,17 @@ public sealed class ModelGenerationService(
         if (!File.Exists(payloadPath))
             return await FailAsync(job, "The compiler reported success but wrote no model.", cancellationToken);
 
+        // Library, lineage and the delivery marker arrive together, or none do.
+        // The files remain content-addressed, so a retry can reuse their bytes.
+        await using var delivery = await db.Database.BeginTransactionAsync(cancellationToken);
+        async Task<RepositoryResult<JobSummary>> RefuseDeliveryAsync(string error)
+        {
+            await delivery.RollbackAsync(cancellationToken);
+            db.ChangeTracker.Clear();
+            var restored = await db.Jobs.SingleAsync(candidate => candidate.Id == job.Id, cancellationToken);
+            return await FailAsync(restored, error, cancellationToken);
+        }
+
         RepositoryResult<AssetSummary> imported;
         await using (var payload = File.OpenRead(payloadPath))
         {
@@ -1209,7 +1220,7 @@ public sealed class ModelGenerationService(
         // An invalid model never becomes a usable one: the import validates the
         // container before it stores anything, and a refusal fails the job.
         if (imported.Kind != RepositoryResultKind.Ok || imported.Value is null)
-            return await FailAsync(job, imported.Error ?? "The generated model could not be validated.", cancellationToken);
+            return await RefuseDeliveryAsync(imported.Error ?? "The generated model could not be validated.");
 
         // The reference may have moved on while this ran. That does not spoil
         // the candidate; it makes it a candidate from an older source, and it
@@ -1224,8 +1235,7 @@ public sealed class ModelGenerationService(
             var stacked = await StackDerivativeAsync(
                 source, imported.Value, packet, payloadPath, sourcePath, cancellationToken);
             if (stacked.Kind != RepositoryResultKind.Ok)
-                return await FailAsync(job,
-                    stacked.Error ?? "The derivative could not be recorded against its source.", cancellationToken);
+                return await RefuseDeliveryAsync(stacked.Error ?? "The derivative could not be recorded against its source.");
             topologyChanged = stacked.Value;
         }
         await RecordLineageAsync(imported.Value.Id, packet, source, stale, cancellationToken);
@@ -1269,6 +1279,7 @@ public sealed class ModelGenerationService(
                 ? $"Delivered from an older {sourceWord}"
                 : preparing ? "Delivered, and waiting to be looked at" : "Delivered",
             cancellationToken);
+        await delivery.CommitAsync(cancellationToken);
         return RepositoryResult<JobSummary>.Ok(Map(job));
     }
 
@@ -1443,7 +1454,7 @@ public sealed class ModelGenerationService(
                 packet.CompilerVersion is null
                     ? "Reference Asset Compiler"
                     : $"Reference Asset Compiler {packet.CompilerVersion}"),
-            cancellationToken);
+            cancellationToken, makeCurrent: false);
         if (added.Kind != RepositoryResultKind.Ok)
             return RepositoryResult<bool>.Invalid(added.Error ?? "The derivative could not join its source's revisions.");
 
@@ -1453,8 +1464,6 @@ public sealed class ModelGenerationService(
                     .Where(parent => parent.Id == source.Id)
                     .Select(parent => parent.RevisionFamilyId).FirstOrDefault())
             .ToListAsync(cancellationToken);
-        foreach (var member in stack) member.IsCurrentRevision = member.Id == source.Id;
-
         var stored = stack.SingleOrDefault(asset => asset.Id == derivative.Id);
         if (stored is not null)
         {

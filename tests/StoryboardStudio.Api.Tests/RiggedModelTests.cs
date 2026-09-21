@@ -190,7 +190,7 @@ public sealed class RiggedModelTests
 
                 // Raising the character's left arm a quarter turn about Z moves
                 // the hand, and moves nothing on the other side.
-                var posed = await PoseAsync(client, assetId, new { bone = "LeftUpperArm", rotation = new[] { 0d, 0d, 1.5707963268 } });
+                var posed = await PoseAsync(client, assetId, new { bone = "LeftUpperArm", rotation = (double[])[0d, 0d, 1.5707963268] });
                 Assert.Equal(HttpStatusCode.OK, posed.StatusCode);
                 using var pose = await posed.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
                 Assert.Equal(contentHash, pose.RootElement.GetProperty("contentHash").GetString());
@@ -205,7 +205,7 @@ public sealed class RiggedModelTests
                 Assert.True(posedHand[1] > joints.Single(joint => joint.GetProperty("bone").GetString() == "Chest").GetProperty("position")[1].GetDouble());
 
                 // A static prop is refused honestly rather than posed as if it had bones.
-                var prop = await PoseAsync(client, propId, new { bone = "Hips", rotation = new[] { 0d, 0d, 0d } });
+                var prop = await PoseAsync(client, propId, new { bone = "Hips", rotation = (double[])[0d, 0d, 0d] });
                 Assert.Equal(HttpStatusCode.BadRequest, prop.StatusCode);
             }
 
@@ -226,7 +226,7 @@ public sealed class RiggedModelTests
                 Assert.Equal("Figure skin", profile.RootElement.GetProperty("materials")[0].GetProperty("name").GetString());
 
                 // The same pose against the same revision gives the same numbers.
-                var again = await PoseAsync(client, assetId, new { bone = "LeftUpperArm", rotation = new[] { 0d, 0d, 1.5707963268 } });
+                var again = await PoseAsync(client, assetId, new { bone = "LeftUpperArm", rotation = (double[])[0d, 0d, 1.5707963268] });
                 using var pose = await again.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
                 var leftHand = pose.RootElement.GetProperty("joints").EnumerateArray()
                     .Single(joint => joint.GetProperty("bone").GetString() == "LeftHand");
@@ -247,24 +247,24 @@ public sealed class RiggedModelTests
 
         foreach (var refused in (Guid[])[wrongProfile, brokenSkin])
         {
-            var response = await PoseAsync(client, refused, new { bone = "Hips", rotation = new[] { 0d, 0.2, 0d } });
+            var response = await PoseAsync(client, refused, new { bone = "Hips", rotation = (double[])[0d, 0.2, 0d] });
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
         // Even a sound rig refuses a pose it cannot honour.
-        Assert.Equal(HttpStatusCode.BadRequest, (await PoseAsync(client, figure, new { bone = "Tail", rotation = new[] { 0d, 0d, 0d } })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await PoseAsync(client, figure, new { bone = "Tail", rotation = (double[])[0d, 0d, 0d] })).StatusCode);
         // A rotation that overflows a double is refused rather than posed as
         // whatever that number turns into.
         using var overflowing = new StringContent(
             "{\"pose\":[{\"bone\":\"Hips\",\"rotation\":[0,1e999,0]}]}", Encoding.UTF8, "application/json");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync($"/api/assets/{figure}/rig-pose", overflowing)).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await PoseAsync(client, figure, new { bone = "Hips", rotation = new[] { 0d, 40d, 0d } })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await PoseAsync(client, figure, new { bone = "Hips", rotation = (double[])[0d, 40d, 0d] })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/assets/{figure}/rig-pose", new
         {
             pose = new object[]
             {
-                new { bone = "Hips", rotation = new[] { 0d, 0.2, 0d } },
-                new { bone = "Hips", rotation = new[] { 0d, 0.4, 0d } },
+                new { bone = "Hips", rotation = (double[])[0d, 0.2, 0d] },
+                new { bone = "Hips", rotation = (double[])[0d, 0.4, 0d] },
             },
         })).StatusCode);
 

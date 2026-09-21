@@ -1787,6 +1787,17 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .shot-workspace.director-mode .shot-center{padding-bottom:0}
 .shot-workspace.director-mode .shot-canvas{width:min(100cqw,100cqh*var(--project-aspect-number,1.777));max-width:100%}
 .director-mode-toggle.active{color:var(--accent-strong);border-color:var(--accent)}
+.scene-workspace.director-mode .scene-layout{grid-template-columns:minmax(0,1fr)}
+.scene-workspace.director-mode .scene-inspector{display:none}
+.scene-workspace.director-mode .scene-stage-shell{padding:0}
+.scene-section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.scene-section-heading button{padding:6px 9px}
+.scene-render-still{width:100%;justify-content:center;margin-top:10px}
+.scene-shot-bindings{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.scene-shot-bindings li{display:grid;grid-template-columns:72px minmax(0,1fr);gap:9px;align-items:center;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface-2)}
+.scene-shot-bindings img{width:72px;aspect-ratio:16/9;object-fit:cover;border-radius:4px;background:#111}
+.scene-shot-bindings span{min-width:0;display:grid;gap:2px}
+.scene-shot-bindings small,.scene-shot-bindings code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 
 /* A proposal states its scope before the artist decides: what it aims at, and
    what it promises not to touch. */

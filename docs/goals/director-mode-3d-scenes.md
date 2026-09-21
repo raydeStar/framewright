@@ -5,7 +5,8 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M04, M05, M06, M07, M08, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED; M09 and M14 are dependency-ready, and M12, M16, M17 and M18 follow them.  
+**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M04, M05, M06, M07, M08, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED. M14 requires M09 acceptance as well as M13; a checked-out compiler alone does not satisfy that dependency. M12, M16, M17 and M18 remain open.
+
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
 > Deliver small, working increments. Prove each increment's agreed contract before dependent work advances. Defer breadth and polish, not correctness that the next increment requires.
@@ -19,7 +20,7 @@ Read the applicable `AGENTS.md`, this section, the shared contracts below, and t
 Use this kickoff instruction:
 
 ```text
-Execute docs/goals/director-mode-3d-scenes.md, starting with M00.
+Execute docs/goals/director-mode-3d-scenes.md from its current evidence ledger.
 Follow the applicable AGENTS.md. Establish the current baseline first.
 Work through one dependency-ready milestone at a time. Implement, test,
 inspect the actual result, repair failures, and record evidence before advancing.
@@ -29,6 +30,8 @@ features unnecessarily, or turn this into one wholesale implementation.
 ```
 
 Keep this file as the single goal-level source of truth. Update the progress and decision records as work proceeds. Do not create a parallel requirements document for every milestone. Detailed specifications may be linked when necessary; each requirement should have one authoritative home.
+
+For the post-QC Sol continuation, use [the execution handoff](../SOL_DIRECTOR_MODE_HANDOFF.md). It provides entry points and an implementation brief; this goal retains all milestone status and acceptance authority.
 
 ### Execution rules for this goal
 
@@ -76,6 +79,8 @@ appropriate stage. The library is available throughout, not only at the end.
 ```
 
 Astra may be the user's preferred visual collaborator. No domain entity, tool schema, provider contract, or required application control may depend on that model. The manual application must remain usable without an agent or browser-tool support.
+
+**Artist clarification, 2026-09-21:** "My hope is to eventually just pop into director mode and have you drive most things." The intended experience is to enter the workspace, point at the relevant image or scene object, and describe creative intent while the assistant carries context, inspects available assets/capabilities, and prepares coherent proposed changes. The artist should not relay screenshots, repeat revision IDs, copy prompts between tools, or operate worker internals. Proposals remain reviewable; explicit Generate/Render and artistic ratification retain their existing boundaries. Verify actual-host collaboration early because it is central to this outcome. Full-view scene/timing interaction is a desired completion experience, not a claim that today's image-only Director Mode already provides it; any needed UX extension must reuse the existing scene workspace and the shared contracts below.
 
 **Editable scene data and generated video are different products.** A video is a take derived from a frozen scene/shot state. It must not replace the scene that produced it.
 
@@ -428,6 +433,31 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 
 ### Current execution state
 
+Reconciled after QC and the repository-destination decision on 2026-09-21. This summary supersedes the historical execution notes below; individual acceptance records remain the evidence authority.
+
+- **Repository:** Public `github.com/raydeStar/framewright` is the maintained Framewright line; the former private mirror is deprecated. Its public history was deliberately sanitized and has no merge base with the older private history, so publish reviewed snapshots as normal descendants of public `main`, never by force-pushing the private graph. `github.com/raydeStar/reference-asset-compiler` is the single implementation home for modeling, texturing, retopology, UV, rigging, deformation gates, payload construction, and compiler receipts. Framewright owns orchestration, validated import, library/scene state, shot binding, and review.
+- **Current MVP increment:** M12 now has an ordinary UI path for replacing one selected placeholder with an exact library revision while preserving instance identity, transform, plan provenance, annotations, pivot/motion, camera, lighting, and unrelated objects. Scene Director Mode uses the same working state. M16 now freezes a saved scene version, distinct shot camera, frame range, selected time, project delivery contract, and snapshot hash; the real Three.js canvas produces a delivery-sized PNG and advances the existing shot candidate/review path. Working-copy export schema v4 includes scenes, instances, annotations, proposals, blockout plans/items, and immutable scene-shot bindings with all referenced assets.
+- **Validation:** The complete `scripts/verify.ps1` gate passed in one invocation on isolated port 5195: dependency audits, frontend checks/build, public-content audit, locked restore, warning-free Release rebuild, 278 backend tests, all backup/setup/worker/release scripts, voice and YuE2 contract tests, NuGet vulnerability inspection, and 132 Playwright journeys with six intentional tablet exclusions. The known Three.js chunk-size advisory remains; scene modules are lazy-loaded. Focused scene-still proof also passed on desktop and tablet and byte-checked the encoded PNG dimensions.
+- **Compiler:** M08 generation and the M09 preparation route have recorded live workstation evidence. Inspect current ignored configuration and the compiler's pinned revision/capabilities before new work; old notes about an absent checkout or missing payload export are historical. Do not infer readiness for rigging from geometry/preparation success.
+- **Active acceptance:** M09 still needs the artist's recorded source/derivative verdict. M14 requires that prerequisite and M13 before live milestone advancement. M02/M03/M10/M11 still lack actual-host proof; M11 also needs human composition acceptance. The milestone table below is authoritative.
+- **Hosted CI:** GitHub Actions is blocked before execution by the account's Actions budget. Local tests do not replace that evidence; the owner must restore capacity before hosted CI can be rerun. Do not change spending settings or bypass checks.
+- **Next engineering action:** Follow the Sol handoff, confirm current source and any new research, and test the real Director Mode host connection early. Prepare a concrete M09 review from existing evidence without regenerating it. Continue only dependency-ready work, labeling permitted fixture-based development separately from live support.
+- **Consent and resources:** This continuation authorizes direct public-main delivery of reviewed Framewright work and propagation of compiler-owned implementation to its repository. It does not authorize provider calls, GPU jobs, downloads, artistic acceptance, deployment, or tagging. Preserve running applications and external queues. Existing live receipts are evidence of prior runs, not permission for another run.
+
+### MVP implementation checkpoint - 2026-09-21
+
+Status: M12 manual replacement and M16 scene-still contracts are implemented and locally verified. M12's new live-generation evidence and M16's human ratification remain separate acceptance items. This checkpoint does not advance M14 or M17.
+
+The replacement journey starts from an approved blockout, binds a chosen reusable model to the same instance, preserves its exact transform and source-plan identity, leaves every other object and scene setting untouched, saves, reloads, and draws the replacement. The scene can enter and leave Director Mode without forking or discarding unsaved state.
+
+The still journey saves a scene, selects an existing shot, edits an independent shot camera and time, renders the actual Three.js scene at the project delivery dimensions, imports the PNG through the validated content-addressed asset gate, creates the next working candidate, and opens existing Review. The service rechecks scene and shot versions after upload, stores an immutable snapshot and SHA-256, leaves later scene edits unable to rewrite it, survives restart, and exports the complete scene graph and binding in working-package schema v4. A regression caught and repaired SQLite's inability to order `DateTimeOffset` server-side.
+
+Evidence: `scripts/verify.ps1` with `STUDIO_E2E_PORT=5195` passed as described in the current validation summary. Focused `SceneApiTests` passed eight tests; the new scene-still browser journey passed on desktop Chromium and emulated iPad Pro 11. No live provider, model download, production data, or external queue was used. Remaining full-goal evidence includes the M09 artist verdict, actual-host M02/M03/M10/M11 proof, M11 human composition acceptance, a compiler-owned M14 route and human deformation verdict, M17 deterministic animated render, package import/recovery proof, and physical tablet/stylus acceptance.
+
+### Historical execution notes before main QC
+
+Retained for provenance. Branch, environment, dependency, and next-action statements in this subsection describe earlier points in the implementation and are superseded by the current summary, milestone table, and later acceptance records.
+
 - **Repository commit / worktree:** `9ab9b68` on `main`; work continues on `feature/director-mode` branched from it. The artist's previously uncommitted working tree (YuE2 music composition, guided setup/worker scripts, release audit, `AGENTS.md`, `LICENSE`, docs, this goal file) was landed as `9ab9b68` at the user's instruction before M00 was recorded. No linked worktrees. Branches `challenge/webmcp-storyboard` (`f8540a0`) and `production-hardening` (`64998d0`) are untouched.
 - **Compiler revision and configured location:** Reference Asset Compiler is checked out on this workstation under the artist's own source tree (MIT, Python 3.11+, console script `rac`); the exact path is workstation state and is not recorded here. No revision is pinned here yet and Framewright has no configured location for it, so M09/M14 are dependency-ready rather than runnable. Read [../REFERENCE_ASSET_COMPILER.md](../REFERENCE_ASSET_COMPILER.md) before either; the contract itself is canonical in that repository at `docs/BROWSER_STUDIO_CONTRACT.md`.
 - **Runtime / browser / agent host:** .NET SDK 10.0.203 (pinned by `global.json`, `rollForward: disable`), Node v22.15.0, npm 11.11.0, Windows 11 Pro 26200. Playwright projects: desktop Chromium 1440x960 and iPad Pro 11 WebKit. No actual WebMCP-capable agent host has been exercised by this execution agent; existing WebMCP evidence is browser-shim based (`CONTRACT_VERIFIED`).
@@ -462,7 +492,7 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 | M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
 | M12 | NOT_STARTED | None |
 | M13 | VERIFIED | M13 acceptance record below |
-| M14 | NOT_STARTED | Dependency-ready; compiler checked out 2026-09-20 |
+| M14 | NOT_STARTED | Compiler checked out; requires M09's recorded acceptance and M13 |
 | M15 | VERIFIED | M15 acceptance record below |
 | M16 | NOT_STARTED | None |
 | M17 | NOT_STARTED | None |
@@ -1625,6 +1655,77 @@ Known limits: the head band is a height fraction, right for a standing humanoid 
   share the head's cloth); the hi-res provenance runner keeps its fault, recorded in the catalog.
 ```
 
+### WIP quality-control record - 2026-09-21
+
+Scope: review the 46 commits from `9ab9b68` through `8c17be5`, repair concrete
+regressions, and integrate into private `origin/main` at the user's explicit
+request. This review does not advance unfinished milestones or commission
+providers. The starting checkout was clean on `feature/director-mode`.
+
+Tested application changes: `3abed12e1f137a35466fa7bb01f7a20dc8324046`.
+Final browser launcher: `7ac0216` (application code unchanged).
+Environment: Windows, .NET SDK 10.0.203, Node 22.15.0, Playwright 1.62.1;
+desktop Chromium and emulated iPad Pro 11 WebKit.
+
+Repairs:
+
+- Enforce scene versions in the database, so overlapping saves cannot both win.
+- Preserve edits made while a Save response is in flight.
+- Commit model import, revision membership, lineage, and delivery together;
+  an interrupted delivery rolls back and can recover from existing stage outputs.
+- Keep the artist's current revision when preparation finishes against an older source.
+- Refuse malformed GLB field types and unavailable optional glass stages cleanly.
+- Surface readiness failures with a retry instead of an endless loading indicator.
+- Keep delayed model/clip callbacks bound to the current scene, deduplicate model
+  loads, give each instance its own selection materials, and release original
+  model materials when closing an unpainted inspection view.
+- Restore command-line configuration precedence and correct 58 analyzer errors
+  in test data without suppressing diagnostics or weakening assertions.
+- Support `STUDIO_E2E_PORT` and build test binaries in the disposable test directory,
+  allowing verification while existing workstation apps own port 5180/Debug DLLs.
+
+Observed evidence:
+
+- **D/A:** Three new data-integrity regressions failed against the original code:
+  overlapping saves, older-source selection, and partially committed model delivery.
+  After repairs, 74 focused backend tests passed; the final complete backend suite
+  passed **277/277**, with **zero build warnings/errors**.
+- **D:** TypeScript, lint, formatting, production bundle, public-content audit,
+  npm audit, NuGet vulnerability inspection, six PowerShell contract suites,
+  five voice tests, and five YuE2 tests passed. No dependency vulnerabilities reported.
+- **A:** Full Playwright suite passed **130**, with **6 existing tablet exclusions**,
+  in 5.7 minutes. The exclusions duplicate desktop coverage for seeded placeholder
+  feedback, job recovery, project-rate conversion, generated-media provenance,
+  immutable authority drops, and background authority refresh.
+- **Visual inspection by the coding agent:** Desktop/tablet model and scene
+  screenshots inspected; layouts and controls readable. This is not human artistic
+  acceptance or a physical stylus test.
+- The `verify.ps1` run completed all pre-browser gates; browser startup exposed
+  the occupied port and locked shared binaries. After repairing the launcher,
+  `STUDIO_E2E_PORT=5182` with `npm --prefix src/storyboard-studio-web run test:e2e`
+  completed the remaining gate. Its disposable server shut down; existing apps
+  were not stopped.
+
+Local evidence (ignored): `artifacts/qc/regressions-before.log`,
+`artifacts/qc/regressions-after.log`, `artifacts/qc/verify-final-5182.log`,
+`artifacts/qc/browser-final.log`, and `artifacts/qc/{model,scene}-{desktop,tablet}.png`.
+The HTML browser report is `src/storyboard-studio-web/playwright-report/index.html`.
+
+Limits and next action: No live GPU generation, paid provider calls, actual-host
+WebMCP commissioning, physical tablet/stylus acceptance, installer/container release
+smoke, or production deployment was performed. Browser compiler work used the
+controlled fixture worker. The separate Three.js bundle retains Vite's size warning.
+M09 remains awaiting the artist's verdict; actual-host evidence for M02/M03/M10/M11
+and the remaining not-started milestones stay open for the research/implementation
+handoff. This is a tested WIP checkpoint, not release acceptance.
+
+Remote verification: the reviewed branch was fast-forwarded and pushed to private
+`origin/main`. [GitHub Actions run 35659270918](https://github.com/raydeStar/framewright-private/actions/runs/35659270918)
+failed before executing any steps: "The job was not started because an Actions
+budget is preventing further use." Hosted CI is therefore **blocked by the Actions
+budget**, not verified by the local results. Restore that budget and rerun CI;
+no workflow gates or account spending settings were changed during this review.
+
 ### Acceptance record template
 
 ```text
@@ -1665,7 +1766,9 @@ No execution deferrals recorded yet. Add each with an owner/milestone, reason, d
 
 ### Known failures and blockers
 
-No runtime assessment performed yet. The user reports remaining manual failures in Framewright; M00 must reproduce and classify them. Do not infer a clean baseline from this empty ledger.
+See the milestone records and the 2026-09-21 QC record above for runtime evidence.
+The remaining external-host, human acceptance, and not-started milestone boundaries
+are still open; passing deterministic checks does not close them.
 
 ## 9. Source notes and refresh policy
 

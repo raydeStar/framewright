@@ -31,7 +31,7 @@ public sealed class ModelLibraryApiTests
                 var renamed = await client.PutAsJsonAsync($"/api/assets/{blockId}", new
                 {
                     displayName = "Chain court block", collectionId = (string?)null,
-                    tags = new[] { "set-dressing", "chain-court" }, notes = "Blocking stand-in for the gate approach."
+                    tags = (string[])["set-dressing", "chain-court"], notes = "Blocking stand-in for the gate approach."
                 });
                 renamed.EnsureSuccessStatusCode();
 
@@ -196,9 +196,9 @@ public sealed class ModelLibraryApiTests
                 new
                 {
                     id = Guid.NewGuid(), assetId = placed, name = "The prop",
-                    position = new[] { 0.0, 0.0, 0.0 },
-                    rotation = new[] { 0.0, 0.0, 0.0 },
-                    scale = new[] { 1.0, 1.0, 1.0 },
+                    position = (double[])[0.0, 0.0, 0.0],
+                    rotation = (double[])[0.0, 0.0, 0.0],
+                    scale = (double[])[1.0, 1.0, 1.0],
                 },
             },
         });

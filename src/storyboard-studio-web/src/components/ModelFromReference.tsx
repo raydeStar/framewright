@@ -36,6 +36,8 @@ export default function ModelFromReference({ asset, onQueued }: {
   onQueued: (message: string) => void
 }) {
   const [readiness, setReadiness] = useState<ModelGenerationReadiness>()
+  const [readinessError, setReadinessError] = useState<string>()
+  const [readinessAttempt, setReadinessAttempt] = useState(0)
   const [size, setSize] = useState('')
   const [glass, setGlass] = useState('')
   // Set dressing unless asked: most generated things are seen from a distance,
@@ -46,11 +48,15 @@ export default function ModelFromReference({ asset, onQueued }: {
 
   useEffect(() => {
     let live = true
+    setReadiness(undefined)
+    setReadinessError(undefined)
     studioApi.modelGenerationReadiness()
       .then(answer => { if (live) setReadiness(answer) })
-      .catch(() => { if (live) setReadiness(undefined) })
+      .catch(reason => {
+        if (live) setReadinessError(reason instanceof Error ? reason.message : 'The compiler readiness check failed.')
+      })
     return () => { live = false }
-  }, [])
+  }, [readinessAttempt])
 
   const generate = async () => {
     setBusy(true); setError(undefined)
@@ -65,7 +71,12 @@ export default function ModelFromReference({ asset, onQueued }: {
 
   return <section className="model-from-reference" data-testid="model-from-reference">
     <h3>Make a 3D model</h3>
-    {readiness === undefined
+    {readinessError
+      ? <div role="alert">
+          <p className="form-error">{readinessError}</p>
+          <button type="button" className="secondary" onClick={() => setReadinessAttempt(attempt => attempt + 1)}>Retry readiness check</button>
+        </div>
+      : readiness === undefined
       ? <p className="model-note"><LoaderCircle className="spin" size={14} /> Asking the compiler what it can do…</p>
       : <>
           <p className="model-note" data-testid="model-generation-readiness" data-can-run={readiness.canRun ? 'true' : 'false'}>

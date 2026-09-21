@@ -38,6 +38,8 @@ export interface SceneViewportProps {
   onSelect: (instanceId: string | undefined) => void
   onCameraChange: (camera: SceneCameraSummary) => void
   onPlaceNote?: (instanceId: string, localAnchor: [number, number, number]) => void
+  /** Supplies the real renderer's exact-canvas still capture while it is mounted. */
+  onCaptureReady?: (capture: ((request: { camera: SceneCameraSummary; time: number; width: number; height: number }) => Promise<Blob>) | undefined) => void
 }
 
 type ViewportState = 'loading' | 'ready' | 'unsupported'
@@ -45,7 +47,7 @@ type ViewportState = 'loading' | 'ready' | 'unsupported'
 /** Identifies one stand-in's geometry, so a resized placeholder is rebuilt. */
 const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}`
 
-export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote }: SceneViewportProps) {
+export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote, onCaptureReady }: SceneViewportProps) {
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewportState>('loading')
   const surface = useRef<{
@@ -72,7 +74,7 @@ export default function SceneViewport({ instances, camera, environment, selected
     if (!container) return
 
     let renderer: WebGLRenderer
-    try { renderer = new WebGLRenderer({ antialias: true, alpha: true }) }
+    try { renderer = new WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true }) }
     catch { setState('unsupported'); return }
 
     let disposed = false
@@ -80,6 +82,9 @@ export default function SceneViewport({ instances, camera, environment, selected
     const perspective = new PerspectiveCamera(camera.fieldOfView, 1, 0.01, 2000)
     const placed = new Map<string, Object3D>()
     const loaded = new Map<string, Object3D>()
+    const loadingModels = new Set<string>()
+    let currentInstances = instances
+    let currentSelection = selectedId
     // One load per clip file, and one mixer per object, so two objects playing
     // the same clip keep their own time, speed, and loop.
     const clipFiles = new Map<string, AnimationClip[]>()
@@ -93,7 +98,8 @@ export default function SceneViewport({ instances, camera, environment, selected
     const ambient = new AmbientLight(0xffffff, environment.ambientIntensity)
     const key = new DirectionalLight(0xffffff, environment.keyIntensity)
     scene.add(ambient, key)
-    scene.add(new GridHelper(40, 40, new Color('#3c4a44'), new Color('#232c29')))
+    const grid = new GridHelper(40, 40, new Color('#3c4a44'), new Color('#232c29'))
+    scene.add(grid)
 
     const draw = () => { if (!disposed) renderer.render(scene, perspective) }
 
@@ -166,11 +172,21 @@ export default function SceneViewport({ instances, camera, environment, selected
       })
     }
 
+    const releaseInstance = (root: Object3D) => {
+      if (root.userData.placeholder) { release(root); return }
+      root.traverse(node => {
+        if (!(node instanceof Mesh)) return
+        for (const material of Array.isArray(node.material) ? node.material : [node.material]) material.dispose()
+      })
+    }
+
     const sync = (next: SceneInstanceSummary[], selected?: string) => {
+      currentInstances = next
+      currentSelection = selected
       for (const [id, object] of placed) {
         if (next.some(instance => instance.id === id)) continue
         scene.remove(object)
-        if (object.userData.placeholder) release(object)
+        releaseInstance(object)
         placed.delete(id)
       }
 
@@ -185,7 +201,7 @@ export default function SceneViewport({ instances, camera, environment, selected
           applyTransform(existing, instance)
           continue
         }
-        if (existing) { scene.remove(existing); if (isPlaceholder) release(existing); placed.delete(instance.id) }
+        if (existing) { scene.remove(existing); releaseInstance(existing); placed.delete(instance.id) }
 
         // Stand-in geometry the plan asked for, drawn as itself.
         if (instance.placeholder) {
@@ -212,6 +228,11 @@ export default function SceneViewport({ instances, camera, environment, selected
         if (template) {
           const skinned = (() => { let found = false; template.traverse(node => { if (node instanceof SkinnedMesh) found = true }); return found })()
           const copy = skinned ? cloneSkinned(template) : template.clone(true)
+          // Selection belongs to one instance, even when its geometry is shared.
+          copy.traverse(node => {
+            if (!(node instanceof Mesh)) return
+            node.material = Array.isArray(node.material) ? node.material.map(material => material.clone()) : node.material.clone()
+          })
           copy.userData.instanceId = instance.id
           copy.userData.assetId = instance.assetId
           applyTransform(copy, instance)
@@ -221,21 +242,29 @@ export default function SceneViewport({ instances, camera, environment, selected
         }
 
         // One load per model revision; every instance of it is a clone.
+        const assetKey = instance.assetId ?? ''
+        if (loadingModels.has(assetKey)) continue
+        loadingModels.add(assetKey)
         new GLTFLoader().load(instance.contentUrl, gltf => {
+          loadingModels.delete(assetKey)
           if (disposed) { release(gltf.scene); return }
           sharpenTextures(gltf.scene, renderer)
           loaded.set(instance.assetId ?? '', gltf.scene)
-          sync(next, selected)
+          // A late delivery must not summon an object the artist already removed.
+          sync(currentInstances, currentSelection)
           // The scene graph arrives before its textures finish decoding, and
           // this viewport draws on demand, so without waiting for the upload a
           // textured model would stay untextured until something else moved.
           void renderer.compileAsync(scene, perspective).then(() => { if (!disposed) draw() })
         }, undefined, () => {
+          loadingModels.delete(assetKey)
           if (disposed) return
+          const current = currentInstances.find(candidate => candidate.id === instance.id && candidate.assetId === instance.assetId)
+          if (!current) return
           const marker = placeholder()
           marker.userData.instanceId = instance.id
           marker.userData.assetId = instance.assetId
-          applyTransform(marker, instance)
+          applyTransform(marker, current)
           scene.add(marker)
           placed.set(instance.id, marker)
           draw()
@@ -248,7 +277,9 @@ export default function SceneViewport({ instances, camera, environment, selected
           if (!(node instanceof Mesh)) return
           for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
             if (!material || !('emissive' in material)) continue
-            ;(material as MeshStandardMaterial).emissive = new Color(highlighted ? '#3d5c50' : '#000000')
+            const surfaceMaterial = material as MeshStandardMaterial
+            material.userData.originalEmissive ??= surfaceMaterial.emissive.clone()
+            surfaceMaterial.emissive.copy(highlighted ? new Color('#3d5c50') : material.userData.originalEmissive as Color)
           }
         })
       }
@@ -379,6 +410,47 @@ export default function SceneViewport({ instances, camera, environment, selected
       draw()
     }
 
+    const capture = async (request: { camera: SceneCameraSummary; time: number; width: number; height: number }) => {
+      if (disposed || currentInstances.length === 0 || placed.size !== currentInstances.length)
+        throw new Error('The scene is still loading. Wait for every object, then render again.')
+      if (!Number.isInteger(request.width) || !Number.isInteger(request.height) || request.width < 64 || request.height < 64)
+        throw new Error('The project delivery canvas is invalid.')
+      const maxTexture = renderer.capabilities.maxTextureSize
+      if (request.width > maxTexture || request.height > maxTexture)
+        throw new Error(`This graphics device supports stills up to ${maxTexture} pixels on either side.`)
+
+      const originalView = { ...view.current, target: [...view.current.target] }
+      const originalRatio = renderer.getPixelRatio()
+      const originalSelection = currentSelection
+      const restoreWidth = Math.max(1, container.clientWidth)
+      const restoreHeight = Math.max(1, container.clientHeight)
+      try {
+        grid.visible = false
+        renderer.setPixelRatio(1)
+        renderer.setSize(request.width, request.height, false)
+        perspective.aspect = request.width / request.height
+        perspective.updateProjectionMatrix()
+        view.current = { ...request.camera, target: [...request.camera.target] }
+        sync(currentInstances, undefined)
+        place()
+        animate(currentInstances, request.time)
+        draw()
+        return await new Promise<Blob>((resolve, reject) => renderer.domElement.toBlob(
+          blob => blob ? resolve(blob) : reject(new Error('The graphics device could not encode the scene still.')),
+          'image/png'))
+      } finally {
+        grid.visible = true
+        renderer.setPixelRatio(originalRatio)
+        renderer.setSize(restoreWidth, restoreHeight, false)
+        perspective.aspect = restoreWidth / restoreHeight
+        perspective.updateProjectionMatrix()
+        view.current = originalView
+        sync(currentInstances, originalSelection)
+        place()
+        animate(currentInstances, latestPlayhead.current)
+      }
+    }
+
     const loadClips = (next: SceneInstanceSummary[]) => {
       for (const instance of next) {
         const binding = instance.clip
@@ -388,7 +460,7 @@ export default function SceneViewport({ instances, camera, environment, selected
           if (disposed) return
           clipFiles.set(binding.clipAssetId, gltf.animations)
           release(gltf.scene)
-          animate(next, latestPlayhead.current)
+          animate(currentInstances, latestPlayhead.current)
         }, undefined, () => { if (!disposed) clipFiles.delete(binding.clipAssetId) })
       }
     }
@@ -459,19 +531,21 @@ export default function SceneViewport({ instances, camera, environment, selected
     }
 
     surface.current = { place, sync, light, pick, frame, animate }
+    onCaptureReady?.(capture)
     resize()
     place()
     light(environment)
 
     return () => {
       disposed = true
+      onCaptureReady?.(undefined)
       surface.current = undefined
       observer.disconnect()
       renderer.domElement.removeEventListener('wheel', wheel)
       for (const [, player] of players) player.mixer.stopAllAction()
       players.clear()
       clipFiles.clear()
-      for (const [, object] of placed) { scene.remove(object); if (object.userData.placeholder) release(object) }
+      for (const [, object] of placed) { scene.remove(object); releaseInstance(object) }
       placed.clear()
       for (const [, template] of loaded) release(template)
       loaded.clear()

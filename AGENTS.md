@@ -17,6 +17,14 @@ Framewright is a local-first creative production workspace built around intentio
 
 **Magic means less friction, not less agency.** Use sensible defaults, progressive disclosure, precise targeting, coherent proposal review, responsive progress, and reversible edits. Show meaningful consequences without forcing technical detail on every action. Preserve approval and generation boundaries. Never manufacture progress or success.
 
+### Repository and 3D compiler ownership
+
+`github.com/raydeStar/framewright` is the maintained Framewright repository. The former private mirror is deprecated; do not push, synchronize, or treat it as another release line.
+
+Framewright owns the creative workspace: library records, revisions, scene instances, direction, jobs, validated imports, review, shot binding, and applying root motion once. [Reference Asset Compiler](docs/REFERENCE_ASSET_COMPILER.md) owns changes that create or decide the asset itself: geometry generation, mesh cleanup, retopology, UVs, texture generation or baking, material packing, texture compression, skeleton profiles, rigging, deformation gates, browser payload construction, and compiler receipts. Implement and test those changes in `github.com/raydeStar/reference-asset-compiler` first, then update Framewright's pinned integration and consume its versioned contract. Do not maintain a second modeling or texturing implementation here.
+
+When a feature spans both products, keep the repository changes separate and prove the compiler output before adapting Framewright's consumer. A UI or queue change that merely requests or reviews compiler work remains Framewright code.
+
 ## 2. Start with the actual repository
 
 - Read applicable scoped instructions, `CONTRIBUTING.md`, and relevant `README.md` sections. Inspect branch/worktree, source, and tests before editing. Record the baseline; documentation and mocks are not runtime proof.

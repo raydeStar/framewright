@@ -12,6 +12,23 @@ namespace StoryboardStudio.Api.Tests;
 /// </summary>
 public sealed class GlbModelInspectorTests
 {
+    [Theory]
+    [InlineData("asset")]
+    [InlineData("count")]
+    [InlineData("translation")]
+    public void MalformedFieldTypesAreRefusedWithoutCrashing(string field)
+    {
+        var bytes = ModelFixtures.Mutate(document =>
+        {
+            if (field == "asset") document["asset"] = false;
+            else if (field == "count") document["accessors"]![0]!["count"] = "many";
+            else document["nodes"]![0]!["translation"] = new JsonArray("wrong", 0, 0);
+        });
+        var result = GlbModelInspector.Inspect(bytes);
+        Assert.False(result.Ok);
+        Assert.Contains("malformed field", result.Error, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// Glass is not an alpha mode. A material that transmits stays OPAQUE in
     /// glTF and carries KHR_materials_transmission instead, so an inspector

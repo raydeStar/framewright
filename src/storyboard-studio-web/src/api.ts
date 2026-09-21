@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetUsageSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -142,6 +142,28 @@ export const studioApi = {
   createScene: (name: string) => request<SceneSummary>('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) }),
   saveScene: (sceneId: string, body: { expectedVersion: number; name: string; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: { id: string; assetId: string | null; name: string; position: number[]; rotation: number[]; scale: number[]; placeholder?: ScenePlaceholderSummary | null; clip?: SceneClipBindingSummary | null; motion?: SceneRigidMotionSummary | null }[] }) =>
     request<SceneSummary>(`/api/scenes/${sceneId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  sceneShotStills: (sceneId: string) => request<SceneShotBindingSummary[]>(`/api/scenes/${sceneId}/shot-stills`),
+  renderSceneStill: async (sceneId: string, body: { shotId: string; expectedSceneVersion: number; expectedShotVersion: number; camera: SceneCameraSummary; startTime: number; endTime: number; stillTime: number; file: Blob }) => {
+    const bytes = await body.file.arrayBuffer()
+    if (bytes.byteLength === 0) throw new Error('The scene renderer produced an empty image. Try rendering the frame again.')
+    const form = new FormData()
+    form.append('file', new Blob([bytes], { type: body.file.type || 'image/png' }), 'scene-still.png')
+    form.append('shotId', body.shotId)
+    form.append('expectedSceneVersion', String(body.expectedSceneVersion))
+    form.append('expectedShotVersion', String(body.expectedShotVersion))
+    form.append('camera', JSON.stringify(body.camera))
+    form.append('startTime', String(body.startTime))
+    form.append('endTime', String(body.endTime))
+    form.append('stillTime', String(body.stillTime))
+    const response = await fetch(`/api/scenes/${sceneId}/shot-stills`, { method: 'POST', headers: { 'X-Storyboard-Studio': '1' }, body: form })
+    if (!response.ok) {
+      const text = await response.text()
+      let problem: { error?: string; title?: string } | undefined
+      try { problem = JSON.parse(text) as { error?: string; title?: string } } catch { /* Preserve plain service error text. */ }
+      throw new ApiError(problem?.error || problem?.title || text || `${response.status} ${response.statusText}`, response.status)
+    }
+    return response.json() as Promise<SceneShotBindingSummary>
+  },
   sceneMotionSample: (sceneId: string, instanceId: string, time: number) =>
     request<SceneMotionSampleSummary>(`/api/scenes/${sceneId}/instances/${instanceId}/motion-sample?time=${time}`),
   sceneAnnotations: (sceneId: string) => request<SceneAnnotationSummary[]>(`/api/scenes/${sceneId}/annotations`),

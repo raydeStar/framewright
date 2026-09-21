@@ -22,6 +22,29 @@ function ownReference(label: string) {
   return Buffer.concat([png, Buffer.from(`model-generation-${label}`, 'utf8')])
 }
 
+test('a failed readiness check stops loading and can be retried without queuing work', async ({ page }, testInfo) => {
+  const referenceName = `readiness-error-${testInfo.project.name}`
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('.asset-hero input[type="file"]').setInputFiles({
+    name: `${referenceName}.png`, mimeType: 'image/png', buffer: ownReference(referenceName),
+  })
+  await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
+  await page.route('**/api/models/generation/readiness', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'QC readiness unavailable' }),
+  }))
+  await page.getByRole('button', { name: /^Images/ }).click()
+  await page.getByRole('button', { name: `Open ${referenceName}` }).click()
+  const panel = page.getByTestId('model-from-reference')
+  await expect(panel.getByRole('alert')).toContainText('QC readiness unavailable')
+  await expect(panel).not.toContainText('Asking the compiler')
+  await page.unroute('**/api/models/generation/readiness')
+  await panel.getByRole('button', { name: 'Retry readiness check' }).click()
+  await expect(panel.getByTestId('model-generation-readiness')).toHaveAttribute('data-can-run', 'true')
+  const snapshot = await (await page.request.get('/api/studio')).json()
+  expect(snapshot.jobs.some((job: { shotCode: string }) => job.shotCode === referenceName)).toBe(false)
+})
+
 test('a reference becomes a model candidate that names where it came from', async ({ page }, testInfo) => {
   const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
   const label = testInfo.project.name

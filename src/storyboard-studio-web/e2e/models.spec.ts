@@ -46,7 +46,7 @@ async function openAssets(page: Page) {
   await expect(page.getByRole('heading', { name: 'Asset library' })).toBeVisible()
 }
 
-test('a supported model imports, reports its real measurements, and inspects without moving', async ({ page }) => {
+test('a supported model imports, reports its real measurements, and inspects without moving', async ({ page }, testInfo) => {
   const verifyConsole = failOnConsoleErrors(page)
   await openAssets(page)
 
@@ -102,6 +102,7 @@ test('a supported model imports, reports its real measurements, and inspects wit
   // though the picture would still look like a plausible block.
   await expect(stage).toHaveAttribute('data-loaded-min', '0,0,0')
   await expect(stage).toHaveAttribute('data-loaded-max', '2,1,0.75')
+  await page.screenshot({ path: testInfo.outputPath('model-qc.png'), fullPage: true })
 
   // Sliding the view is not orbiting it: the camera moves without turning, so
   // a model taller than the frame can be read from top to bottom.

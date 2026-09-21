@@ -255,7 +255,8 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
     return () => {
       disposed = true
       surface.current = undefined
-      for (const { plain } of dressed) plain.dispose()
+      // Restore the owned materials before releasing: clay must not hide the silverware.
+      for (const { mesh, own, plain } of dressed) { mesh.material = own; plain.dispose() }
       scene.environment?.dispose()
       scene.environment = null
       environment.dispose()

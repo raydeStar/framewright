@@ -181,7 +181,7 @@ public sealed class SceneMotionApiTests
 
         // The door is hinged at its own left edge and swings a quarter turn.
         var saved = await SaveAsync(client, sceneId, 1, [
-            Motion(doorId, propId, "Door", [4, 0, 0], new { pivot = new[] { -1d, 0d, 0d }, axis = "Y", fromRadians = 0d, toRadians = 1.5707963268, seconds = 2d, pingPong = false }),
+            Motion(doorId, propId, "Door", [4, 0, 0], new { pivot = (double[])[-1d, 0d, 0d], axis = "Y", fromRadians = 0d, toRadians = 1.5707963268, seconds = 2d, pingPong = false }),
             Instance(crateId, propId, "Crate", [0, 0, 0], null),
         ]);
         Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
@@ -213,9 +213,9 @@ public sealed class SceneMotionApiTests
         // axis that is not an axis, and a swing that ends where it began are
         // each refused.
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/scenes/{sceneId}/instances/{doorId}/motion-sample?time=5")).StatusCode);
-        await Refused(client, sceneId, Motion(Guid.NewGuid(), propId, "Bad axis", [0, 0, 0], new { pivot = new[] { 0d, 0d, 0d }, axis = "W", fromRadians = 0d, toRadians = 1d, seconds = 1d, pingPong = false }), 2);
-        await Refused(client, sceneId, Motion(Guid.NewGuid(), propId, "Still", [0, 0, 0], new { pivot = new[] { 0d, 0d, 0d }, axis = "Y", fromRadians = 1d, toRadians = 1d, seconds = 1d, pingPong = false }), 2);
-        await Refused(client, sceneId, Motion(Guid.NewGuid(), propId, "Forever", [0, 0, 0], new { pivot = new[] { 0d, 0d, 0d }, axis = "Y", fromRadians = 0d, toRadians = 1d, seconds = 0d, pingPong = false }), 2);
+        await Refused(client, sceneId, Motion(Guid.NewGuid(), propId, "Bad axis", [0, 0, 0], new { pivot = (double[])[0d, 0d, 0d], axis = "W", fromRadians = 0d, toRadians = 1d, seconds = 1d, pingPong = false }), 2);
+        await Refused(client, sceneId, Motion(Guid.NewGuid(), propId, "Still", [0, 0, 0], new { pivot = (double[])[0d, 0d, 0d], axis = "Y", fromRadians = 1d, toRadians = 1d, seconds = 1d, pingPong = false }), 2);
+        await Refused(client, sceneId, Motion(Guid.NewGuid(), propId, "Forever", [0, 0, 0], new { pivot = (double[])[0d, 0d, 0d], axis = "Y", fromRadians = 0d, toRadians = 1d, seconds = 0d, pingPong = false }), 2);
     }
 
     private static JsonElement Joint(JsonDocument sample, string bone) =>
@@ -228,10 +228,10 @@ public sealed class SceneMotionApiTests
         new { clipAssetId, clipName, start, end, speed, time, loop, rootMotion };
 
     private static object Instance(Guid id, Guid assetId, string name, double[] position, object? clip) =>
-        new { id, assetId, name, position, rotation = new[] { 0d, 0d, 0d }, scale = new[] { 1d, 1d, 1d }, clip };
+        new { id, assetId, name, position, rotation = (double[])[0d, 0d, 0d], scale = (double[])[1d, 1d, 1d], clip };
 
     private static object Motion(Guid id, Guid assetId, string name, double[] position, object motion) =>
-        new { id, assetId, name, position, rotation = new[] { 0d, 0d, 0d }, scale = new[] { 1d, 1d, 1d }, motion };
+        new { id, assetId, name, position, rotation = (double[])[0d, 0d, 0d], scale = (double[])[1d, 1d, 1d], motion };
 
     private static async Task Refused(HttpClient client, Guid sceneId, object instance, int expectedVersion = 1)
     {
@@ -243,7 +243,7 @@ public sealed class SceneMotionApiTests
         client.PutAsJsonAsync($"/api/scenes/{sceneId}", new
         {
             expectedVersion, name = "Motion scene",
-            camera = new { yaw = 0.9, pitch = 0.4, distance = 8d, target = new[] { 0d, 1d, 0d }, fieldOfView = 38d },
+            camera = new { yaw = 0.9, pitch = 0.4, distance = 8d, target = (double[])[0d, 1d, 0d], fieldOfView = 38d },
             environment = new { keyIntensity = 2.2, keyYaw = 0.8, keyPitch = 0.9, ambientIntensity = 1.4 },
             instances,
         });

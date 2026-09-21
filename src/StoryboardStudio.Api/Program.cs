@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol.Server;
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -40,6 +41,7 @@ builder.Configuration.AddJsonFile(
     Path.Combine(AppContext.BaseDirectory, "appsettings.Local.json"), optional: true, reloadOnChange: true);
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables();
+builder.Configuration.AddCommandLine(args);
 
 builder.WebHost.UseUrls(builder.Configuration["Urls"] ?? "http://127.0.0.1:5179");
 
@@ -70,6 +72,7 @@ builder.Services.AddScoped<SceneService>();
 builder.Services.AddScoped<SceneDirectionService>();
 builder.Services.AddScoped<SceneBlockoutService>();
 builder.Services.AddScoped<SceneMotionService>();
+builder.Services.AddScoped<SceneShotService>();
 builder.Services.AddSingleton<ICompilerGateway, CompilerGateway>();
 builder.Services.AddScoped<ModelGenerationService>();
 builder.Services.AddScoped<VisualConsistencyService>();
@@ -137,6 +140,9 @@ app.Use(async (context, next) =>
     if (requestSize is { IsReadOnly: false } && HttpMethods.IsPost(context.Request.Method))
     {
         if (context.Request.Path.Equals("/api/assets/images", StringComparison.OrdinalIgnoreCase))
+            requestSize.MaxRequestBodySize = AssetStore.MaxImageRequestBytes;
+        else if (context.Request.Path.StartsWithSegments("/api/scenes", StringComparison.OrdinalIgnoreCase) &&
+                 context.Request.Path.Value?.EndsWith("/shot-stills", StringComparison.OrdinalIgnoreCase) == true)
             requestSize.MaxRequestBodySize = AssetStore.MaxImageRequestBytes;
         else if (context.Request.Path.StartsWithSegments("/api/assets/media", StringComparison.OrdinalIgnoreCase))
             requestSize.MaxRequestBodySize = AssetStore.MaxMediaRequestBytes;
@@ -500,6 +506,34 @@ app.MapGet("/api/scenes/{sceneId:guid}", async Task<IResult> (Guid sceneId, Scen
     => ToHttpResult(await scenes.GetAsync(sceneId, cancellationToken)));
 app.MapPut("/api/scenes/{sceneId:guid}", async Task<IResult> (Guid sceneId, SaveSceneRequest request, SceneService scenes, CancellationToken cancellationToken)
     => ToHttpResult(await scenes.SaveAsync(sceneId, request, cancellationToken)));
+app.MapGet("/api/scenes/{sceneId:guid}/shot-stills", async (
+    Guid sceneId, SceneShotService sceneShots, CancellationToken cancellationToken)
+    => Results.Ok(await sceneShots.ListAsync(sceneId, cancellationToken)));
+app.MapPost("/api/scenes/{sceneId:guid}/shot-stills", async Task<IResult> (
+    Guid sceneId, HttpContext context, SceneShotService sceneShots, CancellationToken cancellationToken) =>
+{
+    if (context.Request.Headers["X-Storyboard-Studio"] != "1")
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!context.Request.HasFormContentType)
+        return Results.BadRequest(new { error = "A multipart scene still is required." });
+    var form = await context.Request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("file");
+    if (file is null) return Results.BadRequest(new { error = "The multipart field 'file' is required." });
+    if (!Guid.TryParse(form["shotId"], out var shotId) ||
+        !int.TryParse(form["expectedSceneVersion"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var expectedSceneVersion) ||
+        !int.TryParse(form["expectedShotVersion"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var expectedShotVersion) ||
+        !double.TryParse(form["startTime"], NumberStyles.Float, CultureInfo.InvariantCulture, out var startTime) ||
+        !double.TryParse(form["endTime"], NumberStyles.Float, CultureInfo.InvariantCulture, out var endTime) ||
+        !double.TryParse(form["stillTime"], NumberStyles.Float, CultureInfo.InvariantCulture, out var stillTime))
+        return Results.BadRequest(new { error = "The scene, shot, and timing fields are invalid." });
+    SceneCameraSummary? camera;
+    try { camera = JsonSerializer.Deserialize<SceneCameraSummary>(form["camera"].ToString(), new JsonSerializerOptions(JsonSerializerDefaults.Web)); }
+    catch (JsonException) { camera = null; }
+    if (camera is null) return Results.BadRequest(new { error = "A valid shot camera is required." });
+    return ToHttpResult(await sceneShots.RenderStillAsync(
+        sceneId, shotId, expectedSceneVersion, expectedShotVersion,
+        camera, startTime, endTime, stillTime, file, cancellationToken));
+}).DisableAntiforgery();
 app.MapGet("/api/scenes/{sceneId:guid}/annotations", async Task<IResult> (Guid sceneId, SceneDirectionService direction, CancellationToken cancellationToken)
     => ToHttpResult(await direction.ListAnnotationsAsync(sceneId, cancellationToken)));
 app.MapPost("/api/scenes/{sceneId:guid}/annotations", async Task<IResult> (Guid sceneId, CreateSceneAnnotationRequest request, SceneDirectionService direction, CancellationToken cancellationToken)

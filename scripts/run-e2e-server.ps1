@@ -23,7 +23,11 @@ try {
 }
 finally { Pop-Location }
 
-$env:Urls = 'http://127.0.0.1:5180'
+$testPort = 5180
+if ($env:STUDIO_E2E_PORT -and (-not [int]::TryParse($env:STUDIO_E2E_PORT, [ref]$testPort) -or $testPort -lt 1024 -or $testPort -gt 65535)) {
+    throw 'STUDIO_E2E_PORT must be an integer between 1024 and 65535.'
+}
+$env:Urls = "http://127.0.0.1:$testPort"
 $env:Studio__DataRoot = $resolvedTestData
 $env:Integrations__ComfyUi__Endpoint = 'http://127.0.0.1:1'
 $env:Integrations__ComfyUi__SubmissionEnabled = 'false'
@@ -57,10 +61,13 @@ $apiRoot = Split-Path -Parent $apiProject
 # Windows, Playwright cannot reliably terminate a PowerShell/dotnet process
 # tree in restricted environments; the sentinel lets this script stop its own
 # child and return before Playwright performs its fallback teardown.
-dotnet build $apiProject --no-restore --verbosity minimal
+# A running artist-facing app may own the ordinary Debug DLLs. Tests get their
+# own binaries as well as their own data; no need to evict the butler upstairs.
+$testAppRoot = Join-Path $resolvedTestData 'app'
+dotnet build $apiProject --no-restore --verbosity minimal -t:Rebuild --output $testAppRoot
 if ($LASTEXITCODE -ne 0) { throw "E2E API build failed with exit code $LASTEXITCODE." }
 
-$apiDll = Join-Path $apiRoot 'bin\Debug\net10.0\Framewright.dll'
+$apiDll = Join-Path $testAppRoot 'Framewright.dll'
 if (-not (Test-Path -LiteralPath $apiDll)) {
     throw "E2E API output was not found: $apiDll"
 }

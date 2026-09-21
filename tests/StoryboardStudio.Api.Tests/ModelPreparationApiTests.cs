@@ -140,6 +140,62 @@ public sealed class ModelPreparationApiTests
             configureServices: services => services.AddSingleton<ICompilerGateway>(compiler));
 
     [Fact]
+    public async Task PreparingAnOlderRevisionPreservesTheCurrentSelection()
+    {
+        using var factory = Factory(new ControlledCompiler());
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "original.glb", ModelFixtures.DenseProp());
+        var job = await QueueAsync(client, source.Id, "Original prepared later");
+        var newer = await ImportModelAsync(client, "newer.glb", ModelFixtures.AsymmetricBlock());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var added = await scope.ServiceProvider.GetRequiredService<AssetStore>().AddRevisionAsync(
+                source.Id, new AddAssetRevisionRequest(newer.Id, "New working revision", "Imported"), CancellationToken.None);
+            Assert.Equal(RepositoryResultKind.Ok, added.Kind);
+        }
+
+        var finished = await RunAsync(factory, job.Id);
+        Assert.Equal(JobState.Completed, finished.State);
+        using var check = factory.Services.CreateScope();
+        var db = check.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var current = await db.Assets.SingleAsync(asset => asset.IsCurrentRevision && asset.RevisionFamilyId != null);
+        Assert.Equal(newer.Id, current.Id);
+        Assert.False((await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId)).IsCurrentRevision);
+    }
+
+    [Fact]
+    public async Task FailedDeliveryRollsBackTheImportedRevisionAndCanRecover()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "atomic.glb", ModelFixtures.DenseProp());
+        var job = await QueueAsync(client, source.Id, "Atomic derivative");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE TRIGGER FailModelLineage BEFORE UPDATE OF Notes ON Assets
+                WHEN NEW.Notes LIKE '%Prepared for runtime from%'
+                BEGIN SELECT RAISE(ABORT, 'QC simulated interrupted delivery'); END;
+                """);
+        }
+        await Assert.ThrowsAsync<DbUpdateException>(() => RunAsync(factory, job.Id));
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+            Assert.Single(await db.Assets.Where(asset => asset.Kind == "Model").ToArrayAsync());
+            Assert.Null((await db.Assets.SingleAsync(asset => asset.Id == source.Id)).RevisionFamilyId);
+            Assert.Null((await db.Jobs.SingleAsync(candidate => candidate.Id == job.Id)).OutputAssetId);
+            await db.Database.ExecuteSqlRawAsync("DROP TRIGGER FailModelLineage;");
+        }
+        var runs = compiler.Runs;
+        var recovered = await RunAsync(factory, job.Id);
+        Assert.Equal(JobState.Completed, recovered.State);
+        Assert.Equal(runs, compiler.Runs);
+    }
+
+    [Fact]
     public async Task APreparedDerivativeJoinsItsSourceAndLeavesTheSourceTheCurrentOne()
     {
         var compiler = new ControlledCompiler();
@@ -566,9 +622,9 @@ public sealed class ModelPreparationApiTests
                 new
                 {
                     id = instanceId, assetId = source.Id, name = "The prop",
-                    position = new[] { 0.0, 0.0, 0.0 },
-                    rotation = new[] { 0.0, 0.0, 0.0 },
-                    scale = new[] { 1.0, 1.0, 1.0 },
+                    position = (double[])[0.0, 0.0, 0.0],
+                    rotation = (double[])[0.0, 0.0, 0.0],
+                    scale = (double[])[1.0, 1.0, 1.0],
                 },
             },
         });
@@ -577,7 +633,7 @@ public sealed class ModelPreparationApiTests
         var noted = await client.PostAsJsonAsync($"/api/scenes/{made.Id}/annotations", new
         {
             instanceId,
-            anchor = new[] { 0.4, 0.2, 0.1 },
+            anchor = (double[])[0.4, 0.2, 0.1],
             camera,
             body = "This ridge reads too soft from the front.",
         });
@@ -603,9 +659,9 @@ public sealed class ModelPreparationApiTests
                 new
                 {
                     id = instanceId, assetId = finished.OutputAssetId, name = "The prop",
-                    position = new[] { 0.0, 0.0, 0.0 },
-                    rotation = new[] { 0.0, 0.0, 0.0 },
-                    scale = new[] { 1.0, 1.0, 1.0 },
+                    position = (double[])[0.0, 0.0, 0.0],
+                    rotation = (double[])[0.0, 0.0, 0.0],
+                    scale = (double[])[1.0, 1.0, 1.0],
                 },
             },
         });

@@ -51,6 +51,15 @@ public sealed class AssetStore
         => await ImportImageAsync(input, fileName, expectedLength, "GenerationOutputImported", cancellationToken, "Generated image");
 
     /// <summary>
+    /// Imports a frame rendered from a frozen editable scene. It uses the same
+    /// validated, content-addressed image gate as every other picture while
+    /// keeping its source distinguishable from an upload or provider result.
+    /// </summary>
+    public async Task<RepositoryResult<AssetSummary>> ImportSceneStillAsync(
+        Stream input, string fileName, long? expectedLength, CancellationToken cancellationToken)
+        => await ImportImageAsync(input, fileName, expectedLength, "SceneStillRendered", cancellationToken, "Scene still");
+
+    /// <summary>
     /// Imports provider output while preserving whether content-addressed
     /// storage created a new logical asset. Callers that build revision stacks
     /// must not rename or re-parent an already existing asset row when a model
@@ -490,7 +499,7 @@ public sealed class AssetStore
         return RepositoryResult<IReadOnlyList<AssetSummary>>.Ok(family.Select(Map).ToArray());
     }
 
-    public async Task<RepositoryResult<AssetSummary>> AddRevisionAsync(Guid parentAssetId, AddAssetRevisionRequest request, CancellationToken cancellationToken)
+    public async Task<RepositoryResult<AssetSummary>> AddRevisionAsync(Guid parentAssetId, AddAssetRevisionRequest request, CancellationToken cancellationToken, bool makeCurrent = true)
     {
         var parent = await db.Assets.SingleOrDefaultAsync(x => x.Id == parentAssetId, cancellationToken);
         var next = await db.Assets.SingleOrDefaultAsync(x => x.Id == request.AssetId, cancellationToken);
@@ -521,10 +530,11 @@ public sealed class AssetStore
         }
         var family = await db.Assets.Where(x => x.RevisionFamilyId == familyId).ToListAsync(cancellationToken);
         if (family.All(x => x.Id != parent.Id)) family.Add(parent);
-        foreach (var member in family) member.IsCurrentRevision = false;
+        if (makeCurrent)
+            foreach (var member in family) member.IsCurrentRevision = false;
         next.RevisionFamilyId = familyId;
         next.RevisionNumber = family.Max(x => x.RevisionNumber ?? 0) + 1;
-        next.IsCurrentRevision = true;
+        next.IsCurrentRevision = makeCurrent;
         next.ParentAssetId = parent.Id;
         next.RevisionPrompt = NormalizeRevisionText(request.Prompt, 5_000, "Revision note");
         next.RevisionEngine = NormalizeRevisionText(request.Engine, 120, "Imported");

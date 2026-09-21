@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Check, Copy, Image, LoaderCircle, MessageCirclePlus, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
+import { Box, Check, Copy, Image, LoaderCircle, Maximize2, MessageCirclePlus, Minimize2, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
-import type { AssetSummary, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneSummary } from '../types'
+import type { AssetSummary, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
 // three.js loads only when a scene is actually opened.
 const SceneViewport = lazy(() => import('./SceneViewport'))
@@ -17,14 +17,18 @@ const axes = ['X', 'Y', 'Z'] as const
  * is refused by the service and surfaced here, so newer work is never silently
  * overwritten.
  */
-export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal, onDirectorView }: {
+export default function SceneWorkspace({ studio, onToast, proposalSignal, blockoutSignal, directorMode, onDirectorMode, onDirectorView, onShotRendered }: {
+  studio: StudioSnapshot
   onToast: (message: string) => void
   /** Bumped when a browser agent stages a scene proposal. */
   proposalSignal?: number
   /** Bumped when a browser agent stages a blockout plan. */
   blockoutSignal?: number
+  directorMode: boolean
+  onDirectorMode: (active: boolean) => void
   /** Publishes what is open so browser tools describe this exact selection. */
-  onDirectorView?: (view: { sceneId: string; instanceId?: string; referenceAssetId?: string } | undefined) => void
+  onDirectorView?: (view: { sceneId: string; instanceId?: string; referenceAssetId?: string; directorMode?: boolean } | undefined) => void
+  onShotRendered?: (shotId: string) => void
 }) {
   const [list, setList] = useState<SceneListItem[]>([])
   const [scene, setScene] = useState<SceneSummary>()
@@ -49,10 +53,19 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
   const [playing, setPlaying] = useState(false)
   const [clipSourceId, setClipSourceId] = useState<string>()
   const [sourceClips, setSourceClips] = useState<ModelClipSummary[]>([])
+  const [replacementId, setReplacementId] = useState<string>()
+  const [shotId, setShotId] = useState(studio.shots[0]?.id ?? '')
+  const [shotCamera, setShotCamera] = useState<SceneCameraSummary>()
+  const [shotStart, setShotStart] = useState(0)
+  const [shotStill, setShotStill] = useState(0)
+  const [shotBindings, setShotBindings] = useState<SceneShotBindingSummary[]>([])
+  const [captureStill, setCaptureStill] = useState<((request: { camera: SceneCameraSummary; time: number; width: number; height: number }) => Promise<Blob>)>()
+  const shotSceneId = useRef<string | undefined>(undefined)
   // Opening a scene is asynchronous, and the artist can create or open another
   // one while the first is still arriving. Without a ticket the slower answer
   // lands second and puts them back in a scene they have already left.
   const openSequence = useRef(0)
+  const editSequence = useRef(0)
 
   const loadDirection = useCallback(async (sceneId: string) => {
     try {
@@ -146,6 +159,7 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
   }
 
   const edit = (change: (current: SceneSummary) => SceneSummary) => {
+    editSequence.current += 1
     setScene(current => current ? change(current) : current)
     setDirty(true)
   }
@@ -182,6 +196,7 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
 
   const save = async () => {
     if (!scene) return
+    const savedEdit = editSequence.current
     setBusy(true); setError(undefined)
     try {
       const saved = await studioApi.saveScene(scene.id, {
@@ -196,7 +211,9 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
           motion: instance.motion ?? null,
         })),
       })
-      setScene(saved); setDirty(false)
+      const editedWhileSaving = editSequence.current !== savedEdit
+      setScene(current => editedWhileSaving && current?.id === saved.id ? { ...current, version: saved.version } : saved)
+      setDirty(editedWhileSaving)
       await refreshList()
       onToast(`${saved.name} saved as version ${saved.version}.`)
     } catch (reason) {
@@ -206,11 +223,33 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
 
   // Tell the shell what is open, so an agent reading context sees this object.
   useEffect(() => {
-    onDirectorView?.(scene ? { sceneId: scene.id, instanceId: selectedId, referenceAssetId: referenceId } : undefined)
+    onDirectorView?.(scene ? { sceneId: scene.id, instanceId: selectedId, referenceAssetId: referenceId, directorMode } : undefined)
     return () => onDirectorView?.(undefined)
-  }, [onDirectorView, scene, selectedId, referenceId])
+  }, [onDirectorView, scene, selectedId, referenceId, directorMode])
 
   useEffect(() => { void loadPlans(referenceId) }, [referenceId, loadPlans])
+
+  useEffect(() => {
+    if (studio.shots.some(shot => shot.id === shotId)) return
+    setShotId(studio.shots[0]?.id ?? '')
+  }, [shotId, studio.shots])
+
+  useEffect(() => {
+    if (!scene) {
+      shotSceneId.current = undefined
+      setShotBindings([])
+      setShotCamera(undefined)
+      return
+    }
+    if (shotSceneId.current === scene.id) return
+    shotSceneId.current = scene.id
+    setShotCamera({ ...scene.camera, target: [...scene.camera.target] })
+    let live = true
+    void studioApi.sceneShotStills(scene.id)
+      .then(bindings => { if (live) setShotBindings(bindings) })
+      .catch(() => { if (live) setShotBindings([]) })
+    return () => { live = false }
+  }, [scene])
 
   // How long this scene's motion runs: the longest any one object plays for at
   // its own speed, so the transport covers everything in it.
@@ -252,9 +291,69 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
 
   const selected = useMemo(() => scene?.instances.find(item => item.id === selectedId), [scene, selectedId])
   const reference = useMemo(() => references.find(asset => asset.id === referenceId), [references, referenceId])
+  const shot = useMemo(() => studio.shots.find(candidate => candidate.id === shotId), [shotId, studio.shots])
+  const shotEnd = shot ? shotStart + shot.durationFrames / studio.project.framesPerSecond : shotStart
   const selectedNotes = useMemo(
     () => annotations.filter(note => note.instanceId === selectedId && note.state === 'Open'),
     [annotations, selectedId])
+
+  useEffect(() => { setReplacementId(undefined) }, [selectedId])
+
+  useEffect(() => {
+    setShotStill(current => Math.min(Math.max(current, shotStart), shotEnd))
+  }, [shotStart, shotEnd])
+
+  const renderStill = async () => {
+    if (!scene || !shot || !shotCamera || !captureStill) return
+    if (dirty) { setError('Save the scene before rendering, so the still can cite an exact scene version.'); return }
+    setBusy(true); setError(undefined); setPlaying(false)
+    try {
+      const file = await captureStill({
+        camera: shotCamera,
+        time: shotStill,
+        width: studio.project.deliveryWidth,
+        height: studio.project.deliveryHeight,
+      })
+      const binding = await studioApi.renderSceneStill(scene.id, {
+        shotId: shot.id,
+        expectedSceneVersion: scene.version,
+        expectedShotVersion: shot.version,
+        camera: shotCamera,
+        startTime: shotStart,
+        endTime: shotEnd,
+        stillTime: shotStill,
+        file,
+      })
+      setShotBindings(current => [binding, ...current.filter(item => item.id !== binding.id)])
+      onToast(`${binding.shotCode} v${binding.shotVersion} is ready in Review from ${scene.name} v${scene.version}.`)
+      onShotRendered?.(binding.shotId)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'The scene still could not be rendered.') }
+    finally { setBusy(false) }
+  }
+
+  // Replacing a stand-in changes only what its existing scene object draws.
+  // The instance identity, transform, plan provenance, annotations, and rigid
+  // pivot remain on the object; the ordinary versioned Save is still the only
+  // write. GLB coordinates are already +Y-up metres, so there is no hidden unit
+  // conversion here and the artist can adjust the explicit scale if needed.
+  const replacePlaceholder = () => {
+    if (!selected?.placeholder || !replacementId) return
+    const model = models.find(candidate => candidate.id === replacementId)
+    if (!model) return
+    editInstance(selected.id, instance => ({
+      ...instance,
+      assetId: model.id,
+      assetName: model.displayName,
+      revisionNumber: model.revisionNumber ?? 1,
+      contentUrl: model.contentUrl,
+      available: true,
+      archived: model.isArchived,
+      dimensions: [0, 0, 0],
+      placeholder: null,
+    }))
+    setReplacementId(undefined)
+    onToast(`${selected.name} now uses ${model.displayName} in the working scene. Save to keep it.`)
+  }
 
   const bindClip = (clipName: string) => {
     if (!selected || !clipSourceId) return
@@ -385,7 +484,7 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
 
   if (loading) return <main className="workspace workspace-loading" role="status"><LoaderCircle className="spin" /><p>Opening scenes</p></main>
 
-  return <main className="workspace scene-workspace" data-testid="scene-workspace">
+  return <main className={`workspace scene-workspace${directorMode ? ' director-mode' : ''}`} data-testid="scene-workspace">
     <header className="scene-header">
       <div>
         <p className="eyebrow">Scene</p>
@@ -395,6 +494,10 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
           : <h1>No scene yet</h1>}
       </div>
       <div className="scene-header-actions">
+        {scene && <button type="button" className={`secondary director-mode-toggle${directorMode ? ' active' : ''}`}
+          aria-pressed={directorMode} onClick={() => onDirectorMode(!directorMode)}>
+          {directorMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}{directorMode ? 'Exit Director' : 'Director Mode'}
+        </button>}
         {list.length > 1 && <select aria-label="Open scene" value={scene?.id ?? ''} disabled={busy} onChange={event => void open(event.target.value)}>
           {list.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>}
@@ -422,6 +525,7 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
                 playing={playing}
                 onSelect={setSelectedId}
                 onPlaceNote={placeNote}
+                onCaptureReady={capture => setCaptureStill(() => capture)}
                 onCameraChange={(camera: SceneCameraSummary) => edit(current => ({ ...current, camera }))}
               />
             </Suspense>
@@ -462,6 +566,19 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
               <p className="model-note">{selected.placeholder
                 ? `${selected.placeholder.shape} stand-in · ${selected.placeholder.size.map(value => value.toFixed(2)).join(' × ')} m${selected.role ? ` · planned as ${selected.role}` : ''}`
                 : `${selected.assetName} · revision ${selected.revisionNumber}${selected.available ? '' : ' · model unavailable, shown as a placeholder'}`}</p>
+
+              {selected.placeholder && <div className="scene-replacement" data-testid="scene-replacement">
+                <label>Replace stand-in with<select aria-label="Replacement model" value={replacementId ?? ''}
+                  disabled={busy || models.length === 0}
+                  onChange={event => setReplacementId(event.target.value || undefined)}>
+                  <option value="">{models.length === 0 ? 'No models in the library yet' : 'Choose a library model…'}</option>
+                  {models.map(model => <option key={model.id} value={model.id}>{model.displayName} · v{model.revisionNumber ?? 1}</option>)}
+                </select></label>
+                <button type="button" className="primary compact" disabled={busy || !replacementId} onClick={replacePlaceholder}>
+                  Replace this object
+                </button>
+                <p className="model-note">Keeps this object's identity, placement, scale, pivot motion, notes, and plan lineage. Models use +Y-up metres; adjust the visible scale only if the source needs it.</p>
+              </div>}
 
               {(['position', 'rotation', 'scale'] as const).map(field => <div className="scene-vector" key={field}>
                 <span>{field === 'rotation' ? 'Rotation (radians)' : field === 'scale' ? 'Scale' : 'Position (metres)'}</span>
@@ -579,6 +696,56 @@ export default function SceneWorkspace({ onToast, proposalSignal, blockoutSignal
                     </div>}
                 <p className="model-note">A rigid part needs no skeleton. The pivot is the one point the swing leaves where it is.</p>
               </div>}
+            </section>
+
+            <section data-testid="scene-shot">
+              <h2>Shot setup</h2>
+              {studio.shots.length === 0
+                ? <p className="model-note">Create a shot slot before rendering a scene frame for review.</p>
+                : <>
+                    <label>Send still to<select aria-label="Scene shot" value={shotId} disabled={busy}
+                      onChange={event => setShotId(event.target.value)}>
+                      {studio.shots.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.code} · {candidate.title}</option>)}
+                    </select></label>
+                    <div className="scene-vector">
+                      <span>Scene time (seconds)</span>
+                      <div>
+                        <label>From<input type="number" min={0} step={0.05} aria-label="Shot start time" value={shotStart}
+                          onChange={event => setShotStart(Math.max(0, Number(event.target.value) || 0))} /></label>
+                        <label>To<input type="number" aria-label="Shot end time" value={Number(shotEnd.toFixed(3))} disabled /></label>
+                        <label>Still<input type="number" min={shotStart} max={shotEnd} step={0.05} aria-label="Shot still time" value={shotStill}
+                          onChange={event => setShotStill(Number(event.target.value) || 0)} /></label>
+                      </div>
+                    </div>
+                    <p className="model-note">The range is fixed to {shot?.durationFrames ?? 0} frames at {studio.project.framesPerSecond} fps.</p>
+                    {shotCamera && <div className="scene-shot-camera">
+                      <div className="scene-section-heading"><strong>Shot camera</strong><button type="button" disabled={busy}
+                        onClick={() => setShotCamera({ ...scene.camera, target: [...scene.camera.target] })}>Use inspection view</button></div>
+                      <div className="scene-vector"><span>Orbit</span><div>
+                        <label>Yaw<input type="number" step={0.05} aria-label="Shot camera yaw" value={shotCamera.yaw}
+                          onChange={event => setShotCamera(current => current && ({ ...current, yaw: Number(event.target.value) }))} /></label>
+                        <label>Pitch<input type="number" step={0.05} aria-label="Shot camera pitch" value={shotCamera.pitch}
+                          onChange={event => setShotCamera(current => current && ({ ...current, pitch: Number(event.target.value) }))} /></label>
+                        <label>Distance<input type="number" min={0.01} step={0.1} aria-label="Shot camera distance" value={shotCamera.distance}
+                          onChange={event => setShotCamera(current => current && ({ ...current, distance: Number(event.target.value) }))} /></label>
+                      </div></div>
+                      <div className="scene-vector"><span>Frame</span><div>
+                        {axes.map((axis, index) => <label key={axis}>{axis}<input type="number" step={0.1} aria-label={`Shot camera target ${axis}`} value={shotCamera.target[index]}
+                          onChange={event => setShotCamera(current => current && ({ ...current, target: current.target.map((value, position) => position === index ? Number(event.target.value) : value) }))} /></label>)}
+                        <label>FOV<input type="number" min={10} max={120} step={1} aria-label="Shot camera field of view" value={shotCamera.fieldOfView}
+                          onChange={event => setShotCamera(current => current && ({ ...current, fieldOfView: Number(event.target.value) }))} /></label>
+                      </div></div>
+                    </div>}
+                    <button type="button" className="primary scene-render-still" disabled={busy || dirty || !shotCamera || !captureStill}
+                      onClick={() => void renderStill()}>{busy ? 'Rendering…' : 'Render still for review'}</button>
+                    <p className="model-note">This explicit action freezes the saved scene, this separate shot camera, timing, and the {studio.project.deliveryWidth} × {studio.project.deliveryHeight} {studio.project.colorSpace} delivery canvas. It creates a working candidate; approval still happens in Review.</p>
+                  </>}
+              {shotBindings.length > 0 && <ul className="scene-shot-bindings">
+                {shotBindings.slice(0, 3).map(binding => <li key={binding.id}>
+                  <img src={binding.stillAssetUrl} alt={`${binding.shotCode} scene still`} />
+                  <span><strong>{binding.shotCode} v{binding.shotVersion}</strong><small>Scene v{binding.sceneVersion} · {binding.stillTime.toFixed(2)} s · {binding.deliveryWidth} × {binding.deliveryHeight}</small><code>{binding.snapshotHash.slice(0, 12)}</code></span>
+                </li>)}
+              </ul>}
             </section>
 
             <section data-testid="scene-reference">

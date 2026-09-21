@@ -1771,8 +1771,15 @@ public sealed class StudioApiTests : IClassFixture<StudioApiFactory>
         Assert.Equal("application/zip", response.Content.Headers.ContentType?.MediaType);
         using var archive = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read); var manifestEntry = archive.GetEntry("production-manifest.json"); Assert.NotNull(manifestEntry);
         using var json = JsonDocument.Parse(manifestEntry!.Open()); var root = json.RootElement;
-        Assert.Equal(3, root.GetProperty("schemaVersion").GetInt32()); Assert.Equal("WorkingCopy", root.GetProperty("packageKind").GetString());
+        Assert.Equal(4, root.GetProperty("schemaVersion").GetInt32()); Assert.Equal("WorkingCopy", root.GetProperty("packageKind").GetString());
         Assert.True(root.GetProperty("policy").GetProperty("audioIsSeparate").GetBoolean()); Assert.False(root.GetProperty("policy").GetProperty("generatedBackgroundMusicAllowed").GetBoolean()); Assert.True(root.GetProperty("shots").GetArrayLength() >= 6); Assert.True(root.GetProperty("timeline").GetArrayLength() >= 2);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("scenes").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("sceneInstances").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("sceneAnnotations").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("sceneProposals").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("sceneBlockoutPlans").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("sceneBlockoutItems").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("sceneShotBindings").ValueKind);
         foreach (var asset in root.GetProperty("assets").EnumerateArray()) Assert.NotNull(archive.GetEntry(asset.GetProperty("archivePath").GetString()!));
         Assert.NotNull(archive.GetEntry("package-inventory.json"));
     }

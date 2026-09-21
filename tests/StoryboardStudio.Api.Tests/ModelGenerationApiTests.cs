@@ -225,6 +225,28 @@ public sealed class ModelGenerationApiTests
     }
 
     [Fact]
+    public async Task MissingGlassStageRefusesBeforeQueuingTheExpensiveRoute()
+    {
+        var compiler = new ControlledCompiler
+        {
+            Capabilities = ControlledCompiler.Ready with
+            {
+                Stages = [.. ControlledCompiler.Ready.Stages.Where(stage => stage.Stage != "glass")],
+            },
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "glass-preflight.png");
+        var response = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Unavailable glazing", size = "knee", glassColour = "teal" });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(0, compiler.Runs);
+        using var scope = factory.Services.CreateScope();
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<StudioDbContext>().Jobs
+            .Where(job => job.WorkType == "Model").ToArrayAsync());
+    }
+
+    [Fact]
     public async Task InvalidOutputNeverBecomesAUsableModel()
     {
         var compiler = new ControlledCompiler { Payload = "this is not a GLB"u8.ToArray() };

@@ -186,6 +186,19 @@ public sealed class ProductionExportService(
             .ToListAsync(cancellationToken))
             .OrderBy(x => x.CreatedAt)
             .ToArray();
+        var scenes = await db.Scenes.AsNoTracking().OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(cancellationToken);
+        var sceneInstances = await db.SceneInstances.AsNoTracking()
+            .OrderBy(x => x.SceneId).ThenBy(x => x.SortOrder).ToListAsync(cancellationToken);
+        var sceneAnnotations = (await db.SceneAnnotations.AsNoTracking().ToListAsync(cancellationToken))
+            .OrderBy(x => x.CreatedAt).ToArray();
+        var sceneProposals = (await db.SceneProposals.AsNoTracking().ToListAsync(cancellationToken))
+            .OrderBy(x => x.CreatedAt).ToArray();
+        var sceneBlockoutPlans = (await db.SceneBlockoutPlans.AsNoTracking().ToListAsync(cancellationToken))
+            .OrderBy(x => x.CreatedAt).ToArray();
+        var sceneBlockoutItems = await db.SceneBlockoutItems.AsNoTracking()
+            .OrderBy(x => x.PlanId).ThenBy(x => x.SortOrder).ToListAsync(cancellationToken);
+        var sceneShotBindings = (await db.SceneShotBindings.AsNoTracking().ToListAsync(cancellationToken))
+            .OrderBy(x => x.CreatedAt).ToArray();
 
         var verifiedAssets = new List<VerifiedExportAsset>(assetRecords.Count);
         foreach (var asset in assetRecords)
@@ -193,10 +206,10 @@ public sealed class ProductionExportService(
 
         var payload = new
         {
-            // v3 adds complete immutable shot-intent and endpoint evidence to
-            // shotVersions. Consumers can still ignore the additive fields, but
-            // the package declares the stronger historical contract explicitly.
-            schemaVersion = 3,
+            // v4 adds the complete editable scene graph and immutable
+            // scene-to-shot bindings. Every referenced model/still is already
+            // part of the content-addressed asset inventory below.
+            schemaVersion = 4,
             packageKind = readiness.CanExportProduction ? "Production" : "WorkingCopy",
             exportedAt,
             readiness,
@@ -292,6 +305,13 @@ public sealed class ProductionExportService(
             }),
             assetCollections = collections,
             assetPlacements = placements,
+            scenes,
+            sceneInstances,
+            sceneAnnotations,
+            sceneProposals,
+            sceneBlockoutPlans,
+            sceneBlockoutItems,
+            sceneShotBindings,
             assets = verifiedAssets.Select(x => new
             {
                 x.Record.Id,

@@ -46,6 +46,7 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
     public DbSet<SceneProposalRecord> SceneProposals => Set<SceneProposalRecord>();
     public DbSet<SceneBlockoutPlanRecord> SceneBlockoutPlans => Set<SceneBlockoutPlanRecord>();
     public DbSet<SceneBlockoutItemRecord> SceneBlockoutItems => Set<SceneBlockoutItemRecord>();
+    public DbSet<SceneShotBindingRecord> SceneShotBindings => Set<SceneShotBindingRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -119,6 +120,7 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<MusicRenderRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<MusicRenderRecord>().HasIndex(x => new { x.CompositionRevisionId, x.CreatedAt });
         modelBuilder.Entity<SceneRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SceneRecord>().Property(x => x.Version).IsConcurrencyToken();
         modelBuilder.Entity<SceneRecord>().HasIndex(x => new { x.ProjectId, x.UpdatedAt });
         modelBuilder.Entity<SceneInstanceRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<SceneInstanceRecord>().HasIndex(x => new { x.SceneId, x.SortOrder });
@@ -130,6 +132,9 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<SceneBlockoutPlanRecord>().HasIndex(x => new { x.ProjectId, x.IdempotencyKey }).IsUnique();
         modelBuilder.Entity<SceneBlockoutItemRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<SceneBlockoutItemRecord>().HasIndex(x => new { x.PlanId, x.SortOrder });
+        modelBuilder.Entity<SceneShotBindingRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SceneShotBindingRecord>().HasIndex(x => new { x.SceneId, x.CreatedAt });
+        modelBuilder.Entity<SceneShotBindingRecord>().HasIndex(x => new { x.ShotId, x.ShotVersion }).IsUnique();
 
         ApplyProjectScope(modelBuilder);
     }
@@ -182,6 +187,7 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<SceneProposalRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<SceneBlockoutPlanRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<SceneBlockoutItemRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
+        modelBuilder.Entity<SceneShotBindingRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
     }
 
     /// <summary>
@@ -894,6 +900,35 @@ public sealed class SceneBlockoutItemRecord
     public required string Note { get; set; }
     /// <summary>The scene object this item became, once the plan was applied.</summary>
     public Guid? InstanceId { get; set; }
+}
+
+/// <summary>
+/// One immutable scene-to-shot snapshot. The editable scene may continue to
+/// change; this row and its rendered still continue to describe the exact
+/// source that entered candidate review.
+/// </summary>
+public sealed class SceneShotBindingRecord
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Guid SceneId { get; set; }
+    public required string SceneName { get; set; }
+    public int SceneVersion { get; set; }
+    public Guid ShotId { get; set; }
+    public required string ShotCode { get; set; }
+    public int ShotVersion { get; set; }
+    public required string CameraJson { get; set; }
+    public double StartTime { get; set; }
+    public double EndTime { get; set; }
+    public double StillTime { get; set; }
+    public int DeliveryWidth { get; set; }
+    public int DeliveryHeight { get; set; }
+    public int FramesPerSecond { get; set; }
+    public required string ColorSpace { get; set; }
+    public required string SnapshotJson { get; set; }
+    public required string SnapshotHash { get; set; }
+    public Guid StillAssetId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 public sealed class MusicCompositionRecord

@@ -140,6 +140,10 @@ public static class GlbModelInspector
             var binary = binaryChunkBytes > 0 ? bytes.Slice(binaryChunkOffset, (int)binaryChunkBytes) : default;
             return Describe(json.RootElement, binaryChunkBytes, binary, limits);
         }
+        catch (Exception error) when (error is InvalidOperationException or FormatException or OverflowException)
+        {
+            return Failure("This GLB contains malformed field values. Check its glTF structure before importing it.");
+        }
         finally { json?.Dispose() ; }
     }
 

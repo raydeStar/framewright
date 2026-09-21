@@ -11,6 +11,15 @@ with no front end of its own.
 a checkout anyway — you cannot build against a pipeline you do not have — and a
 second copy of a contract is a second thing to keep true.
 
+The repository boundary is also a maintenance rule. Changes to geometry
+generation, mesh cleanup, retopology, UVs, texture generation or baking,
+material packing, texture compression, skeleton profiles, rigging, deformation
+gates, payload construction, or compiler receipts are implemented and tested in
+`reference-asset-compiler`. Framewright then updates its pinned integration and
+consumes the resulting contract. Framewright may provide the controls, durable
+job lifecycle, validated library import, scene use, and review UI; it does not
+fork the modeling or texturing implementation.
+
 ## What that means here
 
 - **Skeleton profiles are not ours.** `profiles/skeletons/*.json` in the

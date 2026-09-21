@@ -33,7 +33,7 @@ public sealed class SceneDirectionApiTests
         {
             sceneId, instanceId = leftId, expectedSceneVersion = 2, observedStateToken = token,
             direction = "Turn the left prop to face the gate.", rationale = "It reads as facing away from camera.",
-            position = (double[]?)null, rotation = new[] { 0d, 1.2, 0d }, scale = (double[]?)null,
+            position = (double[]?)null, rotation = (double[])[0d, 1.2, 0d], scale = (double[]?)null,
             idempotencyKey = Guid.NewGuid().ToString("N"),
         });
         Assert.Equal("proposal_created", proposal.RootElement.GetProperty("code").GetString());
@@ -67,7 +67,7 @@ public sealed class SceneDirectionApiTests
                 name = instance.GetProperty("name").GetString(),
                 position = instance.GetProperty("position").EnumerateArray().Select(x => x.GetDouble()).ToArray(),
                 rotation = instance.GetProperty("id").GetGuid() == leftId
-                    ? new[] { 0d, 1.2, 0d }
+                    ? (double[])[0d, 1.2, 0d]
                     : instance.GetProperty("rotation").EnumerateArray().Select(x => x.GetDouble()).ToArray(),
                 scale = instance.GetProperty("scale").EnumerateArray().Select(x => x.GetDouble()).ToArray(),
             }).ToArray(),
@@ -92,7 +92,7 @@ public sealed class SceneDirectionApiTests
 
         var note = await client.PostAsJsonAsync($"/api/scenes/{sceneId}/annotations", new
         {
-            instanceId = leftId, anchor = new[] { 0.4, 0.8, 0.2 }, camera = Camera(),
+            instanceId = leftId, anchor = (double[])[0.4, 0.8, 0.2], camera = Camera(),
             body = "This corner reads as broken from the gate angle.",
         });
         note.EnsureSuccessStatusCode();
@@ -158,7 +158,7 @@ public sealed class SceneDirectionApiTests
                 assetId = instance.GetProperty("assetId").GetGuid(),
                 name = instance.GetProperty("name").GetString(),
                 position = instance.GetProperty("id").GetGuid() == leftId
-                    ? new[] { -4d, 0d, 0d }
+                    ? (double[])[-4d, 0d, 0d]
                     : instance.GetProperty("position").EnumerateArray().Select(x => x.GetDouble()).ToArray(),
                 rotation = instance.GetProperty("rotation").EnumerateArray().Select(x => x.GetDouble()).ToArray(),
                 scale = instance.GetProperty("scale").EnumerateArray().Select(x => x.GetDouble()).ToArray(),
@@ -170,7 +170,7 @@ public sealed class SceneDirectionApiTests
         {
             sceneId, instanceId = leftId, expectedSceneVersion = 2, observedStateToken = staleToken,
             direction = "Nudge it left.", rationale = "Built on a view that has moved.",
-            position = new[] { 1d, 0d, 0d }, rotation = (double[]?)null, scale = (double[]?)null,
+            position = (double[])[1d, 0d, 0d], rotation = (double[]?)null, scale = (double[]?)null,
             idempotencyKey = Guid.NewGuid().ToString("N"),
         });
         Assert.False(stale.RootElement.GetProperty("ok").GetBoolean());
@@ -198,7 +198,7 @@ public sealed class SceneDirectionApiTests
         {
             sceneId, instanceId = leftId, expectedSceneVersion = 2, observedStateToken = new string('a', 64),
             direction = "A direction with no context behind it.", rationale = "",
-            position = new[] { 1d, 0d, 0d }, rotation = (double[]?)null, scale = (double[]?)null,
+            position = (double[])[1d, 0d, 0d], rotation = (double[]?)null, scale = (double[]?)null,
             idempotencyKey = Guid.NewGuid().ToString("N"),
         });
         Assert.Equal("stale_context", blind.RootElement.GetProperty("code").GetString());
@@ -215,7 +215,7 @@ public sealed class SceneDirectionApiTests
         {
             sceneId, instanceId = leftId, expectedSceneVersion = 2, observedStateToken = token,
             direction = "Flatten it.", rationale = "", position = (double[]?)null,
-            rotation = (double[]?)null, scale = new[] { 0d, 1d, 1d }, idempotencyKey = Guid.NewGuid().ToString("N"),
+            rotation = (double[]?)null, scale = (double[])[0d, 1d, 1d], idempotencyKey = Guid.NewGuid().ToString("N"),
         });
         Assert.Equal("invalid_transform", collapsed.RootElement.GetProperty("code").GetString());
 
@@ -223,7 +223,7 @@ public sealed class SceneDirectionApiTests
         {
             sceneId, instanceId = Guid.NewGuid(), expectedSceneVersion = 2, observedStateToken = token,
             direction = "Move an object that is not here.", rationale = "",
-            position = new[] { 1d, 0d, 0d }, rotation = (double[]?)null, scale = (double[]?)null,
+            position = (double[])[1d, 0d, 0d], rotation = (double[]?)null, scale = (double[]?)null,
             idempotencyKey = Guid.NewGuid().ToString("N"),
         });
         Assert.Equal("instance_not_found", foreign.RootElement.GetProperty("code").GetString());
@@ -246,7 +246,7 @@ public sealed class SceneDirectionApiTests
         {
             sceneId, instanceId = leftId, expectedSceneVersion = 2, observedStateToken = token,
             direction = "A direction the artist does not want.", rationale = "",
-            position = new[] { 9d, 0d, 0d }, rotation = (double[]?)null, scale = (double[]?)null,
+            position = (double[])[9d, 0d, 0d], rotation = (double[]?)null, scale = (double[]?)null,
             idempotencyKey = Guid.NewGuid().ToString("N"),
         });
         var rejectedId = rejected.RootElement.GetProperty("data").GetProperty("id").GetGuid();
@@ -257,7 +257,7 @@ public sealed class SceneDirectionApiTests
         {
             sceneId, instanceId = leftId, expectedSceneVersion = 2, observedStateToken = token,
             direction = "A direction the artist keeps.", rationale = "",
-            position = new[] { 1d, 0d, 0d }, rotation = (double[]?)null, scale = (double[]?)null,
+            position = (double[])[1d, 0d, 0d], rotation = (double[]?)null, scale = (double[]?)null,
             idempotencyKey = Guid.NewGuid().ToString("N"),
         });
         var acceptedId = accepted.RootElement.GetProperty("data").GetProperty("id").GetGuid();
@@ -277,7 +277,7 @@ public sealed class SceneDirectionApiTests
         Assert.Equal(appliedAt, secondBody.RootElement.GetProperty("appliedAt").GetString());
     }
 
-    private static object Camera() => new { yaw = 0.9, pitch = 0.42, distance = 8d, target = new[] { 0d, 0.5, 0d }, fieldOfView = 38d };
+    private static object Camera() => new { yaw = 0.9, pitch = 0.42, distance = 8d, target = (double[])[0d, 0.5, 0d], fieldOfView = 38d };
     private static object Environment() => new { keyIntensity = 2.2, keyYaw = 0.8, keyPitch = 0.9, ambientIntensity = 1.4 };
 
     /// <summary>One model, placed twice. The whole milestone hangs on these being two objects.</summary>
@@ -296,8 +296,8 @@ public sealed class SceneDirectionApiTests
             expectedVersion = 1, name = "Two props", camera = Camera(), environment = Environment(),
             instances = new object[]
             {
-                new { id = leftId, assetId = modelId, name = "Left prop", position = new[] { -3d, 0d, 0d }, rotation = new[] { 0d, 0d, 0d }, scale = new[] { 1d, 1d, 1d } },
-                new { id = rightId, assetId = modelId, name = "Right prop", position = new[] { 3d, 0d, 0d }, rotation = new[] { 0d, 0d, 0d }, scale = new[] { 1d, 1d, 1d } },
+                new { id = leftId, assetId = modelId, name = "Left prop", position = (double[])[-3d, 0d, 0d], rotation = (double[])[0d, 0d, 0d], scale = (double[])[1d, 1d, 1d] },
+                new { id = rightId, assetId = modelId, name = "Right prop", position = (double[])[3d, 0d, 0d], rotation = (double[])[0d, 0d, 0d], scale = (double[])[1d, 1d, 1d] },
             },
         });
         save.EnsureSuccessStatusCode();

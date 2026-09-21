@@ -25,6 +25,7 @@ public static class StudioDatabaseInitializer
     private const string SceneMotionMigration = "20260919-scene-motion-v14";
     private const string AcknowledgedFailureMigration = "20260920-acknowledged-failures-v15";
     private const string PreparedDerivativeMigration = "20260920-prepared-derivatives-v16";
+    private const string SceneShotBindingMigration = "20260921-scene-shot-bindings-v17";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -234,6 +235,18 @@ public static class StudioDatabaseInitializer
             }, cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, SceneShotBindingMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, SceneShotBindingMigration, cancellationToken);
+                migrationBackupCreated = true;
+            }
+
+            await RunMigrationAsync(db, SceneShotBindingMigration,
+                () => EnsureSceneShotBindingTableAsync(db, cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -364,6 +377,7 @@ public static class StudioDatabaseInitializer
             SceneMotionMigration => "per-instance-clip-bindings-and-rigid-part-pivot-motion",
             AcknowledgedFailureMigration => "a-failure-an-artist-has-seen-stays-seen",
             PreparedDerivativeMigration => "per-asset-preparation-acceptance-and-topology-change-that-cannot-be-inherited",
+            SceneShotBindingMigration => "immutable-scene-snapshot-shot-camera-timing-delivery-and-reviewed-still-binding",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
@@ -1327,6 +1341,38 @@ public static class StudioDatabaseInitializer
         await EnsureColumnAsync(db, "SceneInstances", "MotionTo", "REAL NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(db, "SceneInstances", "MotionSeconds", "REAL NOT NULL DEFAULT 0", cancellationToken);
         await EnsureColumnAsync(db, "SceneInstances", "MotionPingPong", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+    }
+
+    private static async Task EnsureSceneShotBindingTableAsync(StudioDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "SceneShotBindings" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_SceneShotBindings" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "SceneId" TEXT NOT NULL,
+                "SceneName" TEXT NOT NULL,
+                "SceneVersion" INTEGER NOT NULL,
+                "ShotId" TEXT NOT NULL,
+                "ShotCode" TEXT NOT NULL,
+                "ShotVersion" INTEGER NOT NULL,
+                "CameraJson" TEXT NOT NULL,
+                "StartTime" REAL NOT NULL,
+                "EndTime" REAL NOT NULL,
+                "StillTime" REAL NOT NULL,
+                "DeliveryWidth" INTEGER NOT NULL,
+                "DeliveryHeight" INTEGER NOT NULL,
+                "FramesPerSecond" INTEGER NOT NULL,
+                "ColorSpace" TEXT NOT NULL,
+                "SnapshotJson" TEXT NOT NULL,
+                "SnapshotHash" TEXT NOT NULL,
+                "StillAssetId" TEXT NOT NULL,
+                "CreatedAt" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_SceneShotBindings_SceneId_CreatedAt"
+                ON "SceneShotBindings" ("SceneId", "CreatedAt");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_SceneShotBindings_ShotId_ShotVersion"
+                ON "SceneShotBindings" ("ShotId", "ShotVersion");
+            """, cancellationToken);
     }
 
     private static async Task EnsureYuE2CompositionTablesAsync(StudioDbContext db, CancellationToken cancellationToken)

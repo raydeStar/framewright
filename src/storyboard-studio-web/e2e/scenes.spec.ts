@@ -34,6 +34,72 @@ function ownFixture(source: string, label: string) {
   return Buffer.concat([header, json, binary])
 }
 
+test('edits made while saving remain in the working scene', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  await page.getByLabel('Scene name', { exact: true }).fill('Saved name')
+  let release!: () => void
+  let received!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const ready = new Promise<void>(resolve => { received = resolve })
+  await page.route('**/api/scenes/*', async route => {
+    if (route.request().method() !== 'PUT') { await route.continue(); return }
+    const response = await route.fetch()
+    received()
+    await held
+    await route.fulfill({ response })
+  })
+  await page.getByTestId('scene-save').click()
+  await ready
+  await page.getByLabel('Scene name', { exact: true }).fill('Newer working name')
+  release()
+  await expect(page.getByTestId('scene-save')).toBeEnabled()
+  await expect(page.getByLabel('Scene name', { exact: true })).toHaveValue('Newer working name')
+  await page.unroute('**/api/scenes/*')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 3')
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await expect(page.getByLabel('Scene name', { exact: true })).toHaveValue('Newer working name')
+})
+
+test('removing an object while its model loads does not bring it back', async ({ page }, testInfo) => {
+  const name = `delayed-model-${testInfo.project.name}`
+  await page.goto('/')
+  const imported = await page.request.post('/api/assets/models', {
+    headers: { 'X-Storyboard-Studio': '1' },
+    multipart: { file: { name: `${name}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, name) } },
+  })
+  expect(imported.ok()).toBe(true)
+  const asset = await imported.json()
+  let release!: () => void
+  let requested!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const started = new Promise<void>(resolve => { requested = resolve })
+  await page.route(`**/api/assets/${asset.id}/content`, async route => {
+    const response = await route.fetch()
+    requested()
+    await held
+    await route.fulfill({ response })
+  })
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await page.getByLabel('Add model to scene').selectOption({ label: name })
+  await started
+  await page.getByRole('button', { name: 'Remove from scene', exact: true }).click()
+  await expect(page.getByTestId('scene-stage')).toHaveAttribute('data-objects', '0')
+  const delivered = page.waitForResponse(`**/api/assets/${asset.id}/content`)
+  release()
+  await delivered
+  // Let decoding and the loader callback finish before checking the graph.
+  await page.waitForTimeout(700)
+  await expect(page.getByTestId('scene-stage')).toHaveAttribute('data-objects', '0')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('saved')
+})
+
 test('two instances of one model are placed, moved independently, and reopen after a reload', async ({ page }, testInfo) => {
   // Switching or removing objects remounts loaders, and an aborted model fetch
   // is reported by WebKit as a failed load. The viewport falls back to a
@@ -71,6 +137,14 @@ test('two instances of one model are placed, moved independently, and reopen aft
   await placement.getByLabel('scale X').fill('2')
   await placement.getByLabel('rotation Y').fill('0.8')
 
+  // Scene Director Mode is the same working scene in full view. Unsaved edits
+  // and the selected object survive entering and leaving it.
+  await page.getByRole('button', { name: 'Director Mode' }).click()
+  await expect(page.getByTestId('scene-workspace')).toHaveClass(/director-mode/)
+  await page.getByRole('button', { name: 'Exit Director' }).click()
+  await expect(placement.getByLabel('position X')).toHaveValue('2.5')
+  await expect(placement.getByLabel('rotation Y')).toHaveValue('0.8')
+
   await page.getByTestId('scene-save').click()
   await expect(page.getByTestId('scene-version')).toContainText('Version 2')
   await expect(page.getByTestId('scene-version')).toContainText('saved')
@@ -97,11 +171,83 @@ test('two instances of one model are placed, moved independently, and reopen aft
   // object that never drew would otherwise pass every assertion above.
   await expect(page.getByTestId('scene-stage')).toHaveAttribute('data-objects', '2')
   await expect(page.getByTestId('scene-object-count')).toContainText('2 objects')
+  await page.screenshot({ path: testInfo.outputPath('scene-qc.png'), fullPage: true })
 
   // Framing pulls an object parked away from the origin back into view.
   await page.getByRole('button', { name: 'Frame all' }).click()
   const framed = await (await page.request.get(`/api/scenes/${scenes[0].id}`)).json()
   expect(framed.instances).toHaveLength(2)
+  verifyConsole()
+})
+
+test('a saved scene renders a delivery-sized still into the ordinary review path', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  const modelName = `scene-still-${label}`
+
+  await page.goto('/')
+  const before = await (await page.request.get('/api/studio')).json()
+  const targetShot = before.shots[0]
+  const delivery = before.project
+
+  const imported = await page.request.post('/api/assets/models', {
+    headers: { 'X-Storyboard-Studio': '1' },
+    multipart: { file: { name: `${modelName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, `still-${label}`) } },
+  })
+  expect(imported.ok()).toBe(true)
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  await page.getByTestId('scene-objects').getByLabel('Add model to scene').selectOption({ label: modelName })
+  await page.getByTestId('scene-placement').getByLabel('position X').fill('1.25')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+  await expect(page.getByTestId('scene-stage')).toHaveAttribute('data-objects', '1')
+
+  const shotSetup = page.getByTestId('scene-shot')
+  await shotSetup.getByLabel('Scene shot').selectOption(targetShot.id)
+  await shotSetup.getByLabel('Shot camera yaw').fill('0.9')
+  await shotSetup.getByLabel('Shot still time').fill('0.5')
+  const render = shotSetup.getByRole('button', { name: 'Render still for review' })
+  await expect(render).toBeEnabled()
+  await render.click()
+
+  await expect(page.getByTestId('review-workspace')).toBeVisible()
+  await expect(page.getByText(new RegExp(`${targetShot.code} v${targetShot.version + 1} is ready in Review`))).toBeVisible()
+
+  const scenes = await (await page.request.get('/api/scenes')).json()
+  const scene = scenes.find((item: { name: string }) => item.name === 'Untitled scene') ?? scenes[0]
+  const bindingsResponse = await page.request.get(`/api/scenes/${scene.id}/shot-stills`)
+  expect(bindingsResponse.ok()).toBe(true)
+  const bindings = await bindingsResponse.json()
+  const binding = bindings.find((item: { shotId: string }) => item.shotId === targetShot.id)
+  expect(binding).toBeTruthy()
+  expect(binding.sceneVersion).toBe(2)
+  expect(binding.shotVersion).toBe(targetShot.version + 1)
+  expect(binding.camera.yaw).toBeCloseTo(0.9, 5)
+  expect(binding.stillTime).toBeCloseTo(0.5, 5)
+  expect(binding.deliveryWidth).toBe(delivery.deliveryWidth)
+  expect(binding.deliveryHeight).toBe(delivery.deliveryHeight)
+  expect(binding.snapshotHash).toMatch(/^[0-9a-f]{64}$/)
+
+  const imageResponse = await page.request.get(binding.stillAssetUrl)
+  expect(imageResponse.ok()).toBe(true)
+  const png = await imageResponse.body()
+  expect(png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  expect(png.readUInt32BE(16)).toBe(delivery.deliveryWidth)
+  expect(png.readUInt32BE(20)).toBe(delivery.deliveryHeight)
+
+  const after = await (await page.request.get('/api/studio')).json()
+  const reviewed = after.shots.find((item: { id: string }) => item.id === targetShot.id)
+  expect(reviewed.version).toBe(targetShot.version + 1)
+  expect(reviewed.currentAssetId).toBe(binding.stillAssetId)
+  const candidates = await (await page.request.get(`/api/shots/${targetShot.id}/candidates`)).json()
+  expect(candidates.find((item: { isCurrent: boolean }) => item.isCurrent).assetId).toBe(binding.stillAssetId)
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await expect(page.getByTestId('scene-shot').getByAltText(`${targetShot.code} scene still`)).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('scene-shot-still.png'), fullPage: true })
   verifyConsole()
 })
 
@@ -393,11 +539,42 @@ test('an agent reads a reference into a plan and the artist builds and corrects 
   const scene = await (await page.request.get(`/api/scenes/${built.id}`)).json()
   const chair = scene.instances.find((instance: { name: string }) => instance.name === 'Magistrate chair')
   const figure = scene.instances.find((instance: { name: string }) => instance.name === 'Standing figure')
+  const floor = scene.instances.find((instance: { name: string }) => instance.name === 'Court floor')
   expect(chair.position[0]).toBeCloseTo(2.75, 4)
   expect(chair.assetId).toBe(modelId)
   // The stand-in beside it kept its own geometry and never moved.
   expect(figure.placeholder.shape).toBe('Cylinder')
   expect(figure.position).toEqual([1.2, 0.9, 0])
+
+  // Replace exactly that stand-in with a reusable library revision. The
+  // existing instance remains the target: placement, the rest of the scene,
+  // lighting, camera, and plan lineage do not move with the payload swap.
+  await objects.getByRole('button', { name: /Standing figure/ }).click()
+  const replacement = page.getByTestId('scene-replacement')
+  await replacement.getByLabel('Replacement model').selectOption(modelId)
+  await replacement.getByRole('button', { name: 'Replace this object' }).click()
+  await expect(page.getByTestId('scene-placement')).toContainText(`${modelName} · revision 1`)
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('saved')
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  const replacedScene = await (await page.request.get(`/api/scenes/${built.id}`)).json()
+  const replaced = replacedScene.instances.find((instance: { name: string }) => instance.name === 'Standing figure')
+  const chairAfter = replacedScene.instances.find((instance: { name: string }) => instance.name === 'Magistrate chair')
+  const floorAfter = replacedScene.instances.find((instance: { name: string }) => instance.name === 'Court floor')
+  expect(replaced.id).toBe(figure.id)
+  expect(replaced.assetId).toBe(modelId)
+  expect(replaced.placeholder).toBeNull()
+  expect(replaced.position).toEqual(figure.position)
+  expect(replaced.rotation).toEqual(figure.rotation)
+  expect(replaced.scale).toEqual(figure.scale)
+  expect(replaced.planId).toBe(figure.planId)
+  expect(chairAfter).toEqual(chair)
+  expect(floorAfter).toEqual(floor)
+  expect(replacedScene.camera).toEqual(scene.camera)
+  expect(replacedScene.environment).toEqual(scene.environment)
+  await expect(page.getByTestId('scene-objects').getByRole('button', { name: /Standing figure/ })).toContainText(modelName)
   verifyConsole()
 })
 

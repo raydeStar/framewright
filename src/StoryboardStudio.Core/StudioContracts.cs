@@ -145,6 +145,18 @@ public sealed record SaveSceneRequest(
     SaveSceneInstanceRequest[] Instances);
 
 /// <summary>
+/// An immutable handoff from one saved scene version into one working shot
+/// revision. SnapshotHash covers the complete scene, shot camera, timing, and
+/// delivery contract recorded by the service when the still was accepted.
+/// </summary>
+public sealed record SceneShotBindingSummary(
+    Guid Id, Guid SceneId, string SceneName, int SceneVersion,
+    Guid ShotId, string ShotCode, int ShotVersion,
+    SceneCameraSummary Camera, double StartTime, double EndTime, double StillTime,
+    int DeliveryWidth, int DeliveryHeight, int FramesPerSecond, string ColorSpace,
+    string SnapshotHash, Guid StillAssetId, string StillAssetUrl, DateTimeOffset CreatedAt);
+
+/// <summary>
 /// One object in a construction plan: what it is for, what would stand in for
 /// it, roughly where it goes, and how sure the plan is about it. Confidence is
 /// carried per object because a reference shows some things plainly and hides

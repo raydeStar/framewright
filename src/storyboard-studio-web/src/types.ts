@@ -154,6 +154,13 @@ export interface SceneBlockoutPlanSummary {
 }
 export interface SceneSummary { id: string; name: string; version: number; camera: SceneCameraSummary; environment: SceneEnvironmentSummary; instances: SceneInstanceSummary[]; updatedAt: string }
 export interface SceneListItem { id: string; name: string; version: number; instanceCount: number; updatedAt: string }
+export interface SceneShotBindingSummary {
+  id: string; sceneId: string; sceneName: string; sceneVersion: number
+  shotId: string; shotCode: string; shotVersion: number; camera: SceneCameraSummary
+  startTime: number; endTime: number; stillTime: number
+  deliveryWidth: number; deliveryHeight: number; framesPerSecond: number; colorSpace: string
+  snapshotHash: string; stillAssetId: string; stillAssetUrl: string; createdAt: string
+}
 /** A note on one scene object, bound to the revision it was measured against. */
 export interface SceneAnnotationSummary {
   id: string; sceneId: string; instanceId: string; assetId: string; instanceName: string

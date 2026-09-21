@@ -38,14 +38,14 @@ public sealed class SceneBlockoutApiTests
                     referenceAssetId = referenceId, observedReferenceHash = hash,
                     title = "Chain court blockout",
                     summary = "Three objects read off the court reference: a seat, a standing figure, and the floor.",
-                    camera = new { yaw = 1.1, pitch = 0.4, distance = 8.0, target = new[] { 0d, 1d, 0d }, fieldOfView = 35d },
-                    assumptions = new[] { "The floor is flat.", "The figure is about 1.8 metres tall." },
-                    uncertainties = new[] { "The right third of the reference is behind the chain." },
+                    camera = new { yaw = 1.1, pitch = 0.4, distance = 8.0, target = (double[])[0d, 1d, 0d], fieldOfView = 35d },
+                    assumptions = (string[])["The floor is flat.", "The figure is about 1.8 metres tall."],
+                    uncertainties = (string[])["The right third of the reference is behind the chain."],
                     items = new object[]
                     {
-                        new { role = "Magistrate chair", matchAssetId = modelId, position = new[] { 0d, 0d, -1.5 }, rotation = new[] { 0d, 0d, 0d }, scale = new[] { 1d, 1d, 1d }, motionIntent = "Static.", confidence = "Certain", note = "Matches the block in the library." },
-                        new { role = "Standing figure", shape = "Cylinder", size = new[] { 0.5, 1.8, 0.5 }, position = new[] { 1.2, 0.9, 0d }, rotation = new[] { 0d, 0.4, 0d }, scale = new[] { 1d, 1d, 1d }, motionIntent = "Walks toward the chair.", confidence = "Approximate", note = "Height guessed from the doorway." },
-                        new { role = "Court floor", shape = "Plane", size = new[] { 12d, 0.1, 12d }, position = new[] { 0d, 0d, 0d }, rotation = new[] { 0d, 0d, 0d }, scale = new[] { 1d, 1d, 1d }, motionIntent = "", confidence = "Occluded", note = "Far edge is not visible." },
+                        new { role = "Magistrate chair", matchAssetId = modelId, position = (double[])[0d, 0d, -1.5], rotation = (double[])[0d, 0d, 0d], scale = (double[])[1d, 1d, 1d], motionIntent = "Static.", confidence = "Certain", note = "Matches the block in the library." },
+                        new { role = "Standing figure", shape = "Cylinder", size = (double[])[0.5, 1.8, 0.5], position = (double[])[1.2, 0.9, 0d], rotation = (double[])[0d, 0.4, 0d], scale = (double[])[1d, 1d, 1d], motionIntent = "Walks toward the chair.", confidence = "Approximate", note = "Height guessed from the doorway." },
+                        new { role = "Court floor", shape = "Plane", size = (double[])[12d, 0.1, 12d], position = (double[])[0d, 0d, 0d], rotation = (double[])[0d, 0d, 0d], scale = (double[])[1d, 1d, 1d], motionIntent = "", confidence = "Occluded", note = "Far edge is not visible." },
                     },
                     idempotencyKey = "blockout-round-trip",
                 });
@@ -97,7 +97,7 @@ public sealed class SceneBlockoutApiTests
                 var correction = await client.PutAsJsonAsync($"/api/scenes/{sceneId}", new
                 {
                     expectedVersion = 1, name = "Chain court blockout",
-                    camera = new { yaw = 1.1, pitch = 0.4, distance = 5.25, target = new[] { 0d, 1d, 0d }, fieldOfView = 35d },
+                    camera = new { yaw = 1.1, pitch = 0.4, distance = 5.25, target = (double[])[0d, 1d, 0d], fieldOfView = 35d },
                     environment = new { keyIntensity = 2.2, keyYaw = 0.8, keyPitch = 0.9, ambientIntensity = 1.4 },
                     instances = instances.Select(instance => new
                     {
@@ -111,7 +111,7 @@ public sealed class SceneBlockoutApiTests
                         },
                         name = instance.GetProperty("name").GetString(),
                         position = instance.GetProperty("id").GetGuid() == chairId
-                            ? new[] { 2.75, 0d, -1.5 }
+                            ? (double[])[2.75, 0d, -1.5]
                             : Numbers(instance, "position"),
                         rotation = Numbers(instance, "rotation"),
                         scale = Numbers(instance, "scale"),
@@ -170,13 +170,13 @@ public sealed class SceneBlockoutApiTests
 
         // An object is a library match or a stand-in, never both and never neither.
         Assert.Equal("invalid_placeholder", await CodeAsync(client, Plan(referenceId, hash,
-            [new { role = "Confused", matchAssetId = modelId, shape = "Box", size = new[] { 1d, 1d, 1d } }], "both")));
+            [new { role = "Confused", matchAssetId = modelId, shape = "Box", size = (double[])[1d, 1d, 1d] }], "both")));
         Assert.Equal("invalid_placeholder", await CodeAsync(client, Plan(referenceId, hash,
             [new { role = "Nothing at all" }], "neither")));
         Assert.Equal("invalid_placeholder", await CodeAsync(client, Plan(referenceId, hash,
-            [new { role = "Unknown shape", shape = "Torus", size = new[] { 1d, 1d, 1d } }], "shape")));
+            [new { role = "Unknown shape", shape = "Torus", size = (double[])[1d, 1d, 1d] }], "shape")));
         Assert.Equal("invalid_placeholder", await CodeAsync(client, Plan(referenceId, hash,
-            [new { role = "Collapsed", shape = "Box", size = new[] { 0d, 1d, 1d } }], "size")));
+            [new { role = "Collapsed", shape = "Box", size = (double[])[0d, 1d, 1d] }], "size")));
 
         // A match has to be a model this project actually holds.
         Assert.Equal("match_not_found", await CodeAsync(client, Plan(referenceId, hash,
@@ -186,7 +186,7 @@ public sealed class SceneBlockoutApiTests
 
         // Confidence is a stated vocabulary, not free text.
         Assert.Equal("invalid_confidence", await CodeAsync(client, Plan(referenceId, hash,
-            [new { role = "Vague", shape = "Box", size = new[] { 1d, 1d, 1d }, confidence = "probably" }], "confidence")));
+            [new { role = "Vague", shape = "Box", size = (double[])[1d, 1d, 1d], confidence = "probably" }], "confidence")));
 
         // The reference is a picture, not a model.
         Assert.Equal("reference_not_an_image", await CodeAsync(client, Plan(modelId, hash,
@@ -282,7 +282,7 @@ public sealed class SceneBlockoutApiTests
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
 
     private static object Placeholder(string role) =>
-        new { role, shape = "Box", size = new[] { 1d, 1d, 1d } };
+        new { role, shape = "Box", size = (double[])[1d, 1d, 1d] };
 
     private static object Plan(Guid referenceAssetId, string hash, object[] items, string key) => new
     {
