@@ -243,7 +243,8 @@ public sealed record RigPoseSummary(
 /// measurement after it would be taken against a lie.
 /// </summary>
 public sealed record CreateModelGenerationRequest(
-    Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null);
+    Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null,
+    string? GlassColour = null);
 
 /// <summary>
 /// Whether model generation can run on this workstation, and whether it is
@@ -254,7 +255,15 @@ public sealed record ModelGenerationReadiness(
     bool Installed, bool Commissioned, bool CanRun,
     string? CompilerVersion, string? Checkout, string? Blender,
     string[] Missing, string Detail, ModelSizeChoice[]? Sizes = null,
-    IReadOnlyDictionary<string, string>? Suffixes = null);
+    IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null);
+
+/// <summary>
+/// A colour a model's glass might have been painted, offered the way a person
+/// would name it. Nothing in a mesh says which faces are glass -- a pane and
+/// its frame are the same surface -- so the paint is what says so, and the
+/// artist says which paint. The compiler owns this vocabulary.
+/// </summary>
+public sealed record ModelColourChoice(string Colour, string Description);
 
 /// <summary>
 /// How big a thing is, offered the way a person can judge it: where it comes

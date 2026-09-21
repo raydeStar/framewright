@@ -205,7 +205,10 @@ export interface ModelGenerationReadiness {
   installed: boolean; commissioned: boolean; canRun: boolean
   compilerVersion: string | null; checkout: string | null; blender: string | null
   missing: string[]; detail: string; sizes: ModelSizeChoice[] | null
+  colours: ModelColourChoice[] | null
 }
+/** A colour a model's glass might have been painted, named the way a person would. */
+export interface ModelColourChoice { colour: string; description: string }
 /** How big a thing is, said as where it comes up to on a person. */
 export interface ModelSizeChoice { size: string; description: string; metres: number }
 /** One reusable clip a model carries, as its file declares it. */

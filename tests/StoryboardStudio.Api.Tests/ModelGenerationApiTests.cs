@@ -56,13 +56,17 @@ public sealed class ModelGenerationApiTests
                     "stage-mesh" => ".blend",
                     "uv-unwrap" => ".obj",
                     _ => ".glb",
-                });
+                },
+                Colours: name == "glass"
+                    ? [new CompilerColour("teal", "teal or cyan"), new CompilerColour("amber", "amber or orange")]
+                    : null);
 
         public static CompilerCapabilities Ready => new(
             Installed: true, Commissioned: true, Version: "reference-asset-compiler 0.1.2",
             Checkout: "C:/checkout", Blender: "C:/blender.exe",
             Stages: [Stage("geometry"), Stage("stage-mesh"), Stage("remesh"),
-                     Stage("uv-unwrap"), Stage("texture"), Stage("browser-payload")]);
+                     Stage("uv-unwrap"), Stage("texture"), Stage("glass"),
+                     Stage("browser-payload")]);
 
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
@@ -609,6 +613,82 @@ public sealed class ModelGenerationApiTests
         // knee, which is worse than refusing.
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Equal(0, compiler.Runs);
+    }
+
+    /// <summary>
+    /// Nothing in a mesh says which faces are glass: a pane and the frame
+    /// around it are the same surface. The paint says so, so the artist names
+    /// the colour — and a model with none, which is most of them, gets no
+    /// glazing step at all rather than a stage guessing which colour was a
+    /// window and turning an ordinary painted surface see-through.
+    /// </summary>
+    [Fact]
+    public async Task GlassIsOnlyInTheRouteWhenTheArtistSaysThereIsGlass()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "glazed-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Glazed", size = "knee", glassColour = "teal" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var jobId = job.RootElement.GetProperty("id").GetGuid();
+
+        var finished = await RunAsync(factory, jobId);
+
+        Assert.Equal(JobState.Completed, finished.State);
+        // Glazing sits after the paint it reads and before the export, because
+        // it needs the colours and the export needs the result.
+        Assert.Equal(
+            ["geometry", "stage-mesh", "remesh", "uv-unwrap", "texture", "glass", "browser-payload"],
+            compiler.Calls.Select(call => call.Stage));
+        Assert.Equal("teal", compiler.Options["glass"]["colour"]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.Equal("teal", result.RootElement.GetProperty("glassColour").GetString());
+    }
+
+    [Fact]
+    public async Task AModelWithNoGlassNeverRunsTheGlazingStage()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "solid-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Solid", size = "knee" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+
+        Assert.Equal(JobState.Completed, finished.State);
+        // Most props have no glass, and running the stage anyway would mean
+        // guessing a colour on a model that has no panes to find.
+        Assert.DoesNotContain("glass", compiler.Calls.Select(call => call.Stage));
+        Assert.Equal(6, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task AColourTheCompilerDoesNotOfferIsRefusedBeforeAnythingRuns()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "chartreuse-reference.png");
+
+        var refused = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Impossible", size = "knee", glassColour = "chartreuse" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(0, compiler.Runs);
+        var message = await refused.Content.ReadAsStringAsync();
+        // Named with what is actually on offer, from the compiler's own list.
+        Assert.Contains("teal", message, StringComparison.Ordinal);
     }
 
     [Fact]

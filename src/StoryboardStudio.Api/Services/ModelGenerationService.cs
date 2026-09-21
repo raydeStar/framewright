@@ -34,6 +34,7 @@ public sealed class ModelGenerationService(
     public const string RemeshStage = "remesh";
     public const string UvUnwrapStage = "uv-unwrap";
     public const string TextureStage = "texture";
+    public const string GlassStage = "glass";
     public const string BrowserPayloadStage = "browser-payload";
 
     /// <summary>
@@ -62,6 +63,17 @@ public sealed class ModelGenerationService(
         UvUnwrapStage, TextureStage, BrowserPayloadStage,
     ];
 
+    /// <summary>
+    /// The route for one request. Glazing is only in it when the artist said
+    /// this thing has glass, because most props have none and a stage that ran
+    /// anyway would have to guess which colour was a window -- turning an
+    /// ordinary painted surface see-through.
+    /// </summary>
+    private static string[] RouteFor(string? glassColour) =>
+        string.IsNullOrWhiteSpace(glassColour)
+            ? ReferenceToModelRoute
+            : [.. ReferenceToModelRoute[..^1], GlassStage, ReferenceToModelRoute[^1]];
+
     /// <summary>What each step is doing, in words an artist reading a queue would use.</summary>
     private static readonly Dictionary<string, string> StagePhase = new(StringComparer.Ordinal)
     {
@@ -70,6 +82,7 @@ public sealed class ModelGenerationService(
         [RemeshStage] = "Rebuilding it evenly at a size a browser can carry",
         [UvUnwrapStage] = "Unfolding it so it can be painted",
         [TextureStage] = "Painting it from the reference",
+        [GlassStage] = "Letting the glass through",
         [BrowserPayloadStage] = "Preparing the mesh for the browser",
     };
 
@@ -89,7 +102,7 @@ public sealed class ModelGenerationService(
     // version 1 packet is not migrated, because the single stage it names is
     // the payload export reading an image, which could never have produced a
     // model. Failing it honestly beats rerunning work that cannot succeed.
-    private const int FrozenPacketVersion = 4;
+    private const int FrozenPacketVersion = 5;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>
@@ -100,7 +113,7 @@ public sealed class ModelGenerationService(
     private sealed record FrozenModelRequest(
         int PacketVersion, Guid SourceAssetId, string SourceContentHash, string SourceName,
         int SourceRevisionNumber, RouteStep[] Route, string? CompilerVersion, DateTimeOffset FrozenAt,
-        string Size, double SizeAdjust);
+        string Size, double SizeAdjust, string? GlassColour);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -150,7 +163,11 @@ public sealed class ModelGenerationService(
             // What each stage writes, frozen into a request so a restart names
             // the same files and a finished step is recognised as finished.
             Suffixes: capabilities.Stages.ToDictionary(
-                stage => stage.Stage, stage => stage.OutputSuffix, StringComparer.Ordinal));
+                stage => stage.Stage, stage => stage.OutputSuffix, StringComparer.Ordinal),
+            Colours: capabilities.Stages
+                .FirstOrDefault(candidate => candidate.Stage == GlassStage)?.Colours
+                ?.Select(colour => new ModelColourChoice(colour.Colour, colour.Description))
+                .ToArray());
     }
 
     private static string Explain(CompilerCapabilities capabilities, bool canRun)
@@ -204,18 +221,28 @@ public sealed class ModelGenerationService(
             return RepositoryResult<JobSummary>.Invalid(
                 "A size adjustment that large means a different size entirely; pick the nearer one.");
 
+        // Glass is opt-in and named, never inferred. An empty answer is the
+        // ordinary one: most props have no glass at all.
+        var glassColour = string.IsNullOrWhiteSpace(request.GlassColour) ? null : request.GlassColour.Trim();
+
         var readiness = await PreflightAsync(cancellationToken);
         if (!readiness.CanRun)
             return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+        if (glassColour is not null
+            && readiness.Colours is { Length: > 0 } offered
+            && !offered.Any(colour => string.Equals(colour.Colour, glassColour, StringComparison.OrdinalIgnoreCase)))
+            return RepositoryResult<JobSummary>.Invalid(
+                $"The compiler does not offer {glassColour} as a glass colour. "
+                + $"It offers: {string.Join(", ", offered.Select(colour => colour.Colour))}.");
 
         var now = timeProvider.GetUtcNow();
         var packet = new FrozenModelRequest(
             FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
             source.RevisionNumber ?? 1,
-            [.. ReferenceToModelRoute.Select(stage => new RouteStep(
+            [.. RouteFor(glassColour).Select(stage => new RouteStep(
                 stage,
                 readiness.Suffixes?.GetValueOrDefault(stage) ?? ".glb"))],
-            readiness.CompilerVersion, now, size, request.SizeAdjust ?? 1.0);
+            readiness.CompilerVersion, now, size, request.SizeAdjust ?? 1.0, glassColour);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -403,6 +430,7 @@ public sealed class ModelGenerationService(
             route = packet.Route.Select(step => step.Stage),
             size = packet.Size,
             sizeAdjust = packet.SizeAdjust,
+            glassColour = packet.GlassColour,
             rerunAfterIncompleteAnswer = rerunAfterPartial,
             // Per step, because "the route succeeded" hides which half of it
             // actually ran on this attempt and which was picked up off disk.
@@ -454,6 +482,7 @@ public sealed class ModelGenerationService(
         UvUnwrapStage => new() { ["allow-triangulated-glb"] = "" },
         // The paint is conditioned on the same picture the geometry came from.
         TextureStage => new() { ["reference"] = referencePath },
+        GlassStage => new() { ["colour"] = packet.GlassColour ?? "" },
         _ => [],
     };
 

@@ -47,6 +47,10 @@ test('a reference becomes a model candidate that names where it came from', asyn
   await expect(panel.getByTestId('model-generate')).toBeDisabled()
   await panel.getByTestId('model-size').selectOption('knee')
   await expect(panel.getByTestId('model-generate')).toBeEnabled()
+  // Glass is offered and only offered: nothing in a mesh says which faces are
+  // panes, so the default answer is that there are none.
+  await expect(panel.getByTestId('model-glass')).toHaveValue('')
+  await panel.getByTestId('model-glass').selectOption('teal')
   await panel.getByTestId('model-generate').click()
   await expect(page.getByText(/keeps going if you leave this screen/)).toBeVisible()
 

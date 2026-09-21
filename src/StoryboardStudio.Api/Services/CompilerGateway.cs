@@ -23,7 +23,11 @@ public sealed record CompilerCapabilities(
 
 public sealed record CompilerStage(
     string Stage, string Runner, string Summary, string Produces, bool Available, string[] Missing,
-    CompilerSize[]? Sizes = null, string OutputSuffix = ".glb");
+    CompilerSize[]? Sizes = null, string OutputSuffix = ".glb",
+    CompilerColour[]? Colours = null);
+
+/// <summary>One colour a stage will accept, as the compiler describes it.</summary>
+public sealed record CompilerColour(string Colour, string Description);
 
 /// <summary>
 /// One size a stage will accept, as the compiler describes it. The vocabulary
@@ -131,7 +135,11 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
                             Text(size, "size") ?? "", Text(size, "description") ?? "",
                             size.TryGetProperty("metres", out var metres) ? metres.GetDouble() : 0))]
                         : null,
-                    Text(stage, "output_suffix") ?? ".glb")).ToArray()
+                    Text(stage, "output_suffix") ?? ".glb",
+                    stage.TryGetProperty("colours", out var colours) && colours.ValueKind == JsonValueKind.Array
+                        ? [.. colours.EnumerateArray().Select(colour => new CompilerColour(
+                            Text(colour, "colour") ?? "", Text(colour, "description") ?? ""))]
+                        : null)).ToArray()
                 : [];
 
             return new CompilerCapabilities(

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Mesh, MeshStandardMaterial, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type Material, type Object3D } from 'three'
+import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Mesh, MeshStandardMaterial, PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type Material, type Object3D } from 'three'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 /**
@@ -79,8 +80,20 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
     renderer.domElement.setAttribute('aria-hidden', 'true')
     container.appendChild(renderer.domElement)
 
-    scene.add(new AmbientLight(0xffffff, 1.4))
-    const key = new DirectionalLight(0xffffff, 2.2)
+    // Metal is mostly what it reflects. With lights but no surroundings a fully
+    // metallic surface renders nearly black, which reads as dull paint rather
+    // than as brass -- the same reason a painted character's armour came out
+    // black when its metalness was wrong. A neutral room gives it something to
+    // be, without putting a backdrop behind the model: the background stays
+    // dark and only the surfaces pick it up.
+    const environment = new PMREMGenerator(renderer)
+    const room = new RoomEnvironment()
+    scene.environment = environment.fromScene(room, 0.04).texture
+    scene.environmentIntensity = 0.65
+    room.dispose?.()
+
+    scene.add(new AmbientLight(0xffffff, 0.75))
+    const key = new DirectionalLight(0xffffff, 1.9)
     key.position.set(1, 2, 1.4)
     scene.add(key)
     // A single key from above leaves every downward face black, and the
@@ -235,6 +248,9 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
       disposed = true
       surface.current = undefined
       for (const { plain } of dressed) plain.dispose()
+      scene.environment?.dispose()
+      scene.environment = null
+      environment.dispose()
       observer.disconnect()
       renderer.domElement.removeEventListener('wheel', wheel)
       if (loaded) { scene.remove(loaded); release(loaded) }

@@ -15,12 +15,21 @@ import type { AssetSummary, ModelGenerationReadiness } from '../types'
  * that could run but has not been commissioned is a different answer from a
  * compiler that is not installed, and the artist is told which.
  *
- * The one thing it asks for is size, because a generator normalises: whatever
- * it makes comes back about two metres tall, a lantern exactly as much as a
- * person. It asks in the only terms most people can answer — where does this
- * come up to on someone standing next to it — rather than in metres, which
- * almost nobody can judge for a prop. The list comes from the compiler, which
- * owns both the vocabulary and the height behind each word.
+ * The one thing it insists on is size, because a generator normalises:
+ * whatever it makes comes back about two metres tall, a lantern exactly as
+ * much as a person. It asks in the only terms most people can answer — where
+ * does this come up to on someone standing next to it — rather than in metres,
+ * which almost nobody can judge for a prop.
+ *
+ * It also offers glass, and only offers it. Nothing in a mesh says which faces
+ * are glass: a pane and the frame around it are the same surface. The paint is
+ * what says so, so the artist names the colour their glass was painted, and a
+ * model with none — which is most of them — simply says nothing and gets no
+ * glazing step. Guessing here would turn an ordinary painted surface
+ * see-through.
+ *
+ * Both lists come from the compiler, which owns the vocabularies and what each
+ * word means.
  */
 export default function ModelFromReference({ asset, onQueued }: {
   asset: AssetSummary
@@ -28,6 +37,7 @@ export default function ModelFromReference({ asset, onQueued }: {
 }) {
   const [readiness, setReadiness] = useState<ModelGenerationReadiness>()
   const [size, setSize] = useState('')
+  const [glass, setGlass] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -42,7 +52,8 @@ export default function ModelFromReference({ asset, onQueued }: {
   const generate = async () => {
     setBusy(true); setError(undefined)
     try {
-      const job = await studioApi.generateModel(asset.id, asset.displayName, size)
+      const job = await studioApi.generateModel(
+        asset.id, asset.displayName, size, glass === '' ? undefined : glass)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -68,6 +79,19 @@ export default function ModelFromReference({ asset, onQueued }: {
             </select>
             <span className="model-note">
               Standing next to it, where would it come up to?
+            </span>
+          </label>}
+          {readiness.canRun && readiness.colours && <label className="model-size">
+            <span>Does it have glass?</span>
+            <select value={glass} onChange={event => setGlass(event.target.value)}
+              data-testid="model-glass">
+              <option value="">No glass</option>
+              {readiness.colours.map(choice => <option key={choice.colour} value={choice.colour}>
+                Glass painted {choice.description}
+              </option>)}
+            </select>
+            <span className="model-note">
+              Only the paint says which faces are panes, so name their colour.
             </span>
           </label>}
           <button type="button" className="secondary" data-testid="model-generate"

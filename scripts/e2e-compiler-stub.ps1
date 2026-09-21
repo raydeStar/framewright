@@ -111,6 +111,23 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
                     missing   = @()
                 },
                 [ordered]@{
+                    stage     = 'glass'
+                    runner    = 'blender'
+                    summary   = 'Give the faces painted a named colour a material that transmits.'
+                    produces  = 'reference-asset-compiler.transparent-material.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('colour', 'transmission')
+                    available = $true
+                    missing   = @()
+                    # Offered from the compiler's own table; the studio
+                    # keeps no list of its own.
+                    colours   = @(
+                        [ordered]@{ colour = 'teal'; description = 'teal or cyan' },
+                        [ordered]@{ colour = 'amber'; description = 'amber or orange' },
+                        [ordered]@{ colour = 'blue'; description = 'blue' }
+                    )
+                },
+                [ordered]@{
                     stage     = 'browser-payload'
                     runner    = 'blender'
                     summary   = 'Export the staged asset as a self-contained browser GLB, +Y up and metric.'
@@ -127,7 +144,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     $stage = $arguments[1]
-    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'browser-payload')) {
+    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'glass', 'browser-payload')) {
         Write-Error "RAC_ERROR unknown stage: $stage"
         exit 2
     }
@@ -159,6 +176,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         'stage-mesh'  { 'reference-asset-compiler.staged-mesh.v1' }
         'remesh'      { 'reference-asset-compiler.production-retopology-candidate.v1' }
         'uv-unwrap'   { 'reference-asset-compiler.texture-uv-transport.v1' }
+        'glass'       { 'reference-asset-compiler.transparent-material.v1' }
         'texture'     { 'reference-asset-compiler.paint-validation.v1' }
         default       { 'reference-asset-compiler.browser-payload.v1' }
     }
