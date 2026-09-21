@@ -167,7 +167,11 @@ export interface SceneProposalSummary {
   createdAt: string; decidedAt?: string; appliedAt?: string
 }
 /** One material as the model inspector reports it. */
-export interface ModelMaterialSummary { name: string; textured: boolean; alphaMode: string; doubleSided: boolean }
+export interface ModelMaterialSummary {
+  name: string; textured: boolean; alphaMode: string; doubleSided: boolean
+  /** 0 is solid. Above 0 the material transmits, which glTF records as an extension rather than an alpha mode. */
+  transmission: number
+}
 /** The supported GLB subset and the ceilings that refuse a model before it loads. */
 export interface ModelSupportLimits { maxBytes: number; maxVertices: number; maxTriangles: number; maxEmbeddedTextureBytes: number; maxNodes: number; maxMaterials: number; maxImages: number; supportedRequiredExtensions: string[] }
 /** One bone of a stored rig, with its rest pose as the file holds it. */

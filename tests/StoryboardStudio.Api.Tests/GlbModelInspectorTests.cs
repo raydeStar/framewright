@@ -12,6 +12,34 @@ namespace StoryboardStudio.Api.Tests;
 /// </summary>
 public sealed class GlbModelInspectorTests
 {
+    /// <summary>
+    /// Glass is not an alpha mode. A material that transmits stays OPAQUE in
+    /// glTF and carries KHR_materials_transmission instead, so an inspector
+    /// that only reads alpha modes tells an artist a window is solid.
+    /// </summary>
+    [Fact]
+    public void AMaterialThatTransmitsIsNotReportedAsSolid()
+    {
+        var glazed = ModelFixtures.Mutate(document =>
+        {
+            var material = document["materials"]!.AsArray()[0]!.AsObject();
+            material["extensions"] = new JsonObject
+            {
+                ["KHR_materials_transmission"] = new JsonObject { ["transmissionFactor"] = 0.85 },
+            };
+            document["extensionsUsed"] = new JsonArray("KHR_materials_transmission");
+        });
+
+        var result = GlbModelInspector.Inspect(glazed);
+
+        Assert.True(result.Ok, result.Error);
+        Assert.Equal(0.85, result.Profile!.Materials[0].Transmission);
+        // The alpha mode is genuinely still opaque; the transmission is the
+        // separate fact, and both are reported rather than one standing in.
+        Assert.Equal("OPAQUE", result.Profile.Materials[0].AlphaMode);
+        Assert.Equal(0, result.Profile.Materials[1].Transmission);
+    }
+
     [Fact]
     public void TheKnownFixtureReportsItsRealDimensionsMaterialsAndCounts()
     {

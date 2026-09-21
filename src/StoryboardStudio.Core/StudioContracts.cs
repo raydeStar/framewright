@@ -183,7 +183,8 @@ public sealed record ProposeSceneBlockoutRequest(
 public sealed record ApplySceneBlockoutRequest(string? SceneName);
 
 /// <summary>One material as the model inspector reports it.</summary>
-public sealed record ModelMaterialSummary(string Name, bool Textured, string AlphaMode, bool DoubleSided);
+public sealed record ModelMaterialSummary(
+    string Name, bool Textured, string AlphaMode, bool DoubleSided, double Transmission = 0);
 
 /// <summary>The bounded GLB subset and the ceilings that refuse a model before it loads.</summary>
 public sealed record ModelSupportLimits(

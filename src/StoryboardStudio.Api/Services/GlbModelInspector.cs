@@ -36,7 +36,8 @@ public sealed record GlbSupportProfile(
         MaxImages: 64);
 }
 
-public sealed record GlbMaterialSummary(string Name, bool Textured, string AlphaMode, bool DoubleSided);
+public sealed record GlbMaterialSummary(
+    string Name, bool Textured, string AlphaMode, bool DoubleSided, double Transmission = 0);
 
 public sealed record GlbModelProfile(
     string Container,
@@ -219,7 +220,11 @@ public static class GlbModelInspector
             Name: material.TryGetProperty("name", out var name) ? name.GetString() ?? "Unnamed material" : "Unnamed material",
             Textured: HasTexture(material),
             AlphaMode: material.TryGetProperty("alphaMode", out var alpha) ? alpha.GetString() ?? "OPAQUE" : "OPAQUE",
-            DoubleSided: material.TryGetProperty("doubleSided", out var doubleSided) && doubleSided.ValueKind == JsonValueKind.True)).ToArray();
+            DoubleSided: material.TryGetProperty("doubleSided", out var doubleSided) && doubleSided.ValueKind == JsonValueKind.True,
+            // Glass is not an alpha mode. A material that transmits stays
+            // OPAQUE in glTF and carries KHR_materials_transmission instead, so
+            // a reader that only knows alpha modes calls a window solid.
+            Transmission: Transmission(material))).ToArray();
 
         return new GlbInspectionResult(true, null, new GlbModelProfile(
             Container: limits.Container,
@@ -332,6 +337,14 @@ public static class GlbModelInspector
         }
         return Matrix4x4.CreateScale(scale) * Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(translation);
     }
+
+    private static double Transmission(JsonElement material) =>
+        material.TryGetProperty("extensions", out var extensions)
+        && extensions.TryGetProperty("KHR_materials_transmission", out var transmission)
+        && transmission.TryGetProperty("transmissionFactor", out var factor)
+        && factor.ValueKind == JsonValueKind.Number
+            ? factor.GetDouble()
+            : 0;
 
     private static bool HasTexture(JsonElement material)
     {

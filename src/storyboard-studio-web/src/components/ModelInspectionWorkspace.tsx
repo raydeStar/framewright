@@ -201,7 +201,15 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
             {profile.materials.length === 0 && <p className="model-note">This model declares no materials.</p>}
             <ul>{profile.materials.map(material => <li key={material.name}>
               <strong>{material.name}</strong>
-              <small>{material.textured ? 'Textured' : 'Untextured'} · {material.alphaMode.toLowerCase()} · {material.doubleSided ? 'double sided' : 'single sided'}</small>
+              <small>
+                {material.textured ? 'Textured' : 'Untextured'}
+                {' · '}
+                {material.transmission > 0
+                  ? `transmits ${Math.round(material.transmission * 100)}%`
+                  : material.alphaMode.toLowerCase()}
+                {' · '}
+                {material.doubleSided ? 'double sided' : 'single sided'}
+              </small>
             </li>)}</ul>
           </section>
         </>}

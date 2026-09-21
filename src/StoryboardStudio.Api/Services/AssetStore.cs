@@ -267,7 +267,8 @@ public sealed class AssetStore
             profile.NodeCount, profile.MeshCount, profile.PrimitiveCount, profile.VertexCount, profile.TriangleCount,
             profile.ImageCount, profile.EmbeddedTextureBytes, profile.BinaryChunkBytes,
             profile.DeclaredExtensions, profile.RequiredExtensions,
-            [.. profile.Materials.Select(material => new ModelMaterialSummary(material.Name, material.Textured, material.AlphaMode, material.DoubleSided))],
+            [.. profile.Materials.Select(material => new ModelMaterialSummary(
+                material.Name, material.Textured, material.AlphaMode, material.DoubleSided, material.Transmission))],
             profile.BoundsMin, profile.BoundsMax, profile.Dimensions,
             new ModelSupportLimits(limits.MaxBytes, limits.MaxVertices, limits.MaxTriangles, limits.MaxEmbeddedTextureBytes,
                 limits.MaxNodes, limits.MaxMaterials, limits.MaxImages, limits.SupportedRequiredExtensions),

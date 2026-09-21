@@ -83,6 +83,14 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
     const key = new DirectionalLight(0xffffff, 2.2)
     key.position.set(1, 2, 1.4)
     scene.add(key)
+    // A single key from above leaves every downward face black, and the
+    // underside of a prop is exactly where a generated mesh hides its worst
+    // surface. This fill is dimmer than the key and comes from the opposite
+    // side and below, so the shape still reads as lit from above while nothing
+    // is left unreadable.
+    const fill = new DirectionalLight(0xffffff, 1.1)
+    fill.position.set(-1.1, -1.8, -0.9)
+    scene.add(fill)
     const grid = new GridHelper(Math.max(4, span * 4), 16, new Color('#3c4a44'), new Color('#232c29'))
     scene.add(grid)
 
