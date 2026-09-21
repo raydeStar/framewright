@@ -36,7 +36,8 @@ $env:YuE2__Enabled = 'false'
 $env:Integrations__OpenAI__SubmissionEnabled = 'false'
 # Model generation is proved against a controlled worker rather than a GPU: the
 # real gateway, the real process boundary and the real import, with a known GLB.
-$env:Integrations__ReferenceAssetCompiler__Executable = (Join-Path $PSScriptRoot 'e2e-compiler-stub.cmd')
+$compilerStub = if ($env:OS -eq 'Windows_NT') { 'e2e-compiler-stub.cmd' } else { 'e2e-compiler-stub.sh' }
+$env:Integrations__ReferenceAssetCompiler__Executable = (Join-Path $PSScriptRoot $compilerStub)
 $env:Integrations__ReferenceAssetCompiler__SubmissionEnabled = 'true'
 
 $stopFile = $env:STUDIO_E2E_STOP_FILE

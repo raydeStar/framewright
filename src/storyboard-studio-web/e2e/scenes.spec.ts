@@ -37,7 +37,13 @@ function ownFixture(source: string, label: string) {
 test('edits made while saving remain in the working scene', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  const createdResponse = page.waitForResponse(response =>
+    response.url().endsWith('/api/scenes') && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'New scene' }).click()
+  const created = await (await createdResponse).json() as { name: string }
+  // Version 1 may already be visible for the previously selected scene. Wait
+  // for the POST result to reach the form before editing the new scene.
+  await expect(page.getByLabel('Scene name', { exact: true })).toHaveValue(created.name)
   await expect(page.getByTestId('scene-version')).toContainText('Version 1')
   await page.getByLabel('Scene name', { exact: true }).fill('Saved name')
   let release!: () => void
