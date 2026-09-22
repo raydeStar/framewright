@@ -148,10 +148,13 @@ public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, 
     {
         var query = db.SceneBlockoutPlans.AsNoTracking();
         if (referenceAssetId is { } id) query = query.Where(x => x.ReferenceAssetId == id);
-        var plans = await query.Take(MaxPlans).ToArrayAsync(cancellationToken);
-        // SQLite cannot order DateTimeOffset, so the bounded set is ordered here.
+        var plans = await query
+            .OrderByDescending(x => x.CreatedAtUnixMs)
+            .ThenByDescending(x => x.Id)
+            .Take(MaxPlans)
+            .ToArrayAsync(cancellationToken);
         var summaries = new List<SceneBlockoutPlanSummary>(plans.Length);
-        foreach (var plan in plans.OrderByDescending(x => x.CreatedAtUnixMs))
+        foreach (var plan in plans)
             summaries.Add(await DescribeAsync(plan, cancellationToken));
         return RepositoryResult<IReadOnlyList<SceneBlockoutPlanSummary>>.Ok(summaries);
     }

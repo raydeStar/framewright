@@ -253,8 +253,12 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
 
     public async Task<RepositoryResult<IReadOnlyList<SceneProposalSummary>>> ListProposalsAsync(Guid sceneId, CancellationToken cancellationToken)
     {
-        var proposals = await db.SceneProposals.AsNoTracking().Where(x => x.SceneId == sceneId).Take(60).ToArrayAsync(cancellationToken);
-        var ordered = proposals.OrderByDescending(x => x.CreatedAtUnixMs).ToArray();
+        var ordered = await db.SceneProposals.AsNoTracking()
+            .Where(x => x.SceneId == sceneId)
+            .OrderByDescending(x => x.CreatedAtUnixMs)
+            .ThenByDescending(x => x.Id)
+            .Take(60)
+            .ToArrayAsync(cancellationToken);
         var summaries = new List<SceneProposalSummary>(ordered.Length);
         foreach (var proposal in ordered) summaries.Add(await SummarizeAsync(proposal, cancellationToken));
         return RepositoryResult<IReadOnlyList<SceneProposalSummary>>.Ok(summaries);
@@ -308,10 +312,17 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
 
     private async Task<IReadOnlyList<SceneAnnotationSummary>> DescribeAnnotationsAsync(Guid sceneId, CancellationToken cancellationToken)
     {
-        var annotations = await db.SceneAnnotations.AsNoTracking().Where(x => x.SceneId == sceneId).Take(200).ToArrayAsync(cancellationToken);
+        // DateTimeOffset ordering is not translated by SQLite. Materialize this
+        // scene's notes before applying the documented oldest-first cap so the
+        // retained set is deliberate instead of whichever rows SQLite returns.
+        var annotations = await db.SceneAnnotations.AsNoTracking()
+            .Where(x => x.SceneId == sceneId)
+            .ToArrayAsync(cancellationToken);
         var instances = await db.SceneInstances.AsNoTracking().Where(x => x.SceneId == sceneId).ToArrayAsync(cancellationToken);
         return [.. annotations
             .OrderBy(annotation => annotation.CreatedAt)
+            .ThenBy(annotation => annotation.Id)
+            .Take(200)
             .Select(annotation =>
             {
                 var instance = instances.FirstOrDefault(x => x.Id == annotation.InstanceId);

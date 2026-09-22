@@ -1858,6 +1858,25 @@ remains CONTRACT_VERIFIED until the artist records composition acceptance using
 a meaningful reference. M09 remains the active milestone pending the prepared
 sword verdict.
 
+### Deterministic bounded scene reads QC - 2026-09-22
+
+Preparing a meaningful disposable M11 composition review exposed EF Core's
+row-limit-without-ordering warning in the ordinary scene workspace. The affected
+reads selected an arbitrary capped subset and sorted it afterward. Scene lists
+and annotation lists now materialize before their SQLite-incompatible
+`DateTimeOffset` sort and cap; scene proposals and blockout plans order by their
+stored Unix timestamp and a stable ID tiebreaker before limiting. The same audit
+repaired host-facing shot notes, authorities, archived candidates, and proposal
+targets so their bounded packets preserve deliberate source or creation order.
+
+`dotnet test Framewright.slnx --configuration Release --nologo` passed
+**289/289**. `STUDIO_E2E_PORT=5231; npx playwright test scenes.spec.ts
+webmcp.spec.ts` passed **38/38** across desktop Chromium and emulated iPad Pro 11
+WebKit. Replaying the exact scene, annotation, proposal, and blockout reads in an
+isolated current Release host produced HTTP 200 responses with no EF ordering
+warnings. The resident application stayed running; no provider, GPU, production
+write, external queue, or tracked private media was used.
+
 ### M18 portable scene-graph recovery groundwork - 2026-09-21
 
 Scope: strengthen the existing working-package contract at the current dependency

@@ -22,7 +22,11 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
 
     public async Task<IReadOnlyList<SceneListItem>> ListAsync(CancellationToken cancellationToken)
     {
-        var scenes = await db.Scenes.AsNoTracking().Take(200).ToArrayAsync(cancellationToken);
+        // SQLite cannot order DateTimeOffset, so materialize the project's
+        // local scene set before choosing the 200 most recently changed rows.
+        // Taking first made the selected subset arbitrary and also raised EF's
+        // row-limit-without-ordering warning on every scene-workspace load.
+        var scenes = await db.Scenes.AsNoTracking().ToArrayAsync(cancellationToken);
         var counts = await db.SceneInstances.AsNoTracking()
             .GroupBy(x => x.SceneId)
             .Select(group => new { SceneId = group.Key, Count = group.Count() })
@@ -30,6 +34,8 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         // SQLite cannot order DateTimeOffset, so the bounded set is ordered here.
         return [.. scenes
             .OrderByDescending(scene => scene.UpdatedAt)
+            .ThenByDescending(scene => scene.Id)
+            .Take(200)
             .Select(scene => new SceneListItem(
                 scene.Id, scene.Name, scene.Version,
                 counts.FirstOrDefault(count => count.SceneId == scene.Id)?.Count ?? 0,

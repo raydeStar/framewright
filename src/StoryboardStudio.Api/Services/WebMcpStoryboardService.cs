@@ -160,15 +160,20 @@ public sealed class WebMcpStoryboardService(
         var shot = await db.Shots.AsNoTracking().SingleOrDefaultAsync(x => x.Id == shotId, cancellationToken);
         if (shot is null) return Failure("shot_not_found", "That shot is not part of the active project.");
         var authorityIds = Parse<string[]>(shot.ReferenceIdsJson) ?? [];
-        var noteIds = await db.Comments.AsNoTracking().Where(x => x.ShotId == shotId && x.Version == shot.Version && x.State == "Open")
-            .Select(x => new { x.Id, x.Body, x.X, x.Y, x.ReferenceId }).Take(20).ToListAsync(cancellationToken);
-        var authorities = await db.References.AsNoTracking().Where(x => authorityIds.Contains(x.Id))
+        var openNotes = await db.Comments.AsNoTracking()
+            .Where(x => x.ShotId == shotId && x.Version == shot.Version && x.State == "Open")
+            .Select(x => new { x.Id, x.Body, x.X, x.Y, x.ReferenceId, x.CreatedAt })
+            .ToListAsync(cancellationToken);
+        var noteIds = openNotes.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Take(20)
+            .Select(x => new { x.Id, x.Body, x.X, x.Y, x.ReferenceId }).ToList();
+        var authorityRows = await db.References.AsNoTracking().Where(x => authorityIds.Contains(x.Id))
             .Select(x => new
             {
                 x.Id, x.Name, x.Category, Version = x.CurrentVersion,
                 LockedConstraint = db.ReferenceVersions.Where(version => version.ReferenceId == x.Id && version.Version == x.CurrentVersion)
                     .Select(version => version.LockedConstraint).FirstOrDefault()
-            }).Take(20).ToListAsync(cancellationToken);
+            }).ToListAsync(cancellationToken);
+        var authorities = authorityRows.OrderBy(x => Array.IndexOf(authorityIds, x.Id)).ThenBy(x => x.Id).Take(20).ToList();
         return Success("shot_details", $"Loaded {shot.Code} v{shot.Version}.", new
         {
             shot = new { shot.Id, shot.Code, shot.Title, shot.Description, shot.Action, shot.Camera, shot.Stage, shot.Approval, shot.Version, shot.DurationFrames, shot.ConstraintsJson, shot.UpdatedAt },
@@ -202,13 +207,14 @@ public sealed class WebMcpStoryboardService(
 
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == db.ActiveProjectId, cancellationToken);
         var authorityIds = Parse<string[]>(view.Shot.ReferenceIdsJson) ?? [];
-        var authorities = await db.References.AsNoTracking().Where(x => authorityIds.Contains(x.Id))
+        var authorityRows = await db.References.AsNoTracking().Where(x => authorityIds.Contains(x.Id))
             .Select(x => new
             {
                 x.Id, x.Name, x.Category, Version = x.CurrentVersion,
                 LockedConstraint = db.ReferenceVersions.Where(version => version.ReferenceId == x.Id && version.Version == x.CurrentVersion)
                     .Select(version => version.LockedConstraint).FirstOrDefault()
-            }).Take(20).ToArrayAsync(cancellationToken);
+            }).ToArrayAsync(cancellationToken);
+        var authorities = authorityRows.OrderBy(x => Array.IndexOf(authorityIds, x.Id)).ThenBy(x => x.Id).Take(20).ToArray();
 
         return Success("director_context", $"{view.Shot.Code} v{view.DisplayedVersion} is on screen with {view.Notes.Length} open {(view.Notes.Length == 1 ? "note" : "notes")}.", new
         {
@@ -294,11 +300,11 @@ public sealed class WebMcpStoryboardService(
         var assetId = shot.CurrentAssetId;
         if (archived)
         {
-            // SQLite cannot order DateTimeOffset, so this bounded per-version set
-            // is ordered after materialization rather than in the query.
+            // SQLite cannot order DateTimeOffset, so the per-version set is
+            // ordered after materialization before choosing the newest row.
             var candidates = await db.CandidateVersions.AsNoTracking()
-                .Where(x => x.ShotId == shot.Id && x.Version == version).Take(20).ToArrayAsync(cancellationToken);
-            var candidate = candidates.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+                .Where(x => x.ShotId == shot.Id && x.Version == version).ToArrayAsync(cancellationToken);
+            var candidate = candidates.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).FirstOrDefault();
             if (candidate is null)
                 return (null, Failure("revision_not_found", $"{shot.Code} has no archived revision v{version} in the active project."));
             assetId = candidate.AssetId;
@@ -309,8 +315,8 @@ public sealed class WebMcpStoryboardService(
         var markupRevision = await db.FrameMarkups.AsNoTracking()
             .Where(x => x.ShotId == shot.Id && x.Version == version).Select(x => (int?)x.Revision).FirstOrDefaultAsync(cancellationToken) ?? 0;
         var openNotes = await db.Comments.AsNoTracking()
-            .Where(x => x.ShotId == shot.Id && x.Version == version && x.State == "Open").Take(40).ToArrayAsync(cancellationToken);
-        var notes = openNotes.OrderBy(x => x.CreatedAt).Take(20).ToArray();
+            .Where(x => x.ShotId == shot.Id && x.Version == version && x.State == "Open").ToArrayAsync(cancellationToken);
+        var notes = openNotes.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Take(20).ToArray();
 
         return (new DirectorView(shot, version, archived, assetId, asset?.ContentHash, asset?.Width, asset?.Height, markupRevision, notes,
             ComputeStateToken(shot, version, archived, assetId, asset?.ContentHash, markupRevision, notes)), null);
@@ -422,7 +428,7 @@ public sealed class WebMcpStoryboardService(
         if (shotId is not null) query = query.Where(x => x.ShotId == shotId);
         // SQLite cannot order DateTimeOffset, so the immutable UTC millisecond
         // key keeps this query bounded before materialization.
-        var proposals = await query.OrderByDescending(x => x.CreatedAtUnixMs).Take(30).ToArrayAsync(cancellationToken);
+        var proposals = await query.OrderByDescending(x => x.CreatedAtUnixMs).ThenByDescending(x => x.Id).Take(30).ToArrayAsync(cancellationToken);
         return Success("proposals_listed", $"Loaded {proposals.Length} proposals.", proposals.Select(ToSummary).ToArray());
     }
 
@@ -481,10 +487,11 @@ public sealed class WebMcpStoryboardService(
     private async Task<object> InstructionsAsync(ShotRevisionProposalRecord proposal, ShotRecord shot, CancellationToken cancellationToken)
     {
         var noteIds = Parse<Guid[]>(proposal.NoteIdsJson) ?? [];
-        var targets = await db.Comments.AsNoTracking()
+        var targetRows = await db.Comments.AsNoTracking()
             .Where(x => noteIds.Contains(x.Id) && x.ShotId == shot.Id && x.Version == proposal.BaseVersion)
             .Select(x => new { x.Id, x.X, x.Y, x.Body, authorityId = x.ReferenceId, authorityVersion = x.ReferenceVersion })
-            .Take(20).ToArrayAsync(cancellationToken);
+            .ToArrayAsync(cancellationToken);
+        var targets = targetRows.OrderBy(x => Array.IndexOf(noteIds, x.Id)).ThenBy(x => x.Id).Take(20).ToArray();
         return new
         {
             proposal = ToSummary(proposal),
