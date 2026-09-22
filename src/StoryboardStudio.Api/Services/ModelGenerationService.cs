@@ -1568,30 +1568,27 @@ public sealed class ModelGenerationService(
         catch (JsonException) { packet = null; }
         // Both routes that start from a model render the same before-and-after
         // views, and both are judged the same way.
-        if (packet is null
-            || !(string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
-                || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
-                || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)
-                || string.Equals(packet.Work, CullWork, StringComparison.Ordinal)))
+        if (!ProducesComparisonEvidence(packet))
             return RepositoryResult<ModelPreparationEvidence>.Invalid(
                 "This job did not produce a before-and-after to compare.");
+        var comparisonPacket = packet!;
 
         var workspace = Workspace(job.Id);
         ModelPreparationViews? source = null;
         ModelPreparationViews? derivative = null;
-        for (var index = 0; index < packet.Route.Length; index++)
+        for (var index = 0; index < comparisonPacket.Route.Length; index++)
         {
-            if (packet.Route[index].Stage != ReviewViewsStage) continue;
+            if (comparisonPacket.Route[index].Stage != ReviewViewsStage) continue;
             var read = ReadViews(job.Id, workspace, index + 1);
             if (read is null) continue;
             // The first views stage reads the original; the second reads what
             // the route produced. Which is which is the route's own answer,
             // not a guess from the order they happen to appear in.
-            if (packet.Route[index].ReadsOriginal) source ??= read;
+            if (comparisonPacket.Route[index].ReadsOriginal) source ??= read;
             else derivative ??= read;
         }
         return RepositoryResult<ModelPreparationEvidence>.Ok(new ModelPreparationEvidence(
-            job.Id, packet.SourceAssetId, job.OutputAssetId, source, derivative));
+            job.Id, comparisonPacket.SourceAssetId, job.OutputAssetId, source, derivative));
     }
 
     /// <summary>
@@ -1612,10 +1609,11 @@ public sealed class ModelGenerationService(
         // nothing here worth paging.
         var delivered = await db.Jobs.AsNoTracking()
             .Where(job => job.WorkType == ModelWorkType && job.OutputAssetId == assetId)
-            .Select(job => new { job.Id, job.CompletedAt })
+            .Select(job => new { job.Id, job.CompletedAt, job.RequestJson })
             .ToArrayAsync(cancellationToken);
         var jobId = delivered
             .OrderByDescending(job => job.CompletedAt)
+            .Where(job => RequestProducesComparisonEvidence(job.RequestJson))
             .Select(job => (Guid?)job.Id)
             .FirstOrDefault();
         // Most models were never prepared from anything, and saying so is an
@@ -1628,6 +1626,27 @@ public sealed class ModelGenerationService(
                 new ModelPreparationEvidence(Guid.Empty, assetId, null, null, null))
             : await PreparationEvidenceAsync(jobId.Value, cancellationToken);
     }
+
+    private static bool RequestProducesComparisonEvidence(string? requestJson)
+    {
+        if (string.IsNullOrWhiteSpace(requestJson)) return false;
+        try
+        {
+            return ProducesComparisonEvidence(
+                JsonSerializer.Deserialize<FrozenModelRequest>(requestJson, Json));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ProducesComparisonEvidence(FrozenModelRequest? packet) =>
+        packet is not null
+        && (string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)
+            || string.Equals(packet.Work, CullWork, StringComparison.Ordinal));
 
     private static ModelPreparationViews? ReadViews(Guid jobId, string workspace, int step)
     {

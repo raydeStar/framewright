@@ -582,8 +582,11 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
   useEffect(() => { void studioApi.candidates(shot.id).then(setCandidates) }, [shot.id, shot.version])
   const refreshMedia = useCallback(() => { void Promise.all([studioApi.assets(), studioApi.assetPlacements({ shotId: shot.id })]).then(([all, linked]) => { setMediaAssets(all); setMediaPlacements(linked) }) }, [shot.id])
   useEffect(() => { refreshMedia() }, [refreshMedia])
-  // Snap back to the live frame whenever the shot moves on.
-  useEffect(() => { setPreviewId(undefined); setPeeking(false) }, [shot.id, shot.version])
+  // A background completion may advance the live head while the artist is
+  // inspecting history. Keep that explicit selection; the refreshed candidate
+  // list will discard it naturally if it no longer exists. Changing shots is
+  // the only time carrying a preview forward would be misleading.
+  useEffect(() => { setPreviewId(undefined); setPeeking(false) }, [shot.id])
   // Warm every candidate image so flipping is instant rather than a flash of empty.
   useEffect(() => { for (const candidate of candidates) if (candidate.assetUrl) { const img = new Image(); img.src = candidate.assetUrl } }, [candidates])
 

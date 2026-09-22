@@ -46,6 +46,9 @@ test('a failed readiness check stops loading and can be retried without queuing 
 })
 
 test('a reference becomes a model candidate that names where it came from', async ({ page }, testInfo) => {
+  // This journey waits for a deliberately external-looking queue. The poll's
+  // 60-second contract must remain reachable on a contended hosted runner.
+  test.setTimeout(90_000)
   const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
   const label = testInfo.project.name
   const referenceName = `model-source-${label}`

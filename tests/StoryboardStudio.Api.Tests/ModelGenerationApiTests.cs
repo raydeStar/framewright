@@ -156,6 +156,17 @@ public sealed class ModelGenerationApiTests
             $"/api/assets/{finished.OutputAssetId}/model-profile") ?? throw new InvalidOperationException();
         Assert.Equal(17, profile.RootElement.GetProperty("rig").GetProperty("boneCount").GetInt32());
 
+        // Generated models have no before-and-after preparation comparison.
+        // That absence is an ordinary empty answer, not a noisy browser error.
+        var evidenceResponse = await client.GetAsync(
+            $"/api/assets/{finished.OutputAssetId}/preparation-evidence");
+        Assert.Equal(HttpStatusCode.OK, evidenceResponse.StatusCode);
+        using var evidence = await evidenceResponse.Content.ReadFromJsonAsync<JsonDocument>()
+            ?? throw new InvalidOperationException();
+        Assert.Equal(Guid.Empty, evidence.RootElement.GetProperty("jobId").GetGuid());
+        Assert.Equal(JsonValueKind.Null, evidence.RootElement.GetProperty("source").ValueKind);
+        Assert.Equal(JsonValueKind.Null, evidence.RootElement.GetProperty("derivative").ValueKind);
+
         // Lineage: the exact reference, its exact bytes, and the compiler that
         // did it, readable by the artist and recorded on the job.
         using var scope = factory.Services.CreateScope();

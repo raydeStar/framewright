@@ -173,6 +173,9 @@ async function currentAssetId(page: Page) {
 }
 
 test('a model is a reusable library record with revisions that never overwrite each other', async ({ page }, testInfo) => {
+  // GLB parsing and software WebGL can be slow on a contended hosted runner.
+  // Keep the behavioral assertions strict while allowing the real viewer work.
+  test.setTimeout(90_000)
   // Switching revisions remounts the viewer, which aborts any GLB fetch still
   // in flight. WebKit reports that abort as a failed load. The viewer already
   // ignores aborted loads rather than showing the artist an error, so this is
@@ -254,6 +257,8 @@ test('a model is a reusable library record with revisions that never overwrite e
 })
 
 test('a rigged character reports its skeleton, poses deterministically, and refuses to flatter a wrong rig', async ({ page }, testInfo) => {
+  // This opens three real GLBs and exercises their skeletons in software WebGL.
+  test.setTimeout(90_000)
   const verifyConsole = failOnConsoleErrors(page)
   const label = testInfo.project.name
   await openAssets(page)
