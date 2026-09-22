@@ -44,14 +44,22 @@ foreach ($protected in @($env:WINDIR, $env:ProgramFiles, ${env:ProgramFiles(x86)
         throw "DataRoot cannot be a system or profile root: $resolvedData"
     }
 }
-if ($isInsideLocalAppData -and (Get-Process -Name 'Framewright' -ErrorAction SilentlyContinue)) {
+$defaultInstalledDataRoot = [IO.Path]::GetFullPath((Join-Path $localAppData 'Framewright\App_Data'))
+$isDefaultInstalledDataRoot = $resolvedData.TrimEnd([IO.Path]::DirectorySeparatorChar).Equals(
+    $defaultInstalledDataRoot.TrimEnd([IO.Path]::DirectorySeparatorChar),
+    [StringComparison]::OrdinalIgnoreCase)
+# A process-name check can only identify the conventional installed root. A
+# separately configured disposable root may live elsewhere under LocalAppData
+# while the artist's real app is open. The port and exclusive database checks
+# below prove ownership for those custom roots without stopping unrelated work.
+if ($isDefaultInstalledDataRoot -and (Get-Process -Name 'Framewright' -ErrorAction SilentlyContinue)) {
     throw 'Close Framewright before restoring a backup.'
 }
 # Refuse a native development server even though its process is named dotnet.
 # Command-line inspection is best-effort because locked-down Windows accounts
 # may not grant Win32_Process details; the HTTP and SQLite checks still apply.
 $liveDotnet = $null
-if ($isInsideLocalAppData) {
+if ($isDefaultInstalledDataRoot) {
     try {
         $liveDotnet = Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" -ErrorAction Stop |
             Where-Object { $_.CommandLine -match 'StoryboardStudio\.Api' } |

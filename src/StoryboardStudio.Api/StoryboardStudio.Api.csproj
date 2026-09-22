@@ -41,6 +41,7 @@
     <Content Include="..\..\scripts\setup-voice-worker.ps1" Link="scripts\setup-voice-worker.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\start-voice-worker.ps1" Link="scripts\start-voice-worker.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\start-installed.ps1" Link="scripts\start-installed.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\scripts\restore-backup.ps1" Link="scripts\restore-backup.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\tools\yue2\yue2_service.py" Link="tools\yue2\yue2_service.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\tools\yue2\requirements.txt" Link="tools\yue2\requirements.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\setup-yue2-worker.ps1" Link="scripts\setup-yue2-worker.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

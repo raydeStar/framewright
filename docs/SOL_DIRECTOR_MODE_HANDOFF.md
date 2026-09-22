@@ -1,6 +1,6 @@
 # Sol handoff: finish the Director Mode workflow
 
-Prepared 2026-09-21 and refreshed after the first public-main MVP increments. Public baseline before the current checkpoint: `ecffc0cc1740d00b33aa89850f16ff85edc9bfb7`. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
+Prepared 2026-09-21 and refreshed after the public-main MVP increments. Public baseline before the current recovery checkpoint: `145430376c9675cc087ec54ab5797475e905636a`. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
 
 > **Repository destination update — 2026-09-21:** `github.com/raydeStar/framewright` is now the maintained Framewright repository and the former private mirror is deprecated. Publish authorized Framewright work to public `main`. Geometry, retopology, UV, material, texture, rigging, deformation-gate, payload, and compiler-receipt changes belong in `github.com/raydeStar/reference-asset-compiler`; Framewright consumes that versioned contract and owns orchestration, import, scene use, and review.
 
@@ -50,7 +50,7 @@ The implemented MVP increments add precise placeholder replacement, full-view Sc
 
 Ignored evidence, when still present locally: `artifacts/qc/regressions-before.log`, `regressions-after.log`, `verify-final-5182.log`, `browser-final.log`, `{model,scene}-{desktop,tablet}.png`, and `src/storyboard-studio-web/playwright-report/index.html`. Do not expect these files in a fresh clone or commit private media to make them portable.
 
-The last public baseline passed [hosted run 35679438121](https://github.com/raydeStar/framewright/actions/runs/35679438121). Require a fresh green public run for the current pushed checkpoint as well.
+The current public baseline passed [hosted run 35683195424](https://github.com/raydeStar/framewright/actions/runs/35683195424). Require a fresh green public run after the recovery checkpoint is pushed as well.
 
 ## Where to resume
 
@@ -62,7 +62,7 @@ The browser registry in `src/storyboard-studio-web/src/webmcp.ts` exposes ten to
 
 **Close M09 with the right evidence.** The preparation route has run live; the prepared sword derivative still awaits the artist's recorded source/derivative verdict. Locate its existing fixed-view evidence and present a concrete comparison. A later favorable texture verdict on a different hero asset does not accept that sword derivative. A mechanical pass is not a production-ready declaration. Do not regenerate merely to obtain a fresh-looking receipt.
 
-**Respect the two dependency chains.** M12's precise replacement and M16's scene-to-shot path are now `CONTRACT_VERIFIED`; their declared live/human evidence still matters. M14 requires M09 acceptance and M13, then integrates a real supported rig-creation route and deformation review. A compiler checkout or consumed profile alone does not satisfy M14. M17 joins the accepted rig and shot/render path into an actual animated take. M18 now has round-trip package groundwork, but completion still proves the connected packaged runtime, backup restore, and full scenario. Consult the exact milestone contracts before coding; do not skip the rig or substitute a viewport recording to claim completion.
+**Respect the two dependency chains.** M12's precise replacement and M16's scene-to-shot path are now `CONTRACT_VERIFIED`; their declared live/human evidence still matters. M14 requires M09 acceptance and M13, then integrates a real supported rig-creation route and deformation review. A compiler checkout or consumed profile alone does not satisfy M14. M17 joins the accepted rig and shot/render path into an actual animated take. M18 now has round-trip package groundwork plus a disposable packaged-runtime export/import, backup, offline restore, restart, and hash-verification smoke. Completion still requires the connected full scenario and its playable M17 graph. Consult the exact milestone contracts before coding; do not skip the rig or substitute a viewport recording to claim completion.
 
 **Keep compiler ownership clear.** Read [REFERENCE_ASSET_COMPILER.md](REFERENCE_ASSET_COMPILER.md) and the compiler checkout's canonical `docs/BROWSER_STUDIO_CONTRACT.md`. Framewright now reads `profiles/skeletons/*.json` from that checkout and enforces its hierarchy, list, count, root, influence, and triangle-budget contracts; its fingerprint remains byte-compatible with the compiler vector. `humanoid-a` exists only as a deterministic Framewright test fixture. The compiler owns generation/preparation/rigging, source conditioning, and verdicts. Framewright owns validated import, user review, library/scene state, and applying root motion once. Do not replace the reference-conditioned pipeline with an eyeballed Blender reconstruction.
 
