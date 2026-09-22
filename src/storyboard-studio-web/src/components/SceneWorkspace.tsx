@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Box, Check, Copy, Image, LoaderCircle, Maximize2, MessageCirclePlus, Minimize2, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
+import SceneLightingControls from './SceneLightingControls'
 import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
 // three.js loads only when a scene is actually opened.
@@ -928,6 +929,7 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
               <label>Ambient <small>{scene.environment.ambientIntensity.toFixed(1)}</small>
                 <input type="range" min={0} max={8} step={0.1} aria-label="Ambient light intensity" value={scene.environment.ambientIntensity}
                   onChange={event => edit(current => ({ ...current, environment: { ...current.environment, ambientIntensity: Number(event.target.value) } }))} /></label>
+              <SceneLightingControls environment={scene.environment} onChange={environment => edit(current => ({ ...current, environment }))} />
               <p className="model-note" data-testid="scene-version">Version {scene.version}{dirty ? ' · unsaved changes' : ' · saved'}</p>
             </section>
           </aside>

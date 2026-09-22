@@ -39,7 +39,9 @@ public sealed class PortableProjectTests
             expectedVersion = 1,
             name = "Portable workshop",
             camera = new { yaw = 1.1, pitch = 0.35, distance = 7.5, target = (double[])[0d, 0.75, 0d], fieldOfView = 38d },
-            environment = new { keyIntensity = 2.8, keyYaw = 0.5, keyPitch = 0.9, ambientIntensity = 1.05 },
+            environment = new SceneEnvironmentSummary(2.8, 0.5, 0.9, 1.05,
+                KeyColor: "#aabbff", Cinematic: true, ShowGrid: false,
+                PointLights: [new(Guid.NewGuid(), "Portable candle", [1, 2, -1], "#ffaa66", 40, 8, true)]),
             instances = new[]
             {
                 new { id = instanceId, assetId = modelId, name = "Workshop block", position = (double[])[1d, 0d, -2d], rotation = (double[])[0d, 0.4, 0d], scale = (double[])[1d, 1d, 1d] }
@@ -89,6 +91,10 @@ public sealed class PortableProjectTests
         var importedSceneId = Assert.Single(scenes, x => x.Name == "Portable workshop").Id;
         using var scene = await client.GetFromJsonAsync<JsonDocument>($"/api/scenes/{importedSceneId}") ?? throw new InvalidOperationException();
         var instance = Assert.Single(scene.RootElement.GetProperty("instances").EnumerateArray());
+        var lighting = scene.RootElement.GetProperty("environment");
+        Assert.True(lighting.GetProperty("cinematic").GetBoolean());
+        Assert.False(lighting.GetProperty("showGrid").GetBoolean());
+        Assert.Equal("Portable candle", Assert.Single(lighting.GetProperty("pointLights").EnumerateArray()).GetProperty("name").GetString());
         Assert.Equal("Workshop block", instance.GetProperty("name").GetString());
         var modelContent = await client.GetAsync(instance.GetProperty("contentUrl").GetString());
         Assert.Equal(HttpStatusCode.OK, modelContent.StatusCode);
@@ -448,6 +454,31 @@ public sealed class PortableProjectTests
         {
             if (Directory.Exists(targetRoot)) Directory.Delete(targetRoot, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("{\"Exposure\":0}")]
+    [InlineData("{malformed")]
+    public async Task InvalidStoredLightingIsRejectedBeforeImport(string invalidLighting)
+    {
+        using var factory = new StudioApiFactory();
+        using var client = factory.CreateClient();
+        var sceneId = await CreateSceneAsync(client, "Invalid lighting source");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+            var scene = await db.Scenes.SingleAsync(x => x.Id == sceneId);
+            scene.EnvironmentJson = invalidLighting;
+            await db.SaveChangesAsync();
+        }
+        // Export hashes the actual malformed record, so this exercises contract
+        // validation rather than merely an inventory checksum failure.
+        var package = await client.GetByteArrayAsync("/api/export/working-package");
+        var before = (await client.GetFromJsonAsync<ProjectListItem[]>("/api/projects") ?? []).Length;
+        var response = await ImportPackageAsync(client, package, "invalid-lighting.zip");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(before, (await client.GetFromJsonAsync<ProjectListItem[]>("/api/projects") ?? []).Length);
     }
 
     [Fact]

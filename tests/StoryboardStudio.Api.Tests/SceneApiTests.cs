@@ -21,6 +21,54 @@ namespace StoryboardStudio.Api.Tests;
 public sealed class SceneApiTests
 {
     [Fact]
+    public async Task LocalLightingSurvivesRestartAndRejectsInvalidPositionsAtomically()
+    {
+        var dataRoot = Path.Combine(Path.GetTempPath(), "framewright-lighting", Guid.NewGuid().ToString("N"));
+        Guid sceneId;
+        var light = new ScenePointLightSummary(Guid.NewGuid(), "Hearth", [-2, 0.6, -1], "#ff9944", 80, 12, true);
+        var environment = new SceneEnvironmentSummary(0.3, 0.8, 0.9, 0.2,
+            "#aaccff", "#8899cc", "#100c09", 1.3, true, false, [light]);
+        try
+        {
+            using (var factory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var client = factory.CreateClient())
+            {
+                sceneId = await CreateSceneAsync(client, "Tavern lights");
+                var scene = (await client.GetFromJsonAsync<SceneSummary>($"/api/scenes/{sceneId}"))!;
+                var request = new SaveSceneRequest(1, scene.Name, scene.Camera, environment, []);
+                (await client.PutAsJsonAsync($"/api/scenes/{sceneId}", request)).EnsureSuccessStatusCode();
+                foreach (var invalid in new[] {
+                    environment with { PointLights = [light with { Position = [0, 1] }] },
+                    environment with { PointLights = [light, light] },
+                    environment with { PointLights = [null!] },
+                    environment with { KeyColor = "red" },
+                    environment with { Exposure = 0 },
+                })
+                {
+                    var response = await client.PutAsJsonAsync($"/api/scenes/{sceneId}", request with { ExpectedVersion = 2, Environment = invalid });
+                    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                }
+            }
+            using var reopenedFactory = new StudioApiFactory(dataRoot, deleteDataRoot: false);
+            using var reopenedClient = reopenedFactory.CreateClient();
+            var reopened = (await reopenedClient.GetFromJsonAsync<SceneSummary>($"/api/scenes/{sceneId}"))!;
+            Assert.Equal(2, reopened.Version);
+            Assert.Equal(environment.KeyColor, reopened.Environment.KeyColor);
+            Assert.Equal(environment.AmbientColor, reopened.Environment.AmbientColor);
+            Assert.Equal(environment.BackgroundColor, reopened.Environment.BackgroundColor);
+            Assert.Equal(environment.Exposure, reopened.Environment.Exposure);
+            Assert.True(reopened.Environment.Cinematic);
+            Assert.False(reopened.Environment.ShowGrid);
+            var restored = Assert.Single(reopened.Environment.PointLights!);
+            Assert.Equal(light.Position, restored.Position);
+            Assert.Equal(light.Id, restored.Id);
+            Assert.Equal(light.Color, restored.Color);
+            Assert.True(restored.CastShadow);
+        }
+        finally { if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true); }
+    }
+
+    [Fact]
     public async Task ASceneStillFreezesItsInputsAndReopensInTheShotReviewPath()
     {
         var dataRoot = Path.Combine(Path.GetTempPath(), "framewright-scene-shot", Guid.NewGuid().ToString("N"));

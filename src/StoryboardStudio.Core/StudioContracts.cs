@@ -101,8 +101,11 @@ public sealed record CreateSceneProposalRequest(
 /// <summary>Where the scene's inspection camera sits. Orbit values, not a matrix, so a saved view reopens exactly.</summary>
 public sealed record SceneCameraSummary(double Yaw, double Pitch, double Distance, double[] Target, double FieldOfView);
 
-/// <summary>The scene's basic lighting. Deliberately small: one key direction plus ambient fill.</summary>
-public sealed record SceneEnvironmentSummary(double KeyIntensity, double KeyYaw, double KeyPitch, double AmbientIntensity);
+/// <summary>Persisted scene lighting, including local practical lights in metres.</summary>
+public sealed record ScenePointLightSummary(Guid Id, string Name, double[] Position, string Color, double Intensity, double Distance, bool CastShadow = false);
+public sealed record SceneEnvironmentSummary(double KeyIntensity, double KeyYaw, double KeyPitch, double AmbientIntensity,
+    string KeyColor = "#ffffff", string AmbientColor = "#ffffff", string BackgroundColor = "#171b19",
+    double Exposure = 1, bool Cinematic = false, bool ShowGrid = true, ScenePointLightSummary[]? PointLights = null);
 
 /// <summary>
 /// Simple geometry standing in for an object that has no library model yet. A

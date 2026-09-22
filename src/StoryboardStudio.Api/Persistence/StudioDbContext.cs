@@ -715,6 +715,7 @@ public sealed class SceneRecord
     public double KeyLightYaw { get; set; }
     public double KeyLightPitch { get; set; }
     public double AmbientLightIntensity { get; set; }
+    public string? EnvironmentJson { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

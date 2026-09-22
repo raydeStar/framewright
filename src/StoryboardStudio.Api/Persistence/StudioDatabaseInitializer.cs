@@ -27,6 +27,7 @@ public static class StudioDatabaseInitializer
     private const string PreparedDerivativeMigration = "20260920-prepared-derivatives-v16";
     private const string SceneShotBindingMigration = "20260921-scene-shot-bindings-v17";
     private const string PortableProjectMigration = "20260922-portable-projects-v18";
+    private const string SceneLightingMigration = "20260922-scene-local-lighting-v19";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -266,6 +267,14 @@ public static class StudioDatabaseInitializer
             }, cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, SceneLightingMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, SceneLightingMigration, cancellationToken);
+            await RunMigrationAsync(db, SceneLightingMigration,
+                () => EnsureColumnAsync(db, "Scenes", "EnvironmentJson", "TEXT NULL", cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -398,6 +407,7 @@ public static class StudioDatabaseInitializer
             PreparedDerivativeMigration => "per-asset-preparation-acceptance-and-topology-change-that-cannot-be-inherited",
             SceneShotBindingMigration => "immutable-scene-snapshot-shot-camera-timing-delivery-and-reviewed-still-binding",
             PortableProjectMigration => "round-trippable-project-package-with-project-local-manifest-hash-identity",
+            SceneLightingMigration => "scene-environment-json-with-local-lights-color-exposure-and-grid",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

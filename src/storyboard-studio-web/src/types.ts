@@ -120,7 +120,12 @@ export type DirectorViewQuery = DirectorShotView | DirectorSceneView
 /** Where a scene's inspection camera sits. Orbit values, so a saved view reopens exactly. */
 export interface SceneCameraSummary { yaw: number; pitch: number; distance: number; target: number[]; fieldOfView: number }
 /** A scene's basic lighting: one key direction plus ambient fill. */
-export interface SceneEnvironmentSummary { keyIntensity: number; keyYaw: number; keyPitch: number; ambientIntensity: number }
+export interface ScenePointLightSummary { id: string; name: string; position: [number, number, number]; color: string; intensity: number; distance: number; castShadow: boolean }
+export interface SceneEnvironmentSummary {
+  keyIntensity: number; keyYaw: number; keyPitch: number; ambientIntensity: number
+  keyColor?: string; ambientColor?: string; backgroundColor?: string; exposure?: number
+  cinematic?: boolean; showGrid?: boolean; pointLights?: ScenePointLightSummary[] | null
+}
 /** Simple geometry standing in for an object that has no library model yet. */
 export interface ScenePlaceholderSummary { shape: 'Box' | 'Cylinder' | 'Sphere' | 'Plane'; size: number[] }
 /** One placed object: either pinned to an exact model revision or drawn as a placeholder, never both. */

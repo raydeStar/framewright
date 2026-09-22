@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, LoopOnce, LoopRepeat, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SkinnedMesh, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type BufferGeometry, type Object3D } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { ACESFilmicToneMapping, NoToneMapping, PCFSoftShadowMap, PointLight } from 'three'
 import { sharpenTextures } from './textureQuality'
 // A skinned mesh cannot be cloned with Object3D.clone: the copies would share
 // one skeleton and pose identically, which is the opposite of two instances.
@@ -98,6 +99,7 @@ export default function SceneViewport({ instances, camera, environment, selected
     const ambient = new AmbientLight(0xffffff, environment.ambientIntensity)
     const key = new DirectionalLight(0xffffff, environment.keyIntensity)
     scene.add(ambient, key)
+    const practicalLights = new Map<string, PointLight>()
     const grid = new GridHelper(40, 40, new Color('#3c4a44'), new Color('#232c29'))
     scene.add(grid)
 
@@ -117,7 +119,43 @@ export default function SceneViewport({ instances, camera, environment, selected
 
     const light = (next: SceneEnvironmentSummary) => {
       ambient.intensity = next.ambientIntensity
+      ambient.color.set(next.ambientColor ?? '#ffffff')
       key.intensity = next.keyIntensity
+      key.color.set(next.keyColor ?? '#ffffff')
+      scene.background = new Color(next.backgroundColor ?? '#171b19')
+      grid.visible = next.showGrid ?? true
+      renderer.toneMapping = next.cinematic ? ACESFilmicToneMapping : NoToneMapping
+      renderer.toneMappingExposure = next.exposure ?? 1
+      renderer.shadowMap.enabled = (next.pointLights ?? []).some(source => source.castShadow)
+      renderer.shadowMap.type = PCFSoftShadowMap
+      const ids = new Set((next.pointLights ?? []).map(source => source.id))
+      for (const [id, practical] of practicalLights) {
+        if (ids.has(id)) continue
+        scene.remove(practical)
+        practical.dispose()
+        practicalLights.delete(id)
+      }
+      for (const source of next.pointLights ?? []) {
+        let practical = practicalLights.get(source.id)
+        if (!practical) {
+          practical = new PointLight()
+          practical.shadow.mapSize.set(1024, 1024)
+          practical.shadow.bias = -0.0005
+          practical.shadow.normalBias = 0.025
+          practicalLights.set(source.id, practical)
+          scene.add(practical)
+        }
+        practical.name = source.name
+        practical.position.fromArray(source.position)
+        practical.color.set(source.color)
+        practical.intensity = source.intensity
+        practical.distance = source.distance
+        practical.decay = 2
+        practical.castShadow = source.castShadow
+        practical.shadow.camera.near = 0.04
+        practical.shadow.camera.far = source.distance
+        practical.shadow.camera.updateProjectionMatrix()
+      }
       key.position.set(
         6 * Math.cos(next.keyPitch) * Math.sin(next.keyYaw),
         6 * Math.sin(next.keyPitch),
@@ -231,6 +269,8 @@ export default function SceneViewport({ instances, camera, environment, selected
           // Selection belongs to one instance, even when its geometry is shared.
           copy.traverse(node => {
             if (!(node instanceof Mesh)) return
+            node.castShadow = true
+            node.receiveShadow = true
             node.material = Array.isArray(node.material) ? node.material.map(material => material.clone()) : node.material.clone()
           })
           copy.userData.instanceId = instance.id
@@ -549,6 +589,8 @@ export default function SceneViewport({ instances, camera, environment, selected
       placed.clear()
       for (const [, template] of loaded) release(template)
       loaded.clear()
+      for (const practical of practicalLights.values()) practical.dispose()
+      practicalLights.clear()
       renderer.domElement.remove()
       renderer.dispose()
       renderer.forceContextLoss()

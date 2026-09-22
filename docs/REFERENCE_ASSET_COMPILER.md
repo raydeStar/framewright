@@ -61,6 +61,15 @@ fork the modeling or texturing implementation.
 
 ## Running it
 
+The browser scene/rig integration was validated against compiler commit
+`07460ea` (2026-09-22), retaining the `0.1.2` CLI contract. That checkout adds
+`quadruped_cat_browser` and `ue5_manny_browser`: explicit 50k browser profiles
+with the canonical bone hierarchy and weight limits. The original 20k
+production profiles remain unchanged. A matching browser rig is usable for
+posing; it does not constitute creative approval or UE production certification.
+Floor normalization, component preservation, material repair and rig stress
+tests remain compiler-owned. See its canonical contract for invocation/evidence.
+
 The pinned wheel gives contracts and receipts. It does **not** give the Blender
 stages or the pinned workflow bundles; those need a configured checkout, the
 same way Framewright already needs a Blender path and a ComfyUI root, and it is

@@ -1,5 +1,16 @@
 # Framewright implementation handoff
 
+## Scene local lighting (2026-09-22)
+
+Saved scenes now support named local lights, lighting colors, exposure, filmic
+response and grid visibility through ordinary controls. Their settings survive
+restarts, frozen review stills and portable project import/export. Migration v19
+preserves legacy defaults; scene save and package import enforce the same limits.
+See [SCENE_LIGHTING.md](SCENE_LIGHTING.md) for behavior and validation. The live
+tavern exercise uses independently inspectable compiler assets and two neutral
+skinned characters; it leaves artistic approval pending. Modeling and texture
+changes were delivered in Reference Asset Compiler, not duplicated here.
+
 ## Project-wide World settings
 
 Framewright now has a dedicated **World** workspace for universal visual language, world canon, always-preserve rules, and negative/anti-drift rules. These values are project data rather than UI-only preferences. Saving them updates the optimistic-concurrency-protected project contract; every newly prepared still-image, asset-image, and H3 video manifest freezes a labeled `PROJECT WORLD SETTINGS` block before the shot-specific brief. Historical outputs and manifests remain unchanged.

@@ -188,6 +188,7 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         scene.KeyLightYaw = request.Environment.KeyYaw;
         scene.KeyLightPitch = request.Environment.KeyPitch;
         scene.AmbientLightIntensity = request.Environment.AmbientIntensity;
+        scene.EnvironmentJson = System.Text.Json.JsonSerializer.Serialize(request.Environment);
         scene.Version += 1;
         scene.UpdatedAt = now;
 
@@ -259,7 +260,9 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             scene.Id, scene.Name, scene.Version,
             new SceneCameraSummary(scene.CameraYaw, scene.CameraPitch, scene.CameraDistance,
                 [scene.CameraTargetX, scene.CameraTargetY, scene.CameraTargetZ], scene.CameraFieldOfView),
-            new SceneEnvironmentSummary(scene.KeyLightIntensity, scene.KeyLightYaw, scene.KeyLightPitch, scene.AmbientLightIntensity),
+            scene.EnvironmentJson is { } lighting
+                ? System.Text.Json.JsonSerializer.Deserialize<SceneEnvironmentSummary>(lighting)!
+                : new SceneEnvironmentSummary(scene.KeyLightIntensity, scene.KeyLightYaw, scene.KeyLightPitch, scene.AmbientLightIntensity),
             [.. instances], scene.UpdatedAt);
     }
 
@@ -329,7 +332,7 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         return profile.Value?.Dimensions ?? [0d, 0d, 0d];
     }
 
-    private static string? Validate(SceneCameraSummary camera, SceneEnvironmentSummary environment)
+    internal static string? Validate(SceneCameraSummary camera, SceneEnvironmentSummary environment)
     {
         if (camera.Target is not { Length: 3 } || camera.Target.Any(value => !double.IsFinite(value) || Math.Abs(value) > MaxDistanceFromOrigin))
             return "The camera target must be three finite coordinates inside the supported working volume.";
@@ -339,6 +342,26 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         foreach (var value in (double[])[environment.KeyIntensity, environment.AmbientIntensity])
             if (!double.IsFinite(value) || value is < 0 or > 20) return "Light intensity must be between 0 and 20.";
         if (!double.IsFinite(environment.KeyYaw) || !double.IsFinite(environment.KeyPitch)) return "The key light direction must be finite.";
+        static bool Color(string? value) => value is { Length: 7 } && value[0] == '#' && value.Skip(1).All(Uri.IsHexDigit);
+        if (!Color(environment.KeyColor) || !Color(environment.AmbientColor) || !Color(environment.BackgroundColor))
+            return "Lighting colors must use #RRGGBB.";
+        if (!double.IsFinite(environment.Exposure) || environment.Exposure is < 0.1 or > 5)
+            return "Exposure must be between 0.1 and 5.";
+        var lights = environment.PointLights ?? [];
+        if (lights.Any(light => light is null)) return "A local light cannot be empty.";
+        if (lights.Length > 12 || lights.Count(light => light.CastShadow) > 2)
+            return "A scene supports twelve local lights, with shadows on at most two.";
+        if (lights.Any(light => light.Id == Guid.Empty) || lights.Select(light => light.Id).Distinct().Count() != lights.Length)
+            return "Each local light needs a distinct identifier.";
+        foreach (var light in lights)
+        {
+            if ((light.Name ?? "").Trim().Length is 0 or > 80 || !Color(light.Color))
+                return "Each local light needs a name and #RRGGBB color.";
+            if (light.Position is not { Length: 3 } || light.Position.Any(value => !double.IsFinite(value) || Math.Abs(value) > MaxDistanceFromOrigin))
+                return "Local light positions must be three finite coordinates inside the working volume.";
+            if (!double.IsFinite(light.Intensity) || light.Intensity is < 0 or > 3000 || !double.IsFinite(light.Distance) || light.Distance is <= 0 or > 100)
+                return "Local light intensity must be 0 to 3000 and reach greater than zero through 100 metres.";
+        }
         return null;
     }
 

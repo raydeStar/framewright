@@ -79,6 +79,22 @@ public sealed class PortableProjectImportService(
             if (assetError is not null)
                 return RepositoryResult<PortableProjectImportSummary>.Invalid(assetError);
 
+            // Lighting arrives as stored JSON in a package. Apply the same
+            // limits as an ordinary save before it can reach the scene reader.
+            foreach (var scene in manifest.Scenes)
+            {
+                var lighting = scene.EnvironmentJson is { } json
+                    ? JsonSerializer.Deserialize<SceneEnvironmentSummary>(json)
+                    : new SceneEnvironmentSummary(scene.KeyLightIntensity, scene.KeyLightYaw,
+                        scene.KeyLightPitch, scene.AmbientLightIntensity);
+                if (lighting is null)
+                    return RepositoryResult<PortableProjectImportSummary>.Invalid("A packaged scene has empty lighting.");
+                var camera = new SceneCameraSummary(scene.CameraYaw, scene.CameraPitch, scene.CameraDistance,
+                    [scene.CameraTargetX, scene.CameraTargetY, scene.CameraTargetZ], scene.CameraFieldOfView);
+                if (SceneService.Validate(camera, lighting) is { } sceneError)
+                    return RepositoryResult<PortableProjectImportSummary>.Invalid(sceneError);
+            }
+
             var sourceProjectId = manifest.Project.Id;
             if (sourceProjectId == Guid.Empty || manifest.SourceProjectId != sourceProjectId || !AllRowsBelongTo(sourceProjectId, manifest))
                 return RepositoryResult<PortableProjectImportSummary>.Invalid(
