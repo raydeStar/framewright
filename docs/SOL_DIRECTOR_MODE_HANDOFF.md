@@ -1,6 +1,6 @@
 # Sol handoff: finish the Director Mode workflow
 
-Prepared 2026-09-21 and refreshed after the public-main MVP increments. Public baseline before the current recovery checkpoint: `145430376c9675cc087ec54ab5797475e905636a`. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
+Prepared 2026-09-21 and refreshed after the public-main MVP increments. Current public recovery baseline: `539d3a4ba1d74eaa97de068f10403133475ed5c4`. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
 
 > **Repository destination update — 2026-09-21:** `github.com/raydeStar/framewright` is now the maintained Framewright repository and the former private mirror is deprecated. Publish authorized Framewright work to public `main`. Geometry, retopology, UV, material, texture, rigging, deformation-gate, payload, and compiler-receipt changes belong in `github.com/raydeStar/reference-asset-compiler`; Framewright consumes that versioned contract and owns orchestration, import, scene use, and review.
 
@@ -50,7 +50,7 @@ The implemented MVP increments add precise placeholder replacement, full-view Sc
 
 Ignored evidence, when still present locally: `artifacts/qc/regressions-before.log`, `regressions-after.log`, `verify-final-5182.log`, `browser-final.log`, `{model,scene}-{desktop,tablet}.png`, and `src/storyboard-studio-web/playwright-report/index.html`. Do not expect these files in a fresh clone or commit private media to make them portable.
 
-The current public baseline passed [hosted run 35683195424](https://github.com/raydeStar/framewright/actions/runs/35683195424). Require a fresh green public run after the recovery checkpoint is pushed as well.
+The current public recovery baseline passed [hosted run 35687307712](https://github.com/raydeStar/framewright/actions/runs/35687307712): build/API, container runtime, and browser acceptance were all green.
 
 ## Where to resume
 
