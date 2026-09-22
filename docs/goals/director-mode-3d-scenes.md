@@ -1924,6 +1924,56 @@ and the required human checks remain outstanding. The last full browser gate on
 the preceding recovery baseline remains 134 passes with six intentional tablet
 exclusions; it was not rerun for this backend-only regression.
 
+### 2026-09-22 — Library asset Director Mode
+
+Scope: extend the existing full-view interaction to every library media kind.
+Image, GLB model, audio, and video cards now open directly into Director Mode,
+and each inspector has a toggle. Escape, the toggle, and returning to the library
+restore the surrounding UI. The same mounted surface preserves the displayed
+revision, image notes, model orbit, media position, and inspector drafts.
+
+The browser director context now resolves the visible asset revision through a
+project-scoped service. Image observations bind to its content and review notes;
+stale tokens are refused. Model/audio/video packets identify stored media and do
+not pretend to capture a 3D camera or playback frame. A comparison view asks the
+artist to select a single image before observation. Leaving a supported surface
+no longer silently reports the last shot. Tool-driven shot navigation commits
+before a following context read. No approval or provider-dispatch tool was added.
+
+Evidence includes eight desktop Chromium/iPad WebKit journeys, two focused API
+contracts, and actual Codex in-app browser calls for a model and image. The
+actual-host image observation matched the visible reference. Pausing browser
+tools left manual model full view usable; tools were then restored. The local
+persistent project reopened with the same shots, zero new jobs, and its saved
+scene at v10 with 62 instances. This is interface/runtime evidence, not artistic
+acceptance or completion of the remaining animation milestones.
+
+The asset journeys also check accessibility, touch target size, old revision
+identity, media seek preservation, and absence of renderer remounts. They caught
+and fixed an audio play overlay intercepting card clicks and an unlabeled image
+revision import control. Local evidence is under the ignored
+`artifacts/asset-director-verification/` directory. The implementation checkpoint
+is `60a3c0f06c858eb009da0000ff1c11847897616b`, tested on Windows with .NET
+10.0.203 and Node 22.15.0. The focused asset/WebMCP run passed all 24 desktop and
+tablet journeys. The existing immediate shot-navigation/context test reproduced
+the timing regression before the fix and passed unchanged afterwards.
+
+The full gate uses `.framewright/verify-director` for .NET build outputs because
+the artist's running studio owns the normal binaries. It retains the test
+assembly's expected directory depth and runs the unchanged repository gate.
+Physical tablet/stylus acceptance, live provider generation, and 3D/video frame
+capture are outside this change. No compiler contract or RAC pin changed.
+
+Final full gate: **passed**, exit 0. Backend 296/296; browser 146 passed with six
+existing tablet exclusions. Frontend source checks, production bundle, tracked
+public-content audit, backup/restore, launcher/setup/worker safety contracts, and
+dependency audits also passed. The log is
+`artifacts/asset-director-verification/full-gate-60a3c0f.log`; focused screenshots
+are in `final-focused-results/` alongside it. The local tavern on port 5230 serves
+the updated application with its original data and provider configuration.
+Next action: use the library's Director Mode shortcut for asset inspection and
+continue the remaining creative work; full view is not artistic acceptance.
+
 ### Acceptance record template
 
 ```text

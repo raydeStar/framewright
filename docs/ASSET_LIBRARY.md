@@ -65,3 +65,20 @@ Desktop uses a three-pane layout: navigation/bins, media browser, and inspector.
 - The Asset Library is not a replacement for the sequence audio editor; it supplies reusable source media to it.
 - Filesystem folder mirroring, automatic duplicate cleanup, AI auto-tagging, proxy generation, and waveform background indexing are future capabilities, not shipped behavior.
 - Voice-profile consent and reusable voice identity remain in the separate voice domain; importing an audio file does not create a clone profile.
+
+## Director Mode for library assets
+
+Every image, model, video, and audio card has a **Director Mode** shortcut. The
+same toggle appears inside its inspector. Full view hides the surrounding library
+and detail rails; **Exit Director Mode**, Escape, or returning to the library
+restores them. The workspace stays mounted, preserving the selected revision,
+model orbit, playback position, review pins, and unsaved metadata.
+
+The existing shot and scene Director Mode controls continue to work. Browser
+`get_director_context` now identifies the displayed library asset revision and
+content hash, including an older revision. It no longer falls back to the last
+shot when another workspace is open. Image observations include saved review
+notes and refuse stale tokens; comparison views ask for a single view first.
+Model/video/audio context identifies stored media, but does not claim to capture
+the inspection camera or playback frame. No new approval or generation action is
+exposed by these read tools.
