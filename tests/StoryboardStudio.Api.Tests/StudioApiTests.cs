@@ -1078,12 +1078,16 @@ public sealed class StudioApiTests : IClassFixture<StudioApiFactory>
     [Fact]
     public async Task MaintenanceBackupIsIntegrityCheckedPortableAndSecretFree()
     {
-        var status = await client.GetFromJsonAsync<BackupStatus>("/api/maintenance/status");
+        // Keep the archive snapshot independent of unfinished work from the
+        // long-lived class fixture's generation queue.
+        using var isolatedFactory = new StudioApiFactory();
+        using var isolatedClient = isolatedFactory.CreateClient();
+        var status = await isolatedClient.GetFromJsonAsync<BackupStatus>("/api/maintenance/status");
         Assert.NotNull(status);
         Assert.Equal("ok", status.DatabaseIntegrity, ignoreCase: true);
         Assert.Contains("provider keys are excluded", status.Policy, StringComparison.OrdinalIgnoreCase);
 
-        var response = await client.GetAsync("/api/maintenance/backup");
+        var response = await isolatedClient.GetAsync("/api/maintenance/backup");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/zip", response.Content.Headers.ContentType?.MediaType);
 
@@ -1099,7 +1103,7 @@ public sealed class StudioApiTests : IClassFixture<StudioApiFactory>
         Assert.DoesNotContain(archive.Entries, entry => entry.FullName.Contains("secret", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(archive.Entries, entry => entry.FullName.EndsWith("appsettings.json", StringComparison.OrdinalIgnoreCase));
 
-        await using var scope = factory.Services.CreateAsyncScope();
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
         var retained = await scope.ServiceProvider.GetRequiredService<BackupService>().CreateScheduledAsync(CancellationToken.None);
         Assert.True(File.Exists(retained.Path));
         using (var retainedArchive = ZipFile.OpenRead(retained.Path))
@@ -1107,7 +1111,7 @@ public sealed class StudioApiTests : IClassFixture<StudioApiFactory>
             Assert.NotNull(retainedArchive.GetEntry("database/storyboard-studio.db"));
             Assert.NotNull(retainedArchive.GetEntry("backup-manifest.json"));
         }
-        var after = await client.GetFromJsonAsync<BackupStatus>("/api/maintenance/status");
+        var after = await isolatedClient.GetFromJsonAsync<BackupStatus>("/api/maintenance/status");
         Assert.True(after!.RetainedBackups >= 1);
         Assert.NotNull(after.LatestBackupAt);
     }
