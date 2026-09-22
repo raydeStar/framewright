@@ -1,6 +1,6 @@
 # Sol handoff: finish the Director Mode workflow
 
-Prepared 2026-09-21 and refreshed through the reusable-asset discovery increment on 2026-09-22. Public `main` at `774cf6691a1323a2d89b694aa01b8e7aecd6860d` is hosted-green, including the M17 exact-frame render and portable recovery contracts. The current checkout adds the bounded library search described below. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
+Prepared 2026-09-21 and refreshed through the reusable-asset discovery increment on 2026-09-22. Public `main` at `f5b00155df3aa659df478f5409be231a3d883869` is hosted-green, including the M17 exact-frame render, portable recovery, bounded library search, and Director-view synchronization contracts. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
 
 > **Repository destination update — 2026-09-21:** `github.com/raydeStar/framewright` is now the maintained Framewright repository and the former private mirror is deprecated. Publish authorized Framewright work to public `main`. Geometry, retopology, UV, material, texture, rigging, deformation-gate, payload, and compiler-receipt changes belong in `github.com/raydeStar/reference-asset-compiler`; Framewright consumes that versioned contract and owns orchestration, import, scene use, and review.
 
@@ -50,7 +50,7 @@ The implemented MVP increments add precise placeholder replacement, full-view Sc
 
 Ignored evidence, when still present locally: `artifacts/qc/regressions-before.log`, `regressions-after.log`, `verify-final-5182.log`, `browser-final.log`, `{model,scene}-{desktop,tablet}.png`, and `src/storyboard-studio-web/playwright-report/index.html`. Do not expect these files in a fresh clone or commit private media to make them portable.
 
-Public `main` at `774cf6691a1323a2d89b694aa01b8e7aecd6860d` passed [hosted run 35700469040](https://github.com/raydeStar/framewright/actions/runs/35700469040): build/API, container runtime, and browser acceptance were all green. That run includes the M17 scene-render baseline and portable recovery extension. The reusable-asset discovery increment is newer and requires its own exact-head hosted result after push.
+Public `main` at `f5b00155df3aa659df478f5409be231a3d883869` passed [hosted run 35705366882](https://github.com/raydeStar/framewright/actions/runs/35705366882): build/API, container runtime, and browser acceptance were all green. That exact run includes the M17 scene-render baseline, portable recovery extension, reusable-asset discovery, and Director-view synchronization fix.
 
 ## Where to resume
 
