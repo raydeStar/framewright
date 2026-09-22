@@ -129,6 +129,10 @@ test('a supported model imports, reports its real measurements, and inspects wit
 })
 
 test('switching models releases the previous view instead of stacking contexts', async ({ page }) => {
+  // A hosted runner can spend several seconds bringing up its second software
+  // WebGL surface. The contract here is the released context and new measured
+  // profile, so wait for that profile rather than treating render speed as one.
+  test.setTimeout(60_000)
   const verifyConsole = failOnConsoleErrors(page)
   await openAssets(page)
   await page.locator('input[type="file"]').setInputFiles([block, post])
@@ -145,8 +149,9 @@ test('switching models releases the previous view instead of stacking contexts',
   // A second model with different extents: the surface shows the new numbers
   // and still holds exactly one drawing context.
   await page.getByRole('button', { name: 'Open asymmetric-post' }).click()
-  await expect(page.getByTestId('model-dimensions')).toContainText('2.00 m')
-  await expect(page.getByTestId('model-dimensions')).toContainText('0.45 m')
+  const switchedDimensions = page.getByTestId('model-dimensions')
+  await expect(switchedDimensions).toContainText('2.00 m', { timeout: 30_000 })
+  await expect(switchedDimensions).toContainText('0.45 m')
   await expect(page.getByTestId('model-viewer')).toHaveAttribute('data-state', 'ready')
   await expect(page.locator('canvas')).toHaveCount(1)
   verifyConsole()
