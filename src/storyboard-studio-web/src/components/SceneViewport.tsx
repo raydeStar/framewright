@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, LoopOnce, LoopRepeat, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SkinnedMesh, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type BufferGeometry, type Object3D } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { ACESFilmicToneMapping, NoToneMapping, PCFSoftShadowMap, PointLight } from 'three'
+import { ACESFilmicToneMapping, NoToneMapping, PCFShadowMap, PointLight } from 'three'
 import { sharpenTextures } from './textureQuality'
 // A skinned mesh cannot be cloned with Object3D.clone: the copies would share
 // one skeleton and pose identically, which is the opposite of two instances.
@@ -127,7 +127,7 @@ export default function SceneViewport({ instances, camera, environment, selected
       renderer.toneMapping = next.cinematic ? ACESFilmicToneMapping : NoToneMapping
       renderer.toneMappingExposure = next.exposure ?? 1
       renderer.shadowMap.enabled = (next.pointLights ?? []).some(source => source.castShadow)
-      renderer.shadowMap.type = PCFSoftShadowMap
+      renderer.shadowMap.type = PCFShadowMap
       const ids = new Set((next.pointLights ?? []).map(source => source.id))
       for (const [id, practical] of practicalLights) {
         if (ids.has(id)) continue
