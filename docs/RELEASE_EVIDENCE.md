@@ -13,7 +13,7 @@ Framewright's automated gate proves deterministic application contracts. It does
 | Additive schema ledger and verified pre-migration backup | Schema migration tests |
 | Backup inventory/hash verification and recovery behavior | Backup operation tests, restore script canaries, isolated-workspace round trip of rig/clip/motion/annotation/revision/still lineage, and packaged export/import -> backup -> offline restore -> restart smoke |
 | Max-video binding required for video approval | Video ratification/export contract test |
-| Deterministic scene take recovery and promotion | Exact-frame scene-render restart, frame-integrity, FFmpeg-boundary, retry-lineage, decoded-media, and browser-action tests |
+| Deterministic scene take recovery and promotion | Exact-frame scene-render restart, frame-integrity, FFmpeg-boundary, retry-lineage, decoded-media, browser-action, and portable fresh-ID import/restart/playback tests |
 | Browser navigation and fast draft UX | Default Playwright suite using isolated local state and mocked provider boundaries |
 | Frontend type, lint, formatting, and production bundle | `npm run check` and `npm run build` |
 | Reproducible API container | Locked restore plus Docker image build/smoke |

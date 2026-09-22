@@ -1,9 +1,10 @@
-using Microsoft.EntityFrameworkCore;
-using StoryboardStudio.Api.Persistence;
-using StoryboardStudio.Core;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.EntityFrameworkCore;
+using StoryboardStudio.Api.Persistence;
+using StoryboardStudio.Core;
 
 namespace StoryboardStudio.Api.Services;
 
@@ -129,6 +130,7 @@ public sealed class PortableProjectImportService(
         var instanceIds = NewIds(package.SceneInstances.Select(x => x.Id));
         var planIds = NewIds(package.SceneBlockoutPlans.Select(x => x.Id));
         var planItemIds = NewIds(package.SceneBlockoutItems.Select(x => x.Id));
+        var bindingIds = NewIds(package.SceneShotBindings.Select(x => x.Id));
         var compositionIds = NewIds(package.MusicCompositions.Select(x => x.Id));
         var compositionRevisionIds = NewIds(package.MusicCompositionRevisions.Select(x => x.Id));
 
@@ -207,6 +209,8 @@ public sealed class PortableProjectImportService(
             row.ManifestId = Optional(manifestIds, row.ManifestId, "manifest");
             row.OutputAssetId = Optional(assetIds, row.OutputAssetId, "job output");
             row.RetryOfJobId = Optional(jobIds, row.RetryOfJobId, "prior job");
+            if (string.Equals(row.WorkType, SceneRenderService.WorkType, StringComparison.Ordinal))
+                row.RequestJson = RemapSceneRenderPacket(row.RequestJson, bindingIds, sceneIds, shotIds);
             if (row.State is "Queued" or "Running")
             {
                 row.State = "Failed";
@@ -267,7 +271,8 @@ public sealed class PortableProjectImportService(
         }
         foreach (var row in package.SceneShotBindings)
         {
-            row.Id = Guid.NewGuid(); row.ProjectId = projectId; row.SceneId = Required(sceneIds, row.SceneId, "scene");
+            var sourceId = row.Id; row.Id = Required(bindingIds, sourceId, "scene shot binding");
+            row.ProjectId = projectId; row.SceneId = Required(sceneIds, row.SceneId, "scene");
             row.ShotId = Required(shotIds, row.ShotId, "shot"); row.StillAssetId = Required(assetIds, row.StillAssetId, "still asset");
         }
         foreach (var row in package.MusicCompositions)
@@ -312,7 +317,10 @@ public sealed class PortableProjectImportService(
             db.MusicCompositionRevisions.AddRange(package.MusicCompositionRevisions); db.MusicRenders.AddRange(package.MusicRenders);
             db.AuditEvents.Add(new AuditEventRecord
             {
-                Id = Guid.NewGuid(), Type = "PortableProjectImported", TargetType = "Project", TargetId = projectId.ToString(),
+                Id = Guid.NewGuid(),
+                Type = "PortableProjectImported",
+                TargetType = "Project",
+                TargetId = projectId.ToString(),
                 PayloadJson = JsonSerializer.Serialize(new { sourceProjectId, projectName, package.ExportedAt, assets = package.Assets.Length, scenes = package.Scenes.Length }),
                 CreatedAt = timeProvider.GetUtcNow()
             });
@@ -500,6 +508,48 @@ public sealed class PortableProjectImportService(
         }
     }
 
+    /// <summary>
+    /// A generation manifest and scene snapshot are immutable source evidence,
+    /// so their embedded identities intentionally remain untouched. The scene
+    /// render request packet is operational state: its API summary and retry
+    /// path must address the newly imported graph rather than the source
+    /// workspace. Every referenced identity must therefore belong to the
+    /// package and receive the same fresh mapping as its relational row.
+    /// </summary>
+    private static string RemapSceneRenderPacket(
+        string? requestJson,
+        IReadOnlyDictionary<Guid, Guid> bindingIds,
+        IReadOnlyDictionary<Guid, Guid> sceneIds,
+        IReadOnlyDictionary<Guid, Guid> shotIds)
+    {
+        JsonObject packet;
+        try
+        {
+            packet = JsonNode.Parse(requestJson ?? "")?.AsObject()
+                ?? throw new InvalidDataException("A scene render request packet is missing.");
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        {
+            throw new InvalidDataException("A scene render request packet is malformed.", exception);
+        }
+
+        Remap(packet, "bindingId", bindingIds, "scene shot binding");
+        Remap(packet, "sceneId", sceneIds, "scene");
+        Remap(packet, "shotId", shotIds, "shot");
+        return packet.ToJsonString(Json);
+    }
+
+    private static void Remap(
+        JsonObject packet,
+        string property,
+        IReadOnlyDictionary<Guid, Guid> identities,
+        string label)
+    {
+        if (packet[property] is not JsonValue value || !value.TryGetValue<string>(out var text) || !Guid.TryParse(text, out var sourceId))
+            throw new InvalidDataException($"A scene render request packet has no valid {label} identity.");
+        packet[property] = Required(identities, sourceId, label);
+    }
+
     private static bool AllRowsBelongTo(Guid projectId, PortableProjectManifest package)
     {
         IEnumerable<Guid> ids = package.Assets.Select(x => x.ProjectId)
@@ -661,14 +711,35 @@ public sealed class PortableProjectImportService(
 
         public AssetRecord ToRecord() => new()
         {
-            Id = Id, ProjectId = ProjectId, Kind = Kind, OriginalFileName = OriginalFileName, MimeType = MimeType,
-            Bytes = Bytes, Width = Width, Height = Height, DurationSeconds = DurationSeconds, ContentHash = ContentHash,
-            StoragePath = StoragePath, CreatedAt = CreatedAt, DisplayName = DisplayName, CollectionId = CollectionId,
-            TagsJson = TagsJson, Notes = Notes, Source = Source, IsArchived = IsArchived, UpdatedAt = UpdatedAt,
-            RevisionFamilyId = RevisionFamilyId, RevisionNumber = RevisionNumber, IsCurrentRevision = IsCurrentRevision,
-            ParentAssetId = ParentAssetId, RevisionPrompt = RevisionPrompt, RevisionEngine = RevisionEngine,
-            PreparationAcceptedAt = PreparationAcceptedAt, PreparationAcceptedBy = PreparationAcceptedBy,
-            PreparationAcceptanceNote = PreparationAcceptanceNote, PreparationTopologyChanged = PreparationTopologyChanged
+            Id = Id,
+            ProjectId = ProjectId,
+            Kind = Kind,
+            OriginalFileName = OriginalFileName,
+            MimeType = MimeType,
+            Bytes = Bytes,
+            Width = Width,
+            Height = Height,
+            DurationSeconds = DurationSeconds,
+            ContentHash = ContentHash,
+            StoragePath = StoragePath,
+            CreatedAt = CreatedAt,
+            DisplayName = DisplayName,
+            CollectionId = CollectionId,
+            TagsJson = TagsJson,
+            Notes = Notes,
+            Source = Source,
+            IsArchived = IsArchived,
+            UpdatedAt = UpdatedAt,
+            RevisionFamilyId = RevisionFamilyId,
+            RevisionNumber = RevisionNumber,
+            IsCurrentRevision = IsCurrentRevision,
+            ParentAssetId = ParentAssetId,
+            RevisionPrompt = RevisionPrompt,
+            RevisionEngine = RevisionEngine,
+            PreparationAcceptedAt = PreparationAcceptedAt,
+            PreparationAcceptedBy = PreparationAcceptedBy,
+            PreparationAcceptanceNote = PreparationAcceptanceNote,
+            PreparationTopologyChanged = PreparationTopologyChanged
         };
     }
 }

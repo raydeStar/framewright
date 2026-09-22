@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using StoryboardStudio.Api.Persistence;
 using StoryboardStudio.Api.Services;
 using StoryboardStudio.Core;
@@ -283,6 +284,173 @@ public sealed class PortableProjectTests
     }
 
     [Fact]
+    public async Task ACompletedSceneRenderKeepsFreshOperationalIdsAndPlayableOutputAfterImportRestart()
+    {
+        var encoder = new PortableSceneVideoEncoder();
+        byte[] package;
+        Guid sourceSceneId, sourceShotId, sourceBindingId, sourceJobId, sourceOutputAssetId;
+        string sourceManifestHash, sourceSnapshotHash;
+
+        using (var sourceFactory = new StudioApiFactory(services =>
+        {
+            services.RemoveAll<ISceneVideoEncoder>();
+            services.AddSingleton<ISceneVideoEncoder>(encoder);
+        }))
+        using (var sourceClient = sourceFactory.CreateClient())
+        {
+            var studio = await sourceClient.GetFromJsonAsync<StudioSnapshot>("/api/studio")
+                ?? throw new InvalidOperationException();
+            var shotResponse = await sourceClient.PostAsJsonAsync("/api/shots", new CreateShotRequest(
+                "SC-981", "Portable rendered take", "A completed exact-frame take survives a portable restart.",
+                4, "Bound scene camera", "Open the workshop door.", [], []));
+            shotResponse.EnsureSuccessStatusCode();
+            var shot = await shotResponse.Content.ReadFromJsonAsync<ShotSummary>()
+                ?? throw new InvalidOperationException();
+            sourceShotId = shot.Id;
+
+            var propId = await ImportModelAsync(sourceClient, ModelFixtures.AsymmetricBlock(), "portable-render-prop.glb");
+            sourceSceneId = await CreateSceneAsync(sourceClient, "Portable rendered workshop");
+            var save = await sourceClient.PutAsJsonAsync($"/api/scenes/{sourceSceneId}", new
+            {
+                expectedVersion = 1,
+                name = "Portable rendered workshop",
+                camera = Camera(),
+                environment = Environment(),
+                instances = new[]
+                {
+                    new
+                    {
+                        id = Guid.NewGuid(), assetId = propId, name = "Rendered door",
+                        position = (double[])[0d, 0d, 0d], rotation = (double[])[0d, 0d, 0d], scale = (double[])[1d, 1d, 1d],
+                        motion = new { pivot = (double[])[-1d, 0d, 0d], axis = "Y", fromRadians = 0d, toRadians = 1.2d, seconds = 1d, pingPong = false },
+                    },
+                },
+            });
+            save.EnsureSuccessStatusCode();
+            var saved = await save.Content.ReadFromJsonAsync<SceneSummary>() ?? throw new InvalidOperationException();
+            var camera = new SceneCameraSummary(1.1, 0.45, 6.5, [0.5, 1, 0], 35);
+            using var still = await RenderStillAsync(
+                sourceClient, sourceSceneId, sourceShotId, saved.Version, shot.Version, camera,
+                0, shot.DurationFrames / (double)studio.Project.FramesPerSecond, 0,
+                PngHeader(studio.Project.DeliveryWidth, studio.Project.DeliveryHeight));
+            still.EnsureSuccessStatusCode();
+            var binding = await still.Content.ReadFromJsonAsync<SceneShotBindingSummary>()
+                ?? throw new InvalidOperationException();
+            sourceBindingId = binding.Id;
+            sourceSnapshotHash = binding.SnapshotHash;
+
+            var ratifiedStill = await sourceClient.PostAsJsonAsync(
+                $"/api/shots/{sourceShotId}/ratify",
+                new RatifyRequest(binding.ShotVersion, "Approved source still for portable render proof."));
+            ratifiedStill.EnsureSuccessStatusCode();
+            var prepare = await sourceClient.PostAsJsonAsync(
+                $"/api/scenes/{sourceSceneId}/shot-renders",
+                new PrepareSceneRenderRequest(sourceBindingId));
+            Assert.True(prepare.IsSuccessStatusCode, await prepare.Content.ReadAsStringAsync());
+            var render = await prepare.Content.ReadFromJsonAsync<SceneRenderSummary>()
+                ?? throw new InvalidOperationException();
+            sourceManifestHash = render.ManifestHash;
+            foreach (var index in render.MissingFrames)
+            {
+                using var upload = await UploadRenderFrameAsync(
+                    sourceClient, render.JobId, index, PngHeader(render.Width, render.Height));
+                upload.EnsureSuccessStatusCode();
+            }
+
+            var complete = await sourceClient.PostAsync($"/api/scene-renders/{render.JobId}/complete", null);
+            complete.EnsureSuccessStatusCode();
+            var completed = await complete.Content.ReadFromJsonAsync<SceneRenderSummary>()
+                ?? throw new InvalidOperationException();
+            sourceJobId = completed.JobId;
+            sourceOutputAssetId = completed.OutputAssetId ?? throw new InvalidOperationException();
+            Assert.True(completed.Promoted);
+            Assert.Equal(1, encoder.EncodeCount);
+
+            var promoted = (await sourceClient.GetFromJsonAsync<StudioSnapshot>("/api/studio")
+                ?? throw new InvalidOperationException()).Shots.Single(item => item.Id == sourceShotId);
+            var ratifiedVideo = await sourceClient.PostAsJsonAsync(
+                $"/api/shots/{sourceShotId}/ratify",
+                new RatifyRequest(promoted.Version, "Approved exact-frame take for portable recovery proof."));
+            ratifiedVideo.EnsureSuccessStatusCode();
+            package = await sourceClient.GetByteArrayAsync("/api/export/working-package");
+        }
+
+        var targetRoot = Path.Combine(Path.GetTempPath(), "framewright-portable-render", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(targetRoot);
+        try
+        {
+            PortableProjectImportSummary imported;
+            Guid importedSceneId, importedShotId, importedBindingId, importedJobId, importedOutputAssetId;
+            using (var targetFactory = new StudioApiFactory(targetRoot, deleteDataRoot: false))
+            using (var targetClient = targetFactory.CreateClient())
+            {
+                var importedResponse = await ImportPackageAsync(targetClient, package, "portable-rendered-take.zip");
+                importedResponse.EnsureSuccessStatusCode();
+                imported = await importedResponse.Content.ReadFromJsonAsync<PortableProjectImportSummary>()
+                    ?? throw new InvalidOperationException();
+                (await targetClient.PostAsync($"/api/projects/{imported.ProjectId}/activate", null)).EnsureSuccessStatusCode();
+
+                using var scope = targetFactory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+                var importedScene = await db.Scenes.AsNoTracking().SingleAsync(row => row.Name == "Portable rendered workshop");
+                var importedShot = await db.Shots.AsNoTracking().SingleAsync(row => row.Code == "SC-981");
+                var importedBinding = await db.SceneShotBindings.AsNoTracking().SingleAsync(row => row.ShotId == importedShot.Id);
+                var importedJob = await db.Jobs.AsNoTracking().SingleAsync(row => row.WorkType == SceneRenderService.WorkType);
+                var importedManifest = await db.GenerationManifests.AsNoTracking().SingleAsync(row => row.Id == importedJob.ManifestId);
+                var importedCandidate = await db.CandidateVersions.AsNoTracking().SingleAsync(row => row.ShotId == importedShot.Id && row.IsCurrent);
+
+                importedSceneId = importedScene.Id;
+                importedShotId = importedShot.Id;
+                importedBindingId = importedBinding.Id;
+                importedJobId = importedJob.Id;
+                importedOutputAssetId = importedJob.OutputAssetId ?? throw new InvalidOperationException();
+                Assert.NotEqual(sourceSceneId, importedSceneId);
+                Assert.NotEqual(sourceShotId, importedShotId);
+                Assert.NotEqual(sourceBindingId, importedBindingId);
+                Assert.NotEqual(sourceJobId, importedJobId);
+                Assert.NotEqual(sourceOutputAssetId, importedOutputAssetId);
+                Assert.Equal(importedJobId, importedShot.ProductionVideoJobId);
+                Assert.Equal(importedOutputAssetId, importedShot.ProductionVideoAssetId);
+                Assert.Equal(ApprovalState.Ratified.ToString(), importedShot.Approval);
+                Assert.Equal(ShotStage.Video.ToString(), importedShot.Stage);
+                Assert.Equal(importedShotId, importedManifest.ShotId);
+                Assert.Equal(importedBinding.StillAssetId, importedManifest.CompositionAssetId);
+                Assert.Equal(importedManifest.Id, importedCandidate.SourceManifestId);
+                Assert.Equal(sourceSnapshotHash, importedBinding.SnapshotHash);
+            }
+
+            // A fresh application host on the imported data root must resolve
+            // the remapped operational packet and serve the verified movie.
+            using var reopenedFactory = new StudioApiFactory(targetRoot, deleteDataRoot: false);
+            using var reopenedClient = reopenedFactory.CreateClient();
+            var reopened = await reopenedClient.GetFromJsonAsync<StudioSnapshot>("/api/studio")
+                ?? throw new InvalidOperationException();
+            Assert.Equal(imported.ProjectId, reopened.Project.Id);
+            var reopenedShot = reopened.Shots.Single(row => row.Id == importedShotId);
+            Assert.Equal(importedJobId, reopenedShot.ProductionVideoJobId);
+            Assert.Equal(importedOutputAssetId, reopenedShot.ProductionVideoAssetId);
+
+            var renderSummary = await reopenedClient.GetFromJsonAsync<SceneRenderSummary>($"/api/scene-renders/{importedJobId}")
+                ?? throw new InvalidOperationException();
+            Assert.Equal(JobState.Completed, renderSummary.State);
+            Assert.True(renderSummary.Promoted);
+            Assert.Empty(renderSummary.MissingFrames);
+            Assert.Equal(importedSceneId, renderSummary.SceneId);
+            Assert.Equal(importedShotId, renderSummary.ShotId);
+            Assert.Equal(importedBindingId, renderSummary.BindingId);
+            Assert.Equal(importedOutputAssetId, renderSummary.OutputAssetId);
+            Assert.Equal(sourceManifestHash, renderSummary.ManifestHash);
+            var movie = await reopenedClient.GetByteArrayAsync(renderSummary.OutputAssetUrl);
+            Assert.Equal("ftypisom", Encoding.ASCII.GetString(movie, 4, 8));
+            Assert.NotEmpty(await reopenedClient.GetByteArrayAsync("/api/export/working-package"));
+        }
+        finally
+        {
+            if (Directory.Exists(targetRoot)) Directory.Delete(targetRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AChecksumFailureCreatesNoPartialProject()
     {
         using var factory = new StudioApiFactory();
@@ -409,6 +577,21 @@ public sealed class PortableProjectTests
         return await client.SendAsync(request);
     }
 
+    private static async Task<HttpResponseMessage> UploadRenderFrameAsync(
+        HttpClient client,
+        Guid jobId,
+        int frameIndex,
+        byte[] png)
+    {
+        var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(png);
+        file.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        content.Add(file, "file", $"frame-{frameIndex:000000}.png");
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/scene-renders/{jobId}/frames/{frameIndex}") { Content = content };
+        request.Headers.Add("X-Storyboard-Studio", "1");
+        return await client.SendAsync(request);
+    }
+
     private static byte[] PngHeader(int width, int height)
     {
         var bytes = new byte[25];
@@ -488,5 +671,28 @@ public sealed class PortableProjectTests
             }
         }
         return output.ToArray();
+    }
+
+    private sealed class PortableSceneVideoEncoder : ISceneVideoEncoder
+    {
+        public int EncodeCount { get; private set; }
+
+        public Task<SceneVideoEncoderReadiness> InspectAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new SceneVideoEncoderReadiness(true, "portable-test-ffmpeg 1", "Portable encoder ready."));
+        }
+
+        public async Task<SceneVideoEncodeResult> EncodeAsync(
+            SceneVideoEncodeRequest request,
+            CancellationToken cancellationToken)
+        {
+            EncodeCount++;
+            var bytes = new byte[16];
+            BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(0, 4), 16);
+            Encoding.ASCII.GetBytes("ftypisom").CopyTo(bytes, 4);
+            await File.WriteAllBytesAsync(request.OutputPath, bytes, cancellationToken);
+            return new(true, "portable-test-ffmpeg 1", "Portable movie encoded.");
+        }
     }
 }

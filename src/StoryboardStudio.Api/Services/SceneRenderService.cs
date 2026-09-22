@@ -528,7 +528,15 @@ public sealed class SceneRenderService(
         SceneRenderPacket packet,
         CancellationToken cancellationToken)
     {
-        var missing = job.ManifestId is null ? Enumerable.Range(0, packet.FrameCount).ToArray() : MissingFrames(job.ManifestId.Value, packet.FrameCount);
+        // Completed takes carry their verified frame hashes and encoded movie in
+        // durable records. Portable packages intentionally omit the bulky PNG
+        // intermediates, so a reopened completed take has no capture work left
+        // even when those local scratch files are absent.
+        var missing = job.State == JobState.Completed.ToString()
+            ? []
+            : job.ManifestId is null
+                ? Enumerable.Range(0, packet.FrameCount).ToArray()
+                : MissingFrames(job.ManifestId.Value, packet.FrameCount);
         var promoted = job.OutputAssetId is not null && await db.Shots.AsNoTracking()
             .AnyAsync(shot => shot.Id == job.ShotId && shot.ProductionVideoJobId == job.Id && shot.ProductionVideoAssetId == job.OutputAssetId, cancellationToken);
         return new(
