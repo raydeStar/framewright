@@ -87,6 +87,7 @@ public sealed class ModelGenerationService(
     private const string SetAtlas = "2048";
     private const string HeadFrom = "0.78";
     private const string HeadFeather = "0.03";
+    private static readonly string[] HeadEnds = ["top", "left", "right"];
     private const int HeroColourSize = 4096;
     private const int HeroDataSize = 2048;
     private const int HeroTextureQuality = 92;
@@ -332,7 +333,7 @@ public sealed class ModelGenerationService(
         double Relief = 0,
         int ColourSize = 0, int DataSize = 0, int Quality = 0, string? TextureFormat = null,
         int Directions = 0, double Most = 0, double LargestPart = 0,
-        bool IgnoreTransparency = false, string Detail = SetDetail);
+        bool IgnoreTransparency = false, string Detail = SetDetail, string HeadEnd = "top");
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -531,6 +532,13 @@ public sealed class ModelGenerationService(
             return RepositoryResult<JobSummary>.Invalid(
                 "This compiler cannot make a hero yet: it needs the paint-head and compress-textures stages. "
                 + "Generate it as set dressing, or update the compiler.");
+        // Where the head is in the picture. A standing figure's is at the top;
+        // an animal seen from the side has it at one end, and cutting a cat
+        // at the top would paint its ears and the tip of its tail.
+        var headEnd = string.IsNullOrWhiteSpace(request.HeadEnd) ? "top" : request.HeadEnd.Trim().ToLowerInvariant();
+        if (!HeadEnds.Contains(headEnd, StringComparer.Ordinal))
+            return RepositoryResult<JobSummary>.Invalid(
+                $"The head is at the \"top\", \"left\" or \"right\" of the picture, not \"{request.HeadEnd}\".");
 
         var now = timeProvider.GetUtcNow();
         var packet = new FrozenModelRequest(
@@ -540,7 +548,7 @@ public sealed class ModelGenerationService(
                 stage,
                 readiness.Suffixes?.GetValueOrDefault(stage) ?? ".glb"))],
             readiness.CompilerVersion, now, size, request.SizeAdjust ?? 1.0, glassColour,
-            GenerateWork, Detail: detail,
+            GenerateWork, Detail: detail, HeadEnd: headEnd,
             // The hero's delivery encoding, frozen with the rest: a lossless
             // 4096 hero is sixty megabytes, and the masters stay on disk.
             ColourSize: hero ? HeroColourSize : 0, DataSize: hero ? HeroDataSize : 0,
@@ -1255,6 +1263,7 @@ public sealed class ModelGenerationService(
             sizeAdjust = packet.SizeAdjust,
             glassColour = packet.GlassColour,
             detail = packet.Work == GenerateWork ? packet.Detail : null,
+            headEnd = packet.Work == GenerateWork && packet.Detail == HeroDetail ? packet.HeadEnd : null,
             triangleBudget = packet.TriangleBudget == 0 ? (int?)null : packet.TriangleBudget,
             topologyChanged = preparing ? topologyChanged : (bool?)null,
             rerunAfterIncompleteAnswer = rerunAfterPartial,
@@ -1341,6 +1350,7 @@ public sealed class ModelGenerationService(
             ["resolution"] = PaintResolution,
             ["atlas"] = HeroAtlas,
             ["head-from"] = HeadFrom,
+            ["head-end"] = packet.HeadEnd,
             ["feather"] = HeadFeather,
         },
         GlassStage => new Dictionary<string, string> { ["colour"] = packet.GlassColour ?? "" },
@@ -1531,6 +1541,39 @@ public sealed class ModelGenerationService(
         job.LastHeartbeatAt = timeProvider.GetUtcNow();
         if (state == JobState.Completed) job.CompletedAt = job.LastHeartbeatAt;
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Queue a failed or cancelled model job again, as itself.
+    ///
+    /// The same job and the same frozen packet, because nothing about what was
+    /// asked for has changed -- what changed is usually the workstation: the
+    /// painter refuses to launch without 21 GiB of GPU free, and the first
+    /// cat through this route died at its paint while another program held
+    /// seven of them. The steps already on disk are adopted when it runs, so a
+    /// retry after a failed paint pays for the paint and nothing before it.
+    /// </summary>
+    public async Task<RepositoryResult<JobSummary>> RetryAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        var job = await db.Jobs.SingleOrDefaultAsync(
+            candidate => candidate.Id == jobId && candidate.WorkType == ModelWorkType, cancellationToken);
+        if (job is null) return RepositoryResult<JobSummary>.NotFound();
+        if (job.State is not (nameof(JobState.Failed) or nameof(JobState.Cancelled)))
+            return RepositoryResult<JobSummary>.Conflict("Only a failed or cancelled model job can be retried.");
+        if (string.IsNullOrWhiteSpace(job.RequestJson))
+            return RepositoryResult<JobSummary>.Conflict("This model job no longer has its frozen request packet.");
+
+        var now = timeProvider.GetUtcNow();
+        job.State = JobState.Queued.ToString();
+        job.Progress = 0;
+        job.Phase = $"Queued again after: {job.Error}";
+        job.Error = null;
+        job.CompletedAt = null;
+        job.AcknowledgedAt = null;
+        job.Attempt += 1;
+        job.LastHeartbeatAt = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<JobSummary>.Ok(Map(job));
     }
 
     private async Task<RepositoryResult<JobSummary>> FailAsync(

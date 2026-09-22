@@ -43,6 +43,7 @@ export default function ModelFromReference({ asset, onQueued }: {
   // Set dressing unless asked: most generated things are seen from a distance,
   // and a hero costs several minutes more of GPU.
   const [detail, setDetail] = useState('set')
+  const [headEnd, setHeadEnd] = useState('top')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -62,7 +63,8 @@ export default function ModelFromReference({ asset, onQueued }: {
     setBusy(true); setError(undefined)
     try {
       const job = await studioApi.generateModel(
-        asset.id, asset.displayName, size, glass === '' ? undefined : glass, detail)
+        asset.id, asset.displayName, size, glass === '' ? undefined : glass, detail,
+        detail === 'hero' ? headEnd : undefined)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -105,6 +107,18 @@ export default function ModelFromReference({ asset, onQueued }: {
             </select>
             <span className="model-note">
               {readiness.details.find(choice => choice.detail === detail)?.cost}
+            </span>
+          </label>}
+          {readiness.canRun && detail === 'hero' && <label className="model-size">
+            <span>Where is the head in the picture?</span>
+            <select value={headEnd} onChange={event => setHeadEnd(event.target.value)}
+              data-testid="model-head-end">
+              <option value="top">At the top: a standing figure</option>
+              <option value="left">At the left: an animal seen from the side</option>
+              <option value="right">At the right: an animal seen from the side</option>
+            </select>
+            <span className="model-note">
+              The head is painted a second time on its own; this is where it is cut and cropped.
             </span>
           </label>}
           {readiness.canRun && readiness.colours && <label className="model-size">

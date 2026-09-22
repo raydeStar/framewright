@@ -547,7 +547,7 @@ public sealed class ModelGenerationApiTests
                 .Select(choice => choice.GetProperty("detail").GetString()));
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
-            new { sourceAssetId = reference.Id, name = "Hero", size = "head", detail = "hero" });
+            new { sourceAssetId = reference.Id, name = "Hero", size = "head", detail = "hero", headEnd = "left" });
         Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
@@ -571,6 +571,8 @@ public sealed class ModelGenerationApiTests
         Assert.Equal("4096", compiler.Options["texture"]["atlas"]);
         Assert.Equal("4096", compiler.Options["paint-head"]["atlas"]);
         Assert.Equal("0.78", compiler.Options["paint-head"]["head-from"]);
+        // An animal seen from the side: the head pass cuts and crops at that end.
+        Assert.Equal("left", compiler.Options["paint-head"]["head-end"]);
         // The head pass crops the same picture itself; nobody hands it a crop.
         Assert.Equal(compiler.Options["texture"]["reference"], compiler.Options["paint-head"]["reference"]);
         Assert.Equal("4096", compiler.Options["compress-textures"]["colour-size"]);
@@ -634,6 +636,47 @@ public sealed class ModelGenerationApiTests
         var nonsense = await client.PostAsJsonAsync("/api/models/generation",
             new { sourceAssetId = reference.Id, name = "Hero", size = "head", detail = "cinematic" });
         Assert.Equal(HttpStatusCode.BadRequest, nonsense.StatusCode);
+
+        var sideways = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Hero", size = "head", headEnd = "bottom" });
+        Assert.Equal(HttpStatusCode.BadRequest, sideways.StatusCode);
+    }
+
+    [Fact]
+    public async Task AFailedModelJobIsRetriedAsItselfAndPaysOnlyForTheStepThatFailed()
+    {
+        var compiler = new ControlledCompiler { FailingStage = "texture" };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "retry-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Retried", size = "knee" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var jobId = job.RootElement.GetProperty("id").GetGuid();
+        var failed = await RunAsync(factory, jobId);
+        Assert.Equal(JobState.Failed, failed.State);
+        var before = compiler.Calls.Count;
+
+        // Retry is the same route the dock's button calls for every job, and
+        // it used to answer a model job with 409: no manifest, no adapter.
+        var retried = await client.PostAsync($"/api/jobs/{jobId}/retry", null);
+        Assert.Equal(HttpStatusCode.Accepted, retried.StatusCode);
+        using var again = await retried.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        Assert.Equal(jobId, again.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(2, again.RootElement.GetProperty("attempt").GetInt32());
+
+        // The workstation recovered; the same job runs again and finishes.
+        compiler.FailingStage = null;
+        var finished = await RunAsync(factory, jobId);
+        Assert.Equal(JobState.Completed, finished.State);
+        // Only the step that failed and the ones after it were paid for again.
+        Assert.Equal(["texture", "browser-payload"],
+            compiler.Calls.Skip(before).Select(call => call.Stage));
+
+        // A job that finished is not something to retry.
+        var refused = await client.PostAsync($"/api/jobs/{jobId}/retry", null);
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
     }
 
     [Fact]

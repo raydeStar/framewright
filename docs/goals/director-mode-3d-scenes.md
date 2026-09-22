@@ -1731,6 +1731,17 @@ Playwright, full suite after the GPU work: 123 passed, 6 skipped, 1 failed -- th
 Second hero through the studio with the skin fix (job 96a0fc63, 17 min 31 s including a slower paint):
   delivered 4.85 MB; skin under the head mask measured at roughness 0.555 and metallic 0.005 on the delivered
   file, against 0.30 and 0.11 before. The nose-bridge streak is a soft sheen. Awaiting the artist's next look.
+First quadruped (2026-09-22): a tabby cat from a side-view reference another agent had already tried in the
+  compiler by hand (48k triangles, 6 views at 512, a separately generated head fitted on; the body a smear
+  and the join visible). Through the studio as a hero with the head at the picture's left -- a new answer on
+  the request, because a height cut on a cat paints its ears and the tip of its tail -- in 21 minutes: 72,000
+  triangles, 4096 sheet, 6.5 MB; head band 39.5% of faces (head, chest and front legs, by construction).
+  Body, stripes, bib, paws and tail read as the reference. Known defect: the generator modelled the whiskers
+  and brow tufts as thin geometry and they survive every remesh grid tried (0.85, 1.7 and 2.7 mm voxels);
+  they need a thin-sheet cull, not a coarser grid. Two things found on the way: the painter refused to launch
+  while another program held 7 GB of the GPU and the studio reported only "exited with code 1 without saying
+  why" (the compiler now forwards a dying stage's last stderr line); and the dock's Retry answered a model
+  job with 409 (model jobs are now retried as themselves, adopting the steps already on disk).
 Checks NOT RUN at the time of this record: none required.
 Known limits: the head band is a height fraction, right for a standing humanoid and wrong for a crouching
   one; a hero's reference crop keeps whatever the silhouette's top 22% holds (here hood and shoulders, which

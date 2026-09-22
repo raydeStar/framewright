@@ -294,10 +294,21 @@ app.MapGet("/api/jobs/{jobId:guid}", async Task<IResult> (
 app.MapPost("/api/jobs/{jobId:guid}/retry", async Task<IResult> (
     Guid jobId, GenerationOrchestrator orchestrator, AssetImageGenerationService assetGeneration,
     AudioGenerationJobService audioGeneration, SceneRenderService sceneRenders,
+    ModelGenerationService models,
     StudioRepository repository, StudioDbContext db, GenerationJobSignal queue,
     CancellationToken cancellationToken) =>
 {
     var workType = await db.Jobs.Where(x => x.Id == jobId).Select(x => x.WorkType).SingleOrDefaultAsync(cancellationToken);
+    // A model job is retried as itself: the same frozen packet, the steps
+    // already on disk adopted. The generic path below wants a manifest a
+    // model job never had, and answered the dock's Retry button with 409.
+    if (string.Equals(workType, ModelGenerationService.ModelWorkType, StringComparison.Ordinal))
+    {
+        var again = await models.RetryAsync(jobId, cancellationToken);
+        if (again.Kind != RepositoryResultKind.Ok || again.Value is null) return ToHttpResult(again);
+        await queue.QueueAsync(again.Value.Id, cancellationToken);
+        return Results.Accepted($"/api/jobs/{again.Value.Id}", again.Value);
+    }
     if (string.Equals(workType, SceneRenderService.WorkType, StringComparison.Ordinal))
     {
         var retried = await sceneRenders.RetryAsync(jobId, cancellationToken);

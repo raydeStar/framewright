@@ -296,9 +296,14 @@ public sealed record RigPoseSummary(
 /// face about ninety pixels of each view and nothing after the diffusion can
 /// put back what it never saw. Unnamed means set.
 /// </param>
+/// <param name="HeadEnd">
+/// Where the head is in the picture, for a hero: "top" for a standing figure,
+/// "left" or "right" for an animal seen from the side. The head pass cuts the
+/// model and crops the picture at that end. Unnamed means top.
+/// </param>
 public sealed record CreateModelGenerationRequest(
     Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null,
-    string? GlassColour = null, string? Detail = null);
+    string? GlassColour = null, string? Detail = null, string? HeadEnd = null);
 
 /// <summary>
 /// Whether model generation can run on this workstation, and whether it is
