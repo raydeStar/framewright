@@ -26,7 +26,7 @@ COPY src/ ./src/
 COPY workflows/ ./workflows/
 COPY tools/voice/ ./tools/voice/
 COPY tools/yue2/ ./tools/yue2/
-COPY scripts/setup-voice-worker.ps1 scripts/start-voice-worker.ps1 scripts/start-installed.ps1 ./scripts/
+COPY scripts/setup-voice-worker.ps1 scripts/start-voice-worker.ps1 scripts/start-installed.ps1 scripts/restore-backup.ps1 ./scripts/
 COPY scripts/setup-yue2-worker.ps1 scripts/start-yue2-worker.ps1 scripts/stop-yue2-worker.ps1 ./scripts/
 COPY --from=web /source/src/StoryboardStudio.Api/wwwroot/ ./src/StoryboardStudio.Api/wwwroot/
 RUN dotnet publish src/StoryboardStudio.Api/StoryboardStudio.Api.csproj --configuration Release --no-restore --output /out \
