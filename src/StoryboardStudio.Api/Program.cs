@@ -526,6 +526,8 @@ app.MapGet("/api/maintenance/diagnostics", async Task<IResult> (
 // return domain failures as stable envelopes and never dispatch a provider.
 app.MapGet("/api/webmcp/context", async (Guid? selectedShotId, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.ContextAsync(selectedShotId, cancellationToken)));
+app.MapGet("/api/webmcp/scene-assets", async (string? search, int? offset, int? limit, WebMcpStoryboardService service, CancellationToken cancellationToken)
+    => Results.Ok(await service.SearchSceneAssetsAsync(search, offset ?? 0, limit ?? 10, cancellationToken)));
 app.MapGet("/api/scenes", async (SceneService scenes, CancellationToken cancellationToken)
     => Results.Ok(await scenes.ListAsync(cancellationToken)));
 app.MapPost("/api/scenes", async Task<IResult> (CreateSceneRequest request, SceneService scenes, CancellationToken cancellationToken)

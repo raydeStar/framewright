@@ -65,6 +65,96 @@ public sealed class WebMcpStoryboardService(
         return Success("shots_listed", $"Loaded {shots.Count} of {total} shots.", new { shots, offset, limit, total });
     }
 
+    /// <summary>
+    /// A bounded search over reusable model revisions in the active project.
+    ///
+    /// Scene blockout proposals accept an exact model asset id, so the agent
+    /// needs a read-only way to discover those ids instead of guessing them or
+    /// proposing new generation before checking what the artist already owns.
+    /// Archived and superseded revisions stay out of the result, while their
+    /// immutable rows and bytes remain available through the ordinary library.
+    /// </summary>
+    public async Task<WebMcpEnvelope> SearchSceneAssetsAsync(
+        string? search, int offset, int limit, CancellationToken cancellationToken)
+    {
+        search = (search ?? "").Trim();
+        if (search.Length > 120)
+            return Failure("invalid_asset_search", "Scene asset search text must be 120 characters or fewer.");
+
+        offset = Math.Max(0, offset);
+        limit = Math.Clamp(limit, 1, 20);
+        var query = db.Assets.AsNoTracking()
+            .Where(x => x.Kind == "Model" && !x.IsArchived
+                && (x.RevisionFamilyId == null || x.IsCurrentRevision));
+        if (search.Length > 0)
+        {
+            var pattern = $"%{EscapeLike(search)}%";
+            query = query.Where(x =>
+                EF.Functions.Like(x.DisplayName, pattern, "\\")
+                || EF.Functions.Like(x.OriginalFileName, pattern, "\\")
+                || EF.Functions.Like(x.TagsJson, pattern, "\\")
+                || EF.Functions.Like(x.Notes, pattern, "\\")
+                || EF.Functions.Like(x.Source, pattern, "\\"));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var page = await query.OrderBy(x => x.DisplayName).ThenBy(x => x.OriginalFileName).ThenBy(x => x.Id)
+            .Skip(offset).Take(limit)
+            .Select(x => new
+            {
+                x.Id, x.DisplayName, x.OriginalFileName, x.ContentHash, x.TagsJson, x.Notes, x.Source,
+                x.RevisionFamilyId, x.RevisionNumber, x.IsCurrentRevision,
+                x.PreparationAcceptedAt, x.PreparationAcceptanceNote, x.PreparationTopologyChanged,
+                x.UpdatedAt,
+            })
+            .ToArrayAsync(cancellationToken);
+        var ids = page.Select(x => x.Id).ToArray();
+        var sceneUsage = await db.SceneInstances.AsNoTracking()
+            .Where(x => x.AssetId != null && ids.Contains(x.AssetId.Value))
+            .GroupBy(x => x.AssetId!.Value)
+            .Select(group => new { AssetId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.AssetId, x => x.Count, cancellationToken);
+
+        var assets = page.Select(x => new
+        {
+            assetId = x.Id,
+            name = string.IsNullOrWhiteSpace(x.DisplayName)
+                ? Path.GetFileNameWithoutExtension(x.OriginalFileName)
+                : x.DisplayName,
+            kind = "Model",
+            revisionFamilyId = x.RevisionFamilyId,
+            revisionNumber = x.RevisionNumber ?? 1,
+            currentRevision = x.RevisionFamilyId is null || x.IsCurrentRevision,
+            x.ContentHash,
+            tags = Parse<string[]>(x.TagsJson) ?? [],
+            description = BoundedText(x.Notes, 300),
+            source = BoundedText(x.Source, 80),
+            preparation = new
+            {
+                decision = x.PreparationAcceptedAt is not null
+                    ? "Accepted"
+                    : string.IsNullOrWhiteSpace(x.PreparationAcceptanceNote) ? "NotRecorded" : "Refused",
+                acceptedAt = x.PreparationAcceptedAt,
+                note = BoundedText(x.PreparationAcceptanceNote, 300),
+                topologyChanged = x.PreparationTopologyChanged,
+            },
+            sceneUsageCount = sceneUsage.GetValueOrDefault(x.Id),
+            canMatchSceneBlockout = true,
+            x.UpdatedAt,
+        }).ToArray();
+
+        return Success("scene_assets_listed", $"Loaded {assets.Length} of {total} reusable scene models.", new
+        {
+            assets,
+            search,
+            offset,
+            limit,
+            total,
+            generationAuthorized = false,
+            usage = "Pass one returned assetId as matchAssetId in a scene blockout proposal. Searching does not place, import, or generate anything.",
+        });
+    }
+
     public async Task<WebMcpEnvelope> ShotDetailsAsync(Guid shotId, CancellationToken cancellationToken)
     {
         var shot = await db.Shots.AsNoTracking().SingleOrDefaultAsync(x => x.Id == shotId, cancellationToken);
@@ -446,6 +536,13 @@ public sealed class WebMcpStoryboardService(
     }
 
     private static string NormalizeMedia(string value) => value.Trim().ToLowerInvariant() switch { "image" => "Image", "video" => "Video", _ => value.Trim() };
+    private static string EscapeLike(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal);
+    private static string BoundedText(string? value, int limit)
+    {
+        var text = (value ?? "").Trim();
+        return text.Length <= limit ? text : text[..limit];
+    }
     private static T? Parse<T>(string json) { try { return JsonSerializer.Deserialize<T>(json, JsonOptions); } catch (JsonException) { return default; } }
     private static object ToSummary(ShotRevisionProposalRecord x) => new { x.Id, x.ShotId, x.BaseVersion, x.CreativeDirection, x.Rationale, x.DesiredMediaType, authorityIds = Parse<string[]>(x.AuthorityIdsJson) ?? [], noteIds = Parse<Guid[]>(x.NoteIdsJson) ?? [], preservedConstraints = Parse<string[]>(x.PreservedConstraintsJson) ?? [], x.State, x.CreatedAt, x.UpdatedAt, x.DecidedAt, x.AppliedAt };
     private static WebMcpEnvelope Success(string code, string message, object? data, bool retryable = false) => new(true, "success", code, message, data, retryable);

@@ -35,7 +35,7 @@ const shotIdSchema = {
 
 export const FRAMEWRIGHT_WEBMCP_TOOL_NAMES = [
   'get_storyboard_context', 'list_storyboard_shots', 'get_shot_details',
-  'inspect_shot_continuity', 'get_director_context', 'observe_current_frame',
+  'inspect_shot_continuity', 'get_director_context', 'search_scene_assets', 'observe_current_frame',
   'propose_shot_revision', 'propose_scene_edit', 'propose_scene_blockout', 'get_generation_status',
 ] as const
 
@@ -118,6 +118,19 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
           ? studioApi.webMcpSceneContext(view.sceneId, view.instanceId, view.referenceAssetId, view.directorMode ?? false, view.time, signal)
           : studioApi.webMcpDirectorContext(view, signal)
       }),
+    },
+    {
+      name: 'search_scene_assets', title: 'Search reusable scene assets',
+      description: 'Search current, non-archived model revisions in the active project before proposing generation. Returned asset ids may be used as matchAssetId in a scene blockout proposal. This places and generates nothing.',
+      inputSchema: {
+        type: 'object', properties: {
+          search: { type: 'string', maxLength: 120 },
+          offset: { type: 'integer', minimum: 0, maximum: 10000 },
+          limit: { type: 'integer', minimum: 1, maximum: 20 },
+        }, required: [], additionalProperties: false,
+      }, annotations: read,
+      execute: run('search_scene_assets', (input, signal) => studioApi.webMcpSceneAssets(
+        String(input.search ?? ''), Number(input.offset ?? 0), Number(input.limit ?? 10), signal)),
     },
     {
       name: 'observe_current_frame', title: 'Observe the current frame',

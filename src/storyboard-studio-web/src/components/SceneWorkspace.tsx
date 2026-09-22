@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Box, Check, Copy, Image, LoaderCircle, Maximize2, MessageCirclePlus, Minimize2, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
 import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
@@ -243,7 +243,7 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   // Dirty state is part of the contract: the service cannot validate a draft
   // camera or transform until the artist saves it, so browser tools refuse to
   // describe the older persisted scene in its place.
-  useEffect(() => {
+  useLayoutEffect(() => {
     onDirectorView?.(scene ? { kind: 'scene', sceneId: scene.id, instanceId: selectedId, referenceAssetId: referenceId, directorMode, dirty, time: playhead } : undefined)
     return () => onDirectorView?.(undefined)
   }, [onDirectorView, scene, selectedId, referenceId, directorMode, dirty, playhead])

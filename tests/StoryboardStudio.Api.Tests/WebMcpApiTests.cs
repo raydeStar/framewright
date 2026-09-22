@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -80,6 +81,71 @@ public sealed class WebMcpApiTests
         (await client.PostAsync($"/api/projects/{projectId}/activate", null)).EnsureSuccessStatusCode();
         var crossProject = await client.GetFromJsonAsync<JsonDocument>($"/api/webmcp/shots/{shot.Id}");
         Assert.Equal("shot_not_found", crossProject!.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task SceneAssetSearchFindsOnlyReusableCurrentModelsInTheActiveProject()
+    {
+        using var factory = new StudioApiFactory();
+        using var client = factory.CreateClient();
+        var originalId = await ImportModelAsync(client, ModelFixtures.AsymmetricBlock(), "workshop-lantern-source.glb");
+        var derivativeId = await ImportModelAsync(client, ModelFixtures.AsymmetricPost(), "workshop-lantern-prepared.glb");
+        var archivedId = await ImportModelAsync(client, ModelFixtures.DensePropRuntime(), "workshop-table.glb");
+
+        var metadata = await client.PutAsJsonAsync($"/api/assets/{originalId}", new
+        {
+            displayName = "Workshop lantern",
+            collectionId = (Guid?)null,
+            tags = (string[])["warm-light", "hero-prop"],
+            notes = "Reusable practical light for the workshop set.",
+        });
+        metadata.EnsureSuccessStatusCode();
+        var revision = await client.PostAsJsonAsync($"/api/assets/{originalId}/revisions", new
+        {
+            assetId = derivativeId,
+            prompt = "Prepared current revision.",
+            engine = "Test compiler",
+        });
+        revision.EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/assets/{archivedId}/archive", null)).EnsureSuccessStatusCode();
+
+        using var result = await client.GetFromJsonAsync<JsonDocument>(
+            "/api/webmcp/scene-assets?search=warm-light&offset=0&limit=1") ?? throw new InvalidOperationException();
+        Assert.True(result.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("scene_assets_listed", result.RootElement.GetProperty("code").GetString());
+        var data = result.RootElement.GetProperty("data");
+        Assert.Equal(1, data.GetProperty("total").GetInt32());
+        Assert.Equal(1, data.GetProperty("limit").GetInt32());
+        Assert.False(data.GetProperty("generationAuthorized").GetBoolean());
+        var model = Assert.Single(data.GetProperty("assets").EnumerateArray());
+        Assert.Equal(derivativeId, model.GetProperty("assetId").GetGuid());
+        Assert.NotEqual(originalId, model.GetProperty("assetId").GetGuid());
+        Assert.Equal("Workshop lantern", model.GetProperty("name").GetString());
+        Assert.Equal(2, model.GetProperty("revisionNumber").GetInt32());
+        Assert.True(model.GetProperty("currentRevision").GetBoolean());
+        Assert.True(model.GetProperty("canMatchSceneBlockout").GetBoolean());
+        Assert.Contains("warm-light", model.GetProperty("tags").EnumerateArray().Select(x => x.GetString()));
+
+        using var bounded = await client.GetFromJsonAsync<JsonDocument>(
+            $"/api/webmcp/scene-assets?search={new string('x', 121)}") ?? throw new InvalidOperationException();
+        Assert.Equal("invalid_asset_search", bounded.RootElement.GetProperty("code").GetString());
+
+        using var literalWildcard = await client.GetFromJsonAsync<JsonDocument>(
+            "/api/webmcp/scene-assets?search=%25") ?? throw new InvalidOperationException();
+        Assert.Equal(0, literalWildcard.RootElement.GetProperty("data").GetProperty("total").GetInt32());
+
+        var project = await client.PostAsJsonAsync("/api/projects", new
+        {
+            name = "Other asset library", production = "WebMCP", sequenceCode = "ISO-03",
+            sequenceName = "Empty sequence", framesPerSecond = 24, aspectRatio = "2.40:1",
+            deliveryWidth = 2304, deliveryHeight = 960,
+        });
+        project.EnsureSuccessStatusCode();
+        using var projectJson = await project.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        (await client.PostAsync($"/api/projects/{projectJson.RootElement.GetProperty("id").GetGuid()}/activate", null)).EnsureSuccessStatusCode();
+        using var isolated = await client.GetFromJsonAsync<JsonDocument>(
+            "/api/webmcp/scene-assets?search=warm-light") ?? throw new InvalidOperationException();
+        Assert.Equal(0, isolated.RootElement.GetProperty("data").GetProperty("total").GetInt32());
     }
 
     [Fact]
@@ -370,6 +436,20 @@ public sealed class WebMcpApiTests
     {
         using var snapshot = await client.GetFromJsonAsync<JsonDocument>("/api/studio") ?? throw new InvalidOperationException();
         return snapshot.RootElement.GetProperty("jobs").GetArrayLength();
+    }
+
+    private static async Task<Guid> ImportModelAsync(HttpClient client, byte[] bytes, string fileName)
+    {
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new MediaTypeHeaderValue("model/gltf-binary");
+        content.Add(file, "file", fileName);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/assets/models") { Content = content };
+        request.Headers.Add("X-Storyboard-Studio", "1");
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        using var asset = await response.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        return asset.RootElement.GetProperty("id").GetGuid();
     }
 
     private static async Task<JsonDocument> PostEnvelopeAsync(HttpClient client, string url, object body)
