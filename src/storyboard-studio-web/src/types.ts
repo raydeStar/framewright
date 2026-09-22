@@ -114,8 +114,8 @@ export interface ShotRevisionProposalSummary { id: string; shotId: string; baseV
 export interface ShotRevisionInstructions { proposal: ShotRevisionProposalSummary; instructions: { shotId: string; code: string; baseVersion: number; direction: string; rationale: string; desiredMediaType: 'Image' | 'Video'; preservedConstraints: string[]; targetedNotes: { id: string; x: number; y: number; body: string; authorityId?: string; authorityVersion?: number }[]; generationAuthorized: boolean; note: string } }
 /** What the artist currently has on screen in the Shot workspace. */
 export interface DirectorShotView { kind: 'shot'; shotId: string; displayedVersion: number; archived: boolean; directorMode?: boolean; tool?: string }
-/** What the artist has open in the Scene workspace: which object is selected, and which reference is being read. */
-export interface DirectorSceneView { kind: 'scene'; sceneId: string; instanceId?: string; referenceAssetId?: string; directorMode?: boolean }
+/** What the artist has open in the Scene workspace: which object is selected, which reference is being read, and whether the view has a saved service-side counterpart. */
+export interface DirectorSceneView { kind: 'scene'; sceneId: string; instanceId?: string; referenceAssetId?: string; directorMode?: boolean; dirty: boolean; time: number }
 export type DirectorViewQuery = DirectorShotView | DirectorSceneView
 /** Where a scene's inspection camera sits. Orbit values, so a saved view reopens exactly. */
 export interface SceneCameraSummary { yaw: number; pitch: number; distance: number; target: number[]; fieldOfView: number }

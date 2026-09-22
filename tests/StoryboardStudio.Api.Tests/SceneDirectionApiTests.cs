@@ -21,19 +21,31 @@ public sealed class SceneDirectionApiTests
 
         // Read the context for the left prop only.
         using var context = await client.GetFromJsonAsync<JsonDocument>(
-            $"/api/webmcp/director/scene-context?sceneId={sceneId}&instanceId={leftId}&directorMode=true") ?? throw new InvalidOperationException();
+            $"/api/webmcp/director/scene-context?sceneId={sceneId}&instanceId={leftId}&directorMode=true&time=1.25") ?? throw new InvalidOperationException();
         var data = context.RootElement.GetProperty("data");
         Assert.Equal(leftId, data.GetProperty("selectedObject").GetProperty("instanceId").GetGuid());
         Assert.Equal("Left prop", data.GetProperty("selectedObject").GetProperty("name").GetString());
         Assert.Equal(2, data.GetProperty("objects").GetArrayLength());
+        Assert.Equal(1.25, data.GetProperty("view").GetProperty("time").GetDouble());
         Assert.Contains("propose_scene_edit", data.GetProperty("availableActions").EnumerateArray().Select(x => x.GetString()));
         var token = data.GetProperty("stateToken").GetString()!;
+
+        var wrongTime = await PostEnvelopeAsync(client, "/api/webmcp/scene-proposals", new
+        {
+            sceneId, instanceId = leftId, expectedSceneVersion = 2, observedStateToken = token,
+            direction = "Turn the left prop to face the gate.", rationale = "It reads as facing away from camera.",
+            position = (double[]?)null, rotation = (double[])[0d, 1.2, 0d], scale = (double[]?)null,
+            observedSceneTime = 2d,
+            idempotencyKey = Guid.NewGuid().ToString("N"),
+        });
+        Assert.Equal("stale_context", wrongTime.RootElement.GetProperty("code").GetString());
 
         var proposal = await PostEnvelopeAsync(client, "/api/webmcp/scene-proposals", new
         {
             sceneId, instanceId = leftId, expectedSceneVersion = 2, observedStateToken = token,
             direction = "Turn the left prop to face the gate.", rationale = "It reads as facing away from camera.",
             position = (double[]?)null, rotation = (double[])[0d, 1.2, 0d], scale = (double[]?)null,
+            observedSceneTime = 1.25,
             idempotencyKey = Guid.NewGuid().ToString("N"),
         });
         Assert.Equal("proposal_created", proposal.RootElement.GetProperty("code").GetString());

@@ -1,6 +1,6 @@
 # Sol handoff: finish the Director Mode workflow
 
-Prepared 2026-09-21 and refreshed after the first public-main MVP increments. Public baseline before the current checkpoint: `c21027b129da6799477993146240d8fc548e9e39`. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
+Prepared 2026-09-21 and refreshed after the first public-main MVP increments. Public baseline before the current checkpoint: `ecffc0cc1740d00b33aa89850f16ff85edc9bfb7`. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
 
 > **Repository destination update — 2026-09-21:** `github.com/raydeStar/framewright` is now the maintained Framewright repository and the former private mirror is deprecated. Publish authorized Framewright work to public `main`. Geometry, retopology, UV, material, texture, rigging, deformation-gate, payload, and compiler-receipt changes belong in `github.com/raydeStar/reference-asset-compiler`; Framewright consumes that versioned contract and owns orchestration, import, scene use, and review.
 
@@ -44,21 +44,21 @@ The historical pre-public QC reviewed 46 commits and repaired data-integrity and
 - Local evidence: **277 backend tests passed**, **130 browser tests passed / six existing tablet exclusions**, frontend checks/build and supporting script tests passed. No dependency vulnerabilities were reported at that checkpoint. Three new data-integrity regressions were shown to fail before their repairs.
 - Browser coverage used desktop Chromium and emulated iPad Pro 11 WebKit. Coding-agent screenshot inspection is not human artistic acceptance or a physical stylus check.
 - The full verification script passed its pre-browser checks, then exposed occupied-port/locked-binary startup problems. After the launcher repair, the complete browser suite passed separately. Do not describe that as one final successful `verify.ps1` invocation.
-- No new live generation, actual-host commissioning, or packaged release acceptance occurred during QC. Earlier milestone records contain separate live worker evidence. The Three.js bundle still has a Vite size warning.
+- No new live generation or packaged release acceptance occurred during QC. Actual-host commissioning happened afterward and is recorded in the canonical goal. Earlier milestone records contain separate live worker evidence. The Three.js bundle still has a Vite size warning.
 
 The implemented MVP increments add precise placeholder replacement, full-view Scene Director Mode, and a real browser-rendered scene still that freezes saved scene state, a distinct shot camera, timing, delivery settings, and a content hash into the ordinary candidate-review path. Working packages now round-trip the complete editable project graph into a separate project with fresh identities and verified content. Framewright also consumes skeleton profiles owned by the compiler checkout rather than carrying a product fallback. The complete local gate passed with 283 backend tests and 134 browser journeys plus six intentional tablet exclusions; no provider or production queue was contacted.
 
 Ignored evidence, when still present locally: `artifacts/qc/regressions-before.log`, `regressions-after.log`, `verify-final-5182.log`, `browser-final.log`, `{model,scene}-{desktop,tablet}.png`, and `src/storyboard-studio-web/playwright-report/index.html`. Do not expect these files in a fresh clone or commit private media to make them portable.
 
-The last public baseline passed [hosted run 35670211224](https://github.com/raydeStar/framewright/actions/runs/35670211224). Require a fresh green public run for the current pushed checkpoint as well.
+The last public baseline passed [hosted run 35679438121](https://github.com/raydeStar/framewright/actions/runs/35679438121). Require a fresh green public run for the current pushed checkpoint as well.
 
 ## Where to resume
 
 Use the canonical goal's dependency table and acceptance records to choose each increment. The following is reading and execution guidance, not a replacement roadmap.
 
-**First, verify the host path central to the desired experience.** M02, M03, M10, and M11 have contract evidence, not actual-host acceptance. Early in continuation, establish the supported browser/agent connection and record the tested browser, host, API version, discovery result, matching visual observation, proposal round trip, stale-context behavior, and disconnect/reconnect behavior. Use current primary documentation for unfamiliar host APIs; do not infer support from an API shim or a passing synthetic test. If the host is unavailable, name that blocker and continue only independent or explicitly permitted fixture work.
+**The primary host path is commissioned.** Codex's in-app browser discovered all ten page-defined WebMCP tools against the running artist app and the isolated current build. M02 and M03 are `VERIFIED`; M10 is `VERIFIED` after a live scene proposal/apply/save/reopen round trip. The commissioning found and repaired a stale-view defect: browser tools now refuse unsaved scene drafts, include the visible playhead, and bind scene proposals to that time. M11 has actual-host evidence for proposal, build, correction, save, and reopen, but remains `CONTRACT_VERIFIED` until the artist accepts a composition. Keep the existing disconnect/manual-path regressions green and re-commission if the host API or registration contract changes.
 
-The browser registry in `src/storyboard-studio-web/src/webmcp.ts` currently exposes ten tools: `get_storyboard_context`, `list_storyboard_shots`, `get_shot_details`, `inspect_shot_continuity`, `get_director_context`, `observe_current_frame`, `propose_shot_revision`, `propose_scene_edit`, `propose_scene_blockout`, and `get_generation_status`. This list is a source snapshot, not a claim that the current host discovers them. Library search, scene/timing context, or other assisted conveniences must be inspected and added only where the connected goal requires them, through narrow shared-service contracts. Do not invent capabilities in prompts.
+The browser registry in `src/storyboard-studio-web/src/webmcp.ts` exposes ten tools: `get_storyboard_context`, `list_storyboard_shots`, `get_shot_details`, `inspect_shot_continuity`, `get_director_context`, `observe_current_frame`, `propose_shot_revision`, `propose_scene_edit`, `propose_scene_blockout`, and `get_generation_status`. Codex's in-app browser discovered this exact set during commissioning. Library search or other assisted conveniences still need a goal-backed narrow shared-service contract. Do not invent capabilities in prompts.
 
 **Close M09 with the right evidence.** The preparation route has run live; the prepared sword derivative still awaits the artist's recorded source/derivative verdict. Locate its existing fixed-view evidence and present a concrete comparison. A later favorable texture verdict on a different hero asset does not accept that sword derivative. A mechanical pass is not a production-ready declaration. Do not regenerate merely to obtain a fresh-looking receipt.
 
@@ -85,7 +85,7 @@ For storage/trust boundaries use [ARCHITECTURE.md](ARCHITECTURE.md); for library
 
 ## Research intake
 
-The artist intends to supply research before completion. When it arrives, extract the specific decisions it resolves: supported actual host, compiler route/profile, reference and clip licensing, renderer and delivery policy, hardware/install requirements, and remaining human evidence. Link primary sources and record tested/pinned versions where applicable.
+The artist intends to supply research before completion. When it arrives, extract the specific decisions it resolves: additional-host compatibility, compiler route/profile, reference and clip licensing, renderer and delivery policy, hardware/install requirements, and remaining human evidence. Link primary sources and record tested/pinned versions where applicable.
 
 Separate recommendations from capabilities already verified here. Prefer an existing working route over introducing another framework. Put adopted decisions and their evidence in the canonical goal; do not append an incompatible second specification. If research changes scope, trust boundaries, substantial infrastructure, or acceptance, make that conflict concrete for the artist before implementation. Ordinary API details and routine fixes are Sol's work.
 

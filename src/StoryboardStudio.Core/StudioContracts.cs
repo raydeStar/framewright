@@ -95,7 +95,8 @@ public sealed record SceneProposalSummary(
 public sealed record CreateSceneProposalRequest(
     Guid SceneId, Guid InstanceId, int ExpectedSceneVersion, string ObservedStateToken,
     string Direction, string Rationale,
-    double[]? Position, double[]? Rotation, double[]? Scale, string IdempotencyKey);
+    double[]? Position, double[]? Rotation, double[]? Scale, string IdempotencyKey,
+    double ObservedSceneTime = 0);
 
 /// <summary>Where the scene's inspection camera sits. Orbit values, not a matrix, so a saved view reopens exactly.</summary>
 public sealed record SceneCameraSummary(double Yaw, double Pitch, double Distance, double[] Target, double FieldOfView);

@@ -21,6 +21,10 @@ const noReferenceSelected: WebMcpEnvelope = {
   ok: false, status: 'error', code: 'no_reference_selected',
   message: 'No reference is selected in the scene workspace. Ask the artist to choose one, then read the context again.', retryable: true,
 }
+const unsavedScene: WebMcpEnvelope = {
+  ok: false, status: 'conflict', code: 'unsaved_scene',
+  message: 'This scene has unsaved camera or object changes. Save or reopen it before asking an agent to read or propose against it.', retryable: true,
+}
 const wrongSurface: WebMcpEnvelope = {
   ok: false, status: 'error', code: 'wrong_surface',
   message: 'That tool applies to a different workspace than the one the artist has open. Read the director context again.', retryable: true,
@@ -102,15 +106,16 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
     },
     {
       name: 'get_director_context', title: 'Get director context',
-      description: 'Read the exact shot revision on screen, its open notes, constraints, authorities, and a state token that binds this context to the frame itself.',
+      description: 'Read the exact saved shot or scene state on screen and a token that binds later proposals to it. Unsaved scene drafts are refused rather than described as older state.',
       inputSchema: emptySchema, annotations: read,
       execute: run('get_director_context', (_input, signal) => {
         const view = options.getDirectorView()
         if (!view) return Promise.resolve(noShotOpen)
         // One tool, two surfaces: the packet describes whichever the artist has
         // open, so an agent never has to guess which workspace it is looking at.
+        if (view.kind === 'scene' && view.dirty) return Promise.resolve(unsavedScene)
         return view.kind === 'scene'
-          ? studioApi.webMcpSceneContext(view.sceneId, view.instanceId, view.referenceAssetId, view.directorMode ?? false, signal)
+          ? studioApi.webMcpSceneContext(view.sceneId, view.instanceId, view.referenceAssetId, view.directorMode ?? false, view.time, signal)
           : studioApi.webMcpDirectorContext(view, signal)
       }),
     },
@@ -170,7 +175,8 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
         const view = options.getDirectorView()
         if (!view) return noSceneOpen
         if (view.kind !== 'scene') return wrongSurface
-        const result = await studioApi.webMcpProposeSceneEdit({ ...input, sceneId: view.sceneId }, signal)
+        if (view.dirty) return unsavedScene
+        const result = await studioApi.webMcpProposeSceneEdit({ ...input, sceneId: view.sceneId, observedSceneTime: view.time }, signal)
         if (result.ok) options.onSceneProposal()
         return result
       }),

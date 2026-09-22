@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Check, Copy, Image, LoaderCircle, Maximize2, MessageCirclePlus, Minimize2, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
-import type { AssetSummary, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
+import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
 // three.js loads only when a scene is actually opened.
 const SceneViewport = lazy(() => import('./SceneViewport'))
@@ -27,7 +27,7 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   directorMode: boolean
   onDirectorMode: (active: boolean) => void
   /** Publishes what is open so browser tools describe this exact selection. */
-  onDirectorView?: (view: { sceneId: string; instanceId?: string; referenceAssetId?: string; directorMode?: boolean } | undefined) => void
+  onDirectorView?: (view: DirectorSceneView | undefined) => void
   onShotRendered?: (shotId: string) => void
 }) {
   const [list, setList] = useState<SceneListItem[]>([])
@@ -222,10 +222,13 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   }
 
   // Tell the shell what is open, so an agent reading context sees this object.
+  // Dirty state is part of the contract: the service cannot validate a draft
+  // camera or transform until the artist saves it, so browser tools refuse to
+  // describe the older persisted scene in its place.
   useEffect(() => {
-    onDirectorView?.(scene ? { sceneId: scene.id, instanceId: selectedId, referenceAssetId: referenceId, directorMode } : undefined)
+    onDirectorView?.(scene ? { kind: 'scene', sceneId: scene.id, instanceId: selectedId, referenceAssetId: referenceId, directorMode, dirty, time: playhead } : undefined)
     return () => onDirectorView?.(undefined)
-  }, [onDirectorView, scene, selectedId, referenceId, directorMode])
+  }, [onDirectorView, scene, selectedId, referenceId, directorMode, dirty, playhead])
 
   useEffect(() => { void loadPlans(referenceId) }, [referenceId, loadPlans])
 

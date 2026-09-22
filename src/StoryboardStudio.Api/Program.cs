@@ -556,8 +556,8 @@ app.MapPost("/api/scenes/{sceneId:guid}/annotations", async Task<IResult> (Guid 
     => ToHttpResult(await direction.AddAnnotationAsync(sceneId, request, cancellationToken)));
 app.MapPost("/api/scene-annotations/{annotationId:guid}/resolve", async Task<IResult> (Guid annotationId, SceneDirectionService direction, CancellationToken cancellationToken)
     => ToHttpResult(await direction.ResolveAnnotationAsync(annotationId, cancellationToken)));
-app.MapGet("/api/webmcp/director/scene-context", async (Guid sceneId, Guid? instanceId, Guid? referenceAssetId, bool? directorMode, SceneDirectionService direction, CancellationToken cancellationToken)
-    => Results.Ok(await direction.ContextAsync(sceneId, instanceId, referenceAssetId, directorMode ?? false, cancellationToken)));
+app.MapGet("/api/webmcp/director/scene-context", async (Guid sceneId, Guid? instanceId, Guid? referenceAssetId, bool? directorMode, double? time, SceneDirectionService direction, CancellationToken cancellationToken)
+    => Results.Ok(await direction.ContextAsync(sceneId, instanceId, referenceAssetId, directorMode ?? false, time ?? 0, cancellationToken)));
 app.MapPost("/api/webmcp/scene-proposals", async (CreateSceneProposalRequest request, SceneDirectionService direction, CancellationToken cancellationToken)
     => Results.Ok(await direction.ProposeAsync(request, cancellationToken)));
 app.MapGet("/api/scenes/{sceneId:guid}/proposals", async Task<IResult> (Guid sceneId, SceneDirectionService direction, CancellationToken cancellationToken)

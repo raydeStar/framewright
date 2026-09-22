@@ -88,8 +88,10 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
     /// revision, its transform, and its open notes.
     /// </summary>
     public async Task<WebMcpEnvelope> ContextAsync(
-        Guid sceneId, Guid? instanceId, Guid? referenceAssetId, bool directorMode, CancellationToken cancellationToken)
+        Guid sceneId, Guid? instanceId, Guid? referenceAssetId, bool directorMode, double time, CancellationToken cancellationToken)
     {
+        if (!double.IsFinite(time) || time is < 0 or > 86_400)
+            return Failure("invalid_scene_time", "Scene time must be finite and between 0 and 86400 seconds.");
         var scene = await db.Scenes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sceneId, cancellationToken);
         if (scene is null) return Failure("scene_not_found", "That scene is not part of the active project.");
 
@@ -120,6 +122,7 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
             .Where(x => pinnedAssetIds.Contains(x.Id))
             .Select(x => new { x.Id, x.DisplayName, x.RevisionNumber }).ToArrayAsync(cancellationToken);
 
+        var roundedTime = Math.Round(time, 4);
         return Success("scene_director_context",
             selected is null
                 ? $"{scene.Name} is open with {instances.Length} {(instances.Length == 1 ? "object" : "objects")} and nothing selected."
@@ -127,11 +130,12 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
             new
             {
                 contextVersion = DirectorContextVersion,
-                stateToken = ComputeStateToken(scene, selected, selectedNotes),
+                stateToken = ComputeStateToken(scene, selected, selectedNotes, roundedTime),
                 scene = new { scene.Id, scene.Name, scene.Version, instanceCount = instances.Length, scene.UpdatedAt },
                 view = new
                 {
                     directorMode,
+                    time = roundedTime,
                     camera = new
                     {
                         yaw = scene.CameraYaw, pitch = scene.CameraPitch, distance = scene.CameraDistance,
@@ -198,6 +202,8 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
         }
         if (request.Scale is not null && request.Scale.Any(value => value is < 0.001 or > 1000))
             return Failure("invalid_transform", "A proposed scale must be between 0.001 and 1000 on every axis.");
+        if (!double.IsFinite(request.ObservedSceneTime) || request.ObservedSceneTime is < 0 or > 86_400)
+            return Failure("invalid_scene_time", "Scene time must be finite and between 0 and 86400 seconds.");
 
         var existing = await db.SceneProposals.SingleOrDefaultAsync(x => x.IdempotencyKey == request.IdempotencyKey, cancellationToken);
         if (existing is not null)
@@ -219,7 +225,9 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
         // The proposal has to be anchored in a context the agent actually read,
         // for this exact object.
         var annotations = await DescribeAnnotationsAsync(scene.Id, cancellationToken);
-        var expected = ComputeStateToken(scene, instance, annotations.Where(x => x.InstanceId == instance.Id && x.State == "Open").ToArray());
+        var expected = ComputeStateToken(scene, instance,
+            annotations.Where(x => x.InstanceId == instance.Id && x.State == "Open").ToArray(),
+            Math.Round(request.ObservedSceneTime, 4));
         if (!string.Equals(expected, request.ObservedStateToken, StringComparison.OrdinalIgnoreCase))
             return new WebMcpEnvelope(false, "conflict", "stale_context",
                 "This scene changed after that director context was read. Read it again before proposing.", null, true);
@@ -340,11 +348,13 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
         catch (JsonException) { return null; }
     }
 
-    private static string ComputeStateToken(SceneRecord scene, SceneInstanceRecord? instance, IReadOnlyList<SceneAnnotationSummary> notes)
+    private static string ComputeStateToken(
+        SceneRecord scene, SceneInstanceRecord? instance, IReadOnlyList<SceneAnnotationSummary> notes, double time)
     {
         var builder = new StringBuilder()
             .Append("scene-director-v").Append(DirectorContextVersion)
             .Append('|').Append(scene.ProjectId).Append('|').Append(scene.Id).Append('|').Append(scene.Version)
+            .Append('|').Append(Fixed(time))
             .Append('|').Append(instance?.Id).Append('|').Append(instance?.AssetId)
             .Append('|').Append(Fixed(instance?.PositionX)).Append(',').Append(Fixed(instance?.PositionY)).Append(',').Append(Fixed(instance?.PositionZ))
             .Append('|').Append(Fixed(instance?.RotationX)).Append(',').Append(Fixed(instance?.RotationY)).Append(',').Append(Fixed(instance?.RotationZ))

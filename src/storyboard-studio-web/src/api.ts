@@ -188,8 +188,8 @@ export const studioApi = {
   acceptSceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/accept`, { method: 'POST' }),
   rejectSceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/reject`, { method: 'POST' }),
   applySceneProposal: (proposalId: string) => request<SceneProposalSummary>(`/api/scene-proposals/${proposalId}/apply`, { method: 'POST' }),
-  webMcpSceneContext: (sceneId: string, instanceId: string | undefined, referenceAssetId: string | undefined, directorMode: boolean, signal?: AbortSignal) =>
-    request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/scene-context?sceneId=${sceneId}${instanceId ? `&instanceId=${instanceId}` : ''}${referenceAssetId ? `&referenceAssetId=${referenceAssetId}` : ''}&directorMode=${directorMode}`, { signal }),
+  webMcpSceneContext: (sceneId: string, instanceId: string | undefined, referenceAssetId: string | undefined, directorMode: boolean, time: number, signal?: AbortSignal) =>
+    request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/scene-context?sceneId=${sceneId}${instanceId ? `&instanceId=${instanceId}` : ''}${referenceAssetId ? `&referenceAssetId=${referenceAssetId}` : ''}&directorMode=${directorMode}&time=${encodeURIComponent(String(time))}`, { signal }),
   sceneBlockouts: (referenceAssetId?: string) =>
     request<SceneBlockoutPlanSummary[]>(`/api/scene-blockouts${referenceAssetId ? `?referenceAssetId=${referenceAssetId}` : ''}`),
   sceneBlockoutForScene: (sceneId: string) => request<SceneBlockoutPlanSummary>(`/api/scenes/${sceneId}/blockout`),

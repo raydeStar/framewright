@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M04, M05, M06, M07, M08, M13 and M15 are VERIFIED; M02, M03, M10, M11, M12 and M16 are CONTRACT_VERIFIED. M14 requires M09 acceptance as well as M13; a checked-out compiler alone does not satisfy that dependency. M17 and M18 remain open, with portable-package recovery groundwork implemented for M18.
+**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M02, M03, M04, M05, M06, M07, M08, M10, M13 and M15 are VERIFIED; M11, M12 and M16 are CONTRACT_VERIFIED. M11 now lacks only recorded human composition acceptance. M14 requires M09 acceptance as well as M13; a checked-out compiler alone does not satisfy that dependency. M17 and M18 remain open, with portable-package recovery groundwork implemented for M18.
 
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
@@ -439,9 +439,9 @@ Reconciled after QC and the repository-destination decision on 2026-09-21. This 
 - **Current MVP increment:** M12 has an ordinary UI path for replacing one selected placeholder with an exact library revision while preserving instance identity, transform, plan provenance, annotations, pivot/motion, camera, lighting, and unrelated objects. Scene Director Mode uses the same working state. M16 freezes a saved scene version, distinct shot camera, frame range, selected time, project delivery contract, and snapshot hash; the real Three.js canvas produces a delivery-sized PNG and advances the existing shot candidate/review path. Working-package schema v5 carries the complete editable project graph and content-addressed assets; the project switcher verifies and imports it as a separate inactive project with fresh relational identities, preserved revision groups/lineage, interrupted external jobs made terminal, and no machine-local storage paths.
 - **Validation:** The complete `scripts/verify.ps1` gate passed in one invocation on isolated port 5197: dependency audits, frontend checks/build, public-content audit, locked restore, warning-free Release rebuild, 283 backend tests, all backup/setup/worker/release scripts, voice and YuE2 contract tests, NuGet vulnerability inspection, and 134 Playwright journeys with six intentional tablet exclusions. The known Three.js chunk-size advisory remains; scene modules are lazy-loaded. The import proof exports, verifies, imports, activates, reopens, and serves the model from a fresh project, then imports the same package again with fresh IDs. Negative controls reject a checksum failure and a self-consistent forged GLB without creating a partial project.
 - **Compiler:** M08 generation and the M09 preparation route have recorded live workstation evidence. Framewright now reads the compiler-owned skeleton profiles from the configured checkout and enforces hierarchy, list, count, root, influence, and triangle-budget rules; no production humanoid fallback remains in this repository. The workstation's ignored local configuration points at the existing compiler checkout. Do not infer readiness for rigging from profile consumption or geometry/preparation success.
-- **Active acceptance:** M09 still needs the artist's recorded source/derivative verdict. M14 requires that prerequisite and M13 before live milestone advancement. M02/M03/M10/M11 still lack actual-host proof; M11 also needs human composition acceptance. The milestone table below is authoritative.
-- **Hosted CI:** The last public-main baseline, `c21027b`, passed [GitHub Actions run 35670211224](https://github.com/raydeStar/framewright/actions/runs/35670211224). The current checkpoint still requires its own hosted run after push; local results do not replace that evidence.
-- **Next engineering action:** Follow the Sol handoff, confirm current source and any new research, and test the real Director Mode host connection early. Prepare a concrete M09 review from existing evidence without regenerating it. Continue only dependency-ready work, labeling permitted fixture-based development separately from live support.
+- **Active acceptance:** M09 still needs the artist's recorded source/derivative verdict. M14 requires that prerequisite and M13 before live milestone advancement. M02, M03, and M10 have actual-host proof and are VERIFIED. M11 has D/A/H evidence and still needs human composition acceptance. The milestone table below is authoritative.
+- **Hosted CI:** The last public-main baseline, `ecffc0c`, passed [GitHub Actions run 35679438121](https://github.com/raydeStar/framewright/actions/runs/35679438121). The current checkpoint still requires its own hosted run after push; local results do not replace that evidence.
+- **Next engineering action:** Follow the Sol handoff, confirm current source and any new research, and prepare a concrete M09 review from existing evidence without regenerating it. Continue only dependency-ready work, labeling permitted fixture-based development separately from live support.
 - **Consent and resources:** This continuation authorizes direct public-main delivery of reviewed Framewright work and propagation of compiler-owned implementation to its repository. It does not authorize provider calls, GPU jobs, downloads, artistic acceptance, deployment, or tagging. Preserve running applications and external queues. Existing live receipts are evidence of prior runs, not permission for another run.
 
 ### MVP implementation checkpoint - 2026-09-21
@@ -452,7 +452,7 @@ The replacement journey starts from an approved blockout, binds a chosen reusabl
 
 The still journey saves a scene, selects an existing shot, edits an independent shot camera and time, renders the actual Three.js scene at the project delivery dimensions, imports the PNG through the validated content-addressed asset gate, creates the next working candidate, and opens existing Review. The service rechecks scene and shot versions after upload, stores an immutable snapshot and SHA-256, leaves later scene edits unable to rewrite it, survives restart, and exports the complete scene graph and binding in working-package schema v5. A regression caught and repaired SQLite's inability to order `DateTimeOffset` server-side.
 
-Evidence: `scripts/verify.ps1` with `STUDIO_E2E_PORT=5197` passed as described in the current validation summary. Focused scene, rig-profile, and portable-package checks also passed on desktop Chromium and emulated iPad Pro 11. No live provider, model download, production data, or external queue was used. Remaining full-goal evidence includes the M09 artist verdict, actual-host M02/M03/M10/M11 proof, M11 human composition acceptance, a compiler-owned M14 route and human deformation verdict, M17 deterministic animated render, full packaged-runtime plus backup-restore recovery, and physical tablet/stylus acceptance.
+Evidence: `scripts/verify.ps1` with `STUDIO_E2E_PORT=5197` passed as described in the current validation summary. Focused scene, rig-profile, and portable-package checks also passed on desktop Chromium and emulated iPad Pro 11. No live provider, model download, production data, or external queue was used. Remaining full-goal evidence includes the M09 artist verdict, M11 human composition acceptance, a compiler-owned M14 route and human deformation verdict, M17 deterministic animated render, full packaged-runtime plus backup-restore recovery, and physical tablet/stylus acceptance.
 
 ### M12 and M16 contract checkpoint - 2026-09-21
 
@@ -465,7 +465,7 @@ Outcome and supported constraints: Precise replacement and scene-to-shot still r
 Results by evidence class: D and A pass in the complete backend/browser gate. M12 lacks its declared new live
   generation evidence; M16 lacks the declared human visual acceptance. Neither status implies M14 or M17.
 Human approvals actually recorded: NONE for these milestone outputs.
-Known limits: actual-host direction remains contract-only; no provider or renderer was commissioned here.
+Known limits: M11 still lacks human composition acceptance; M12 and M16 retain their declared live/human evidence ceilings. No provider or renderer was commissioned here.
 Next dependency-ready milestone: M09 remains active; M14 follows its artist verdict.
 ```
 
@@ -481,7 +481,7 @@ Evidence: export -> import -> activate -> reopen -> model-content retrieval pass
   fresh IDs while content deduplicates. Checksum corruption and a forged self-consistent GLB both leave no
   partial project. Desktop and tablet project-switcher journeys pass in the complete gate.
 Limit: this is not M18 completion. The actual packaged workstation runtime, full small-workshop scenario,
-  playable M17 output, separate backup restore, actual host, and human/physical-device evidence remain open.
+  playable M17 output, separate backup restore, and human/physical-device evidence remain open.
 ```
 
 ### Historical execution notes before main QC
@@ -510,16 +510,16 @@ Retained for provenance. Branch, environment, dependency, and next-action statem
 | --- | --- | --- |
 | M00 | VERIFIED | M00 acceptance record below; commit `9ab9b68` |
 | M01 | VERIFIED | M01 acceptance record below |
-| M02 | CONTRACT_VERIFIED | M02 acceptance record below; no actual agent host available |
-| M03 | CONTRACT_VERIFIED | M03 acceptance record below; no actual agent host available |
+| M02 | VERIFIED | M02 acceptance and actual-host commissioning records below |
+| M03 | VERIFIED | M03 acceptance and actual-host commissioning records below |
 | M04 | VERIFIED | M04 acceptance record below |
 | M05 | VERIFIED | M05 acceptance record below |
 | M06 | VERIFIED | M06 acceptance record below |
 | M07 | VERIFIED | M07 acceptance record below |
 | M08 | VERIFIED | M08 acceptance record below |
 | M09 | IN_PROGRESS | Route built and run live; awaiting the artist's recorded verdict |
-| M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
-| M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
+| M10 | VERIFIED | M10 acceptance and actual-host commissioning records below |
+| M11 | CONTRACT_VERIFIED | D/A/H pass; human composition acceptance remains |
 | M12 | CONTRACT_VERIFIED | Precise replacement/app persistence pass; declared live evidence remains |
 | M13 | VERIFIED | M13 acceptance record below |
 | M14 | NOT_STARTED | Compiler checked out; requires M09's recorded acceptance and M13 |
@@ -658,8 +658,8 @@ Next dependency-ready milestone: M02.
 ### M02 acceptance record
 
 ```text
-Milestone / status / date: M02 / CONTRACT_VERIFIED / 2026-09-19
-Tested code revision or worktree identity: feature/director-mode, working tree at the M02 commit
+Milestone / status / date: M02 / VERIFIED / 2026-09-21
+Tested code revision or worktree identity: public main including the actual-host commissioning checkpoint
 Outcome and supported constraints: Browser tools can read the exact state the artist has on
   screen and the picture that goes with it, and cannot mix the two up. `get_director_context`
   returns one bounded, versioned packet - project, subject, live and displayed revision, archived
@@ -668,9 +668,9 @@ Outcome and supported constraints: Browser tools can read the exact state the ar
   resolves that revision's picture only while the token still matches. The packet follows an
   archived candidate preview rather than the live head, and omits `propose_shot_revision` from
   available actions while an archived revision is displayed, matching the read-only lock the
-  artist sees. Status is CONTRACT_VERIFIED, not VERIFIED: no actual WebMCP-capable browser or
-  agent host was available, so the only client exercised was the repository's synthetic
-  `document.modelContext` shim. A shim proves its own contract and nothing about native support.
+  artist sees. Codex's in-app browser then discovered the page-defined tools and read the same
+  selected shot, displayed revision, notes, authorities, state token, and frame through the real
+  host path, advancing this milestone from contract evidence to VERIFIED.
 Implementation surfaces reused/changed:
   - src/StoryboardStudio.Api/Services/WebMcpStoryboardService.cs: DirectorContextAsync,
     DirectorObservationAsync, ResolveViewAsync, and the state-token digest.
@@ -694,9 +694,11 @@ Results by evidence class (D/A/H/L/V/P):
      real service and real persistence in a disposable temp data root. Two new agent journeys
      cover the live head with staleness and refresh, and an archived preview with a cross-revision
      token refusal.
-  H: NOT RUN, and this is the milestone's ceiling. No WebMCP-capable browser build or agent host
-     is installed on this workstation, so tool discovery and context reading were exercised only
-     through the synthetic shim. Record host and browser versions when one becomes available.
+  H: PASSED on 2026-09-21 with Codex's in-app browser against the running local Framewright app.
+     The host discovered all ten tools; `get_director_context` and `observe_current_frame` agreed
+     on LAB-010 v16, then a navigation produced LAB-020 v9 with its two open notes and a new token.
+     The host exposed no semantic browser/WebMCP API version, so none is invented; access was
+     same-origin localhost through the Codex IAB host.
   L: NOT RUN. No provider was contacted. The second candidate used by the archived-preview
      journey came from the no-network local proof adapter.
   V: NOT RUN. No human visual acceptance was required for M02.
@@ -708,9 +710,7 @@ Failure/conflict/restart checks: An edit after the context was read refuses the 
   head, malformed tokens, and a shot belonging to another project are each refused by code.
 Relevant earlier-path regression results: The full backend and browser suites passed in full,
   including the M01 director-mode journeys.
-Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
-  passed individually). Actual-host discovery (no such host available). Physical stylus and
-  screen-reader passes.
+Checks NOT RUN and why: Physical stylus and screen-reader passes.
 Human approvals actually recorded, where required: None required. The new tools are read-only,
   create nothing, and dispatch nothing.
 Suite stability observed: one intermediate full-matrix run failed two pre-existing authority
@@ -735,8 +735,8 @@ Next dependency-ready milestone: M03, which the goal allows to proceed on the M0
 ### M03 acceptance record
 
 ```text
-Milestone / status / date: M03 / CONTRACT_VERIFIED / 2026-09-19
-Tested code revision or worktree identity: feature/director-mode, working tree at the M03 commit
+Milestone / status / date: M03 / VERIFIED / 2026-09-21
+Tested code revision or worktree identity: public main including the actual-host commissioning checkpoint
 Outcome and supported constraints: A browser agent can stage a bounded edit proposal against the
   exact view it read, and the artist decides what happens to it. A proposal now carries the
   director-context state token it was based on, the pinned notes it targets, and the shot rules it
@@ -749,9 +749,9 @@ Outcome and supported constraints: A browser agent can stage a bounded edit prop
   preserved constraints, targeted notes with normalized coordinates - in the existing revision
   surface. Applying again replays that one application. Nothing in this path authorizes a
   provider: the instructions carry generationAuthorized: false and the existing explicit Generate
-  action remains the only thing that spends GPU time or money. Status is CONTRACT_VERIFIED, not
-  VERIFIED, for the same reason as M02: no actual WebMCP-capable host exists on this workstation,
-  so the only client exercised was the repository's synthetic shim.
+  action remains the only thing that spends GPU time or money. The actual Codex host staged a
+  two-note LAB-020 proposal, displayed it in Agent Activity, and the artist-facing Reject action
+  left the shot at v9 with the same notes and no job, advancing this milestone to VERIFIED.
 Implementation surfaces reused/changed:
   - src/StoryboardStudio.Api/Services/WebMcpStoryboardService.cs: proposal request gains
     PreservedConstraints and ObservedStateToken with validation, plus ApplyAsync and its frozen
@@ -779,8 +779,9 @@ Results by evidence class (D/A/H/L/V/P):
      change, accepts and applies another, checks the revision surface opens carrying the preserved
      rule and the marked region, reopens it as a replay, and asserts the shot version and the
      durable job ledger are untouched throughout.
-  H: NOT RUN, and this is the milestone's ceiling, inherited from M02. No WebMCP-capable browser
-     build or agent host is installed on this workstation.
+  H: PASSED on 2026-09-21 through Codex's in-app browser. The real host staged a bounded proposal
+     against LAB-020 v9 and both visible notes; the UI showed the proposal, rejection changed no
+     shot state, and a fresh context read returned the same v9 and note set.
   L: NOT RUN. No provider was contacted. Applying a proposal creates no job, which the journey
      asserts against the durable ledger.
   V: NOT RUN. No human visual acceptance was required for M03.
@@ -793,10 +794,9 @@ Failure/conflict/restart checks: Applying before accepting is refused (proposal_
   restores the three columns and preserves the proposal staged before the upgrade.
 Relevant earlier-path regression results: The full backend and browser suites passed in full,
   including the M01 director-mode journeys and the M02 context journeys.
-Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
-  passed individually). Actual-host discovery (no such host available). Live image generation from
-  an applied direction - the milestone explicitly forbids claiming it, and the journey only proves
-  the instructions reach the revision surface unstarted. Physical stylus and screen-reader passes.
+Checks NOT RUN and why: Live image generation from an applied direction - the milestone explicitly
+  forbids claiming it, and the journey only proves the instructions reach the revision surface
+  unstarted. Physical stylus and screen-reader passes.
 Human approvals actually recorded, where required: None required. Accept and apply are simulated
   artist clicks inside an isolated test workspace, not artistic ratification of real work.
 Known defects and dependency impact: None found. Note that a proposal binds notes on the live head
@@ -1035,8 +1035,8 @@ Next dependency-ready milestone: M10. M07 and M08 remain deferred pending the us
 ### M10 acceptance record
 
 ```text
-Milestone / status / date: M10 / CONTRACT_VERIFIED / 2026-09-19
-Tested code revision or worktree identity: feature/director-mode, working tree at the M10 commits
+Milestone / status / date: M10 / VERIFIED / 2026-09-21
+Tested code revision or worktree identity: public main including the actual-host commissioning checkpoint
 Outcome and supported constraints: Director Mode now reaches inside a scene, where two identical
   props are two different objects. A note is anchored in one instance's own local space against
   the exact model revision it was measured on, together with the view it was placed from; pinning
@@ -1047,9 +1047,9 @@ Outcome and supported constraints: Director Mode now reaches inside a scene, whe
   position, rotation, or scale; one built on a view that has since moved is refused, as is one
   applied after the scene changed. Applying is the artist's action and writes nothing: it puts the
   change into working state for that one object, and the transform reaches the scene only through
-  the ordinary validated save. Status is CONTRACT_VERIFIED, not VERIFIED, for the same reason as
-  M02 and M03: no actual WebMCP-capable host exists on this workstation, so the only client
-  exercised was the repository's synthetic shim.
+  the ordinary validated save. Codex's in-app browser then completed that same bounded path against
+  a disposable current build: exact selected object and view, proposal, apply, save, cold reopen,
+  and exact reread. That actual-host result advances M10 to VERIFIED.
 Implementation surfaces reused/changed:
   - src/StoryboardStudio.Api/Services/SceneDirectionService.cs: annotations, the scene context
     packet and its token, and single-instance proposals with accept, reject, and a single apply.
@@ -1073,26 +1073,30 @@ Results by evidence class (D/A/H/L/V/P):
      agent read the context for one of two identical props, stage a rotation for that instance,
      and confirm after the artist applies and saves that the other prop never moved; and confirm
      the scene is fully usable in a browser with no WebMCP at all.
-  H: NOT RUN, and this is the milestone's ceiling, inherited from M02 and M03. No WebMCP-capable
-     browser build or agent host is installed on this workstation.
+  H: PASSED on 2026-09-21 through Codex's in-app browser. A selected Lantern marker was read at
+     scene v2 and time 0, proposed at rotation Y 1.5708, applied only to that instance, saved as
+     v3, reopened cold, selected again, and reread with the saved transform and camera intact.
   L: NOT RUN. No provider is involved; proposals create no jobs.
   V: NOT RUN as human acceptance.
   P: NOT RUN. No runtime dependency changed.
 Failure/conflict/restart checks: A proposal with a token from a view that has since moved is
-  refused as stale_scene and nothing is staged. A blind token, an empty proposal, a collapsed
+  refused as stale_scene and nothing is staged. An unsaved camera or object draft is refused as
+  unsaved_scene for both context reads and proposals, and a token read at another playhead time is
+  refused as stale_context. A blind token, an empty proposal, a collapsed
   scale, and an object from another scene are each refused. Applying before accepting, and
   applying a rejected proposal, are refused; applying twice replays the single application.
   Annotations survive and report staleness after a revision swap.
 Relevant earlier-path regression results: The full backend and browser suites passed in full,
   including the M01 director-mode journeys, the M02/M03 shot agent journeys, and the M06 scene
   journeys.
-Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
-  passed individually). Actual-host discovery (no such host available). Human visual acceptance.
+Checks NOT RUN and why: Human visual acceptance, which M10 does not require.
 Human approvals actually recorded, where required: None required. Accept and apply are simulated
   artist clicks in an isolated test workspace, not artistic ratification.
-Known defects and dependency impact: None found. Notes are anchored to a point rather than to a
-  named surface feature, which is what the milestone permits; arbitrary screen-to-geometry
-  reconstruction stays out of scope.
+Known defects and dependency impact: Actual-host commissioning found that an unsaved orbit or
+  transform could be represented by the older persisted context. The browser bridge now refuses
+  dirty scenes, carries the visible playhead, and binds scene proposal tokens to that time. Notes
+  remain anchored to a point rather than a named surface feature, which M10 permits; arbitrary
+  screen-to-geometry reconstruction stays out of scope.
 Permitted deferrals: Arbitrary screen-to-geometry reconstruction and free-form mesh editing, both
   explicitly deferred by M10.
 Bug-detection check: With notes reporting Stale: false unconditionally, the revision-binding test
@@ -1108,8 +1112,8 @@ Next dependency-ready milestone: M11.
 ### M11 acceptance record
 
 ```text
-Milestone / status / date: M11 / CONTRACT_VERIFIED / 2026-09-19
-Tested code revision or worktree identity: feature/director-mode, working tree at the M11 commits
+Milestone / status / date: M11 / CONTRACT_VERIFIED / 2026-09-21
+Tested code revision or worktree identity: public main including the actual-host commissioning checkpoint
 Outcome and supported constraints: A reference picture now becomes a construction plan the artist
   can argue with before anything is built. The plan names each object the reference seems to call
   for, gives it a role, matches the ones the library already holds, describes simple stand-in
@@ -1124,9 +1128,10 @@ Outcome and supported constraints: A reference picture now becomes a constructio
   camera framing are corrected independently through the ordinary validated save, and after
   reopening every object still names the role and plan it came from, with the reference id and the
   assumptions still readable. No provider job is created by proposing or by approving.
-  Status is CONTRACT_VERIFIED for two reasons, both stated ceilings: no actual WebMCP host exists
-  on this workstation, as for M02, M03 and M10; and this milestone additionally calls for recorded
-  human composition acceptance, which cannot be manufactured.
+  Codex's in-app browser has now exercised proposal, visible review, artist build, independent
+  placement and camera corrections, save, and cold reopen through the actual host. Status remains
+  CONTRACT_VERIFIED for one stated ceiling: recorded human composition acceptance cannot be
+  manufactured from the one-pixel commissioning fixture.
 Implementation surfaces reused/changed:
   - src/StoryboardStudio.Api/Services/SceneBlockoutService.cs: plans, their bounded items, the
     reference binding, rejection, and the single approval that builds.
@@ -1154,8 +1159,10 @@ Results by evidence class (D/A/H/L/V/P):
      and the third is the library model, correct one placement, save, reopen the studio cold, and
      find the correction, the stand-in geometry, and the plan the scene came from still there; and
      confirm a rejected plan builds nothing at all.
-  H: NOT RUN, and this is one of the milestone's two ceilings, inherited from M02, M03 and M10. No
-     WebMCP-capable browser build or agent host is installed on this workstation.
+  H: PASSED on 2026-09-21 through Codex's in-app browser. The host staged a three-object plan bound
+     to an exact selected reference hash; the UI showed assumptions and uncertainty, the artist
+     action built a separate scene, placement and inspection camera were corrected, and the scene
+     survived save and cold reopen with all three object identities and plan lineage intact.
   L: NOT RUN. No provider is involved, which is asserted rather than assumed: proposing and
      approving leave the job and manifest tables empty.
   V: NOT RUN, and this is the milestone's second ceiling. M11 asks for recorded human composition
@@ -1173,9 +1180,8 @@ Failure/conflict/restart checks: A plan whose observed reference hash does not m
 Relevant earlier-path regression results: The full backend and browser suites passed in full,
   including the M01 director-mode journeys, the M02/M03 shot agent journeys, and the M06 and M10
   scene journeys.
-Checks NOT RUN and why: ./scripts/verify.ps1 in full (release-candidate gate; component steps
-  passed individually). Actual-host discovery (no such host available). Human composition
-  acceptance (requires the artist).
+Checks NOT RUN and why: Human composition acceptance (requires the artist and a meaningful
+  reference rather than the one-pixel host-contract fixture).
 Human approvals actually recorded, where required: None. The approvals in the journeys are
   simulated artist clicks in an isolated test workspace and are recorded as such, not as
   composition acceptance.
@@ -1755,6 +1761,56 @@ failed before executing any steps: "The job was not started because an Actions
 budget is preventing further use." Hosted CI is therefore **blocked by the Actions
 budget**, not verified by the local results. Restore that budget and rerun CI;
 no workflow gates or account spending settings were changed during this review.
+
+### Actual-host commissioning record - 2026-09-21
+
+Scope: commission the page-defined WebMCP path in Codex's real in-app browser,
+repair any defect the host exposes, and preserve the artist's running app and
+data. Host/browser: Codex in-app browser (IAB) against same-origin localhost
+Framewright. The host exposed no semantic browser or WebMCP API version, so
+none is inferred. The running artist app was read on `127.0.0.1:5179`; scene
+write-path proof used a disposable current build and data root on
+`127.0.0.1:5198`, which was shut down and removed afterward.
+
+Observed host evidence:
+
+- The host discovered exactly the ten registered tools. On the artist app,
+  `get_director_context` and `observe_current_frame` agreed on LAB-010 v16.
+  Navigation to LAB-020 produced v9, its two open notes, and a new state token.
+- A bounded two-note shot proposal appeared in Agent Activity. Rejecting it
+  left LAB-020 at v9 with both notes and created no generation job.
+- In the disposable current build, an exact one-pixel reference fixture staged
+  a visibly reviewable three-object blockout plan with explicit assumptions and
+  uncertainty. The artist action built a new scene without generation.
+- The Lantern marker was corrected from X 0.8 to 1.15 and the inspection camera
+  from yaw/pitch 0.9/0.42 to 0.98/0.5. While those changes were unsaved, both
+  context and proposal calls returned `unsaved_scene`; after save, context
+  reported scene v2 and the corrected object and camera.
+- The host then staged a one-object rotation proposal, the artist action applied
+  Y 1.5708 only to the Lantern marker, and save produced v3. A cold reload and
+  fresh selection returned the same three object identities, camera, position,
+  rotation, scene version, and plan lineage.
+
+Defect found and fixed: the scene workspace originally published only the
+persisted scene identity. After an unsaved orbit or transform, a host read could
+therefore describe the older persisted camera/object while the artist saw a
+different draft. The bridge now publishes dirty state and playhead time, refuses
+dirty scene reads and proposals, returns time in the scene context, and binds a
+proposal token to the observed time. The exact dirty and time conflicts are
+covered in the desktop/tablet scene journey and API tests.
+
+Final local gate on the containing revision: `STUDIO_E2E_PORT=5199; .\scripts\verify.ps1`
+passed dependency audits, frontend checks and production
+build, public-content audit, a zero-warning Release build, **283/283 backend
+tests**, script/voice/YuE2 contracts, and **134 Playwright journeys with the same
+six intentional tablet exclusions**. No provider, GPU generation, production
+queue, deployment, or artist data was used. The existing separate Three.js
+bundle warning remains.
+
+Status impact: M02, M03, and M10 are VERIFIED. M11 now has D/A/H evidence but
+remains CONTRACT_VERIFIED until the artist records composition acceptance using
+a meaningful reference. M09 remains the active milestone pending the prepared
+sword verdict.
 
 ### Acceptance record template
 

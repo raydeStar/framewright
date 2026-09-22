@@ -349,7 +349,7 @@ test('an agent directs one of two identical props and leaves the other alone', a
   await objects.getByRole('button', { name: /Left prop/ }).click()
   await expect(page.getByTestId('scene-placement').getByLabel('Object name')).toHaveValue('Left prop')
 
-  type Envelope = { ok: boolean; code: string; data?: { stateToken?: string; selectedObject?: { instanceId: string; name: string }; scene?: { version: number }; objects?: unknown[] } }
+  type Envelope = { ok: boolean; code: string; data?: { stateToken?: string; selectedObject?: { instanceId: string; name: string }; scene?: { version: number }; objects?: unknown[]; view?: { time: number } } }
   const call = (name: string, input: object) => page.evaluate(({ name, input }) => {
     const tools = (window as unknown as { __framewrightTools: Map<string, { execute: (input: object, context: object) => Promise<unknown> }> }).__framewrightTools
     return tools.get(name)!.execute(input, {}) as Promise<unknown>
@@ -359,11 +359,45 @@ test('an agent directs one of two identical props and leaves the other alone', a
   const context = await call('get_director_context', {})
   expect(context.data!.selectedObject!.name).toBe('Left prop')
   expect(context.data!.objects).toHaveLength(2)
+  expect(context.data!.view!.time).toBe(0)
 
-  const proposal = await call('propose_scene_edit', {
+  // The live browser must never answer with the older saved transform while
+  // the artist has a different draft on screen. Save restores a context the
+  // service can bind and validate.
+  await page.getByTestId('scene-placement').getByLabel('position X').fill('-2.5')
+  expect((await call('get_director_context', {})).code).toBe('unsaved_scene')
+  expect((await call('propose_scene_edit', {
     instanceId: context.data!.selectedObject!.instanceId,
     expectedSceneVersion: context.data!.scene!.version,
     observedStateToken: context.data!.stateToken,
+    direction: 'This must not be staged against an unsaved draft.', rationale: '',
+    position: [-2.5, 0, 0], idempotencyKey: `unsaved-${Date.now()}-${Math.random()}`,
+  })).code).toBe('unsaved_scene')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 3')
+
+  const savedContext = await call('get_director_context', {})
+  expect(savedContext.code).toBe('scene_director_context')
+
+  // The visible clock is context too. A proposal read at one frame cannot be
+  // smuggled onto another frame merely because the saved scene is unchanged.
+  await page.getByLabel('Playback time').fill('0.5')
+  await expect(page.getByTestId('scene-playhead')).toContainText('0.50 s')
+  expect((await call('propose_scene_edit', {
+    instanceId: savedContext.data!.selectedObject!.instanceId,
+    expectedSceneVersion: savedContext.data!.scene!.version,
+    observedStateToken: savedContext.data!.stateToken,
+    direction: 'This must not be staged against another frame.', rationale: '',
+    rotation: [0, 1.2, 0], idempotencyKey: `wrong-time-${Date.now()}-${Math.random()}`,
+  })).code).toBe('stale_context')
+  await page.getByLabel('Playback time').fill('0')
+  await expect(page.getByTestId('scene-playhead')).toContainText('0.00 s')
+  const resetContext = await call('get_director_context', {})
+
+  const proposal = await call('propose_scene_edit', {
+    instanceId: resetContext.data!.selectedObject!.instanceId,
+    expectedSceneVersion: resetContext.data!.scene!.version,
+    observedStateToken: resetContext.data!.stateToken,
     direction: 'Turn the left prop to face the gate.',
     rationale: 'It reads as facing away from camera.',
     rotation: [0, 1.2, 0],
@@ -372,7 +406,7 @@ test('an agent directs one of two identical props and leaves the other alone', a
   expect(proposal.ok).toBe(true)
 
   // Staging changed nothing: the scene is still at the saved version.
-  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+  await expect(page.getByTestId('scene-version')).toContainText('Version 3')
 
   const staged = page.getByTestId('scene-proposals')
   await expect(staged.getByTestId('scene-proposal').first()).toContainText('Left prop')
@@ -382,13 +416,14 @@ test('an agent directs one of two identical props and leaves the other alone', a
   // still the artist's move.
   await expect(page.getByTestId('scene-placement').getByLabel('rotation Y')).toHaveValue('1.2')
   await page.getByTestId('scene-save').click()
-  await expect(page.getByTestId('scene-version')).toContainText('Version 3')
+  await expect(page.getByTestId('scene-version')).toContainText('Version 4')
 
   const scenes = await (await page.request.get('/api/scenes')).json()
   const scene = await (await page.request.get(`/api/scenes/${scenes[0].id}`)).json()
   const left = scene.instances.find((instance: { name: string }) => instance.name === 'Left prop')
   const right = scene.instances.find((instance: { name: string }) => instance.name === 'Right prop')
   expect(left.rotation[1]).toBeCloseTo(1.2, 4)
+  expect(left.position[0]).toBeCloseTo(-2.5, 4)
   // The identical prop beside it never moved.
   expect(right.rotation[1]).toBe(0)
   expect(right.position[0]).toBe(3)

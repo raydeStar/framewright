@@ -12,7 +12,7 @@ import WorldWorkspace from './components/WorldWorkspace'
 const SceneWorkspace = lazy(() => import('./components/SceneWorkspace'))
 import { BoardWorkspace, ReviewWorkspace, SequenceWorkspace, ShotWorkspace } from './components/StudioWorkspaces'
 import { FRAMEWRIGHT_WEBMCP_TOOL_NAMES, registerFramewrightWebMcp } from './webmcp'
-import type { AgentActivityEntry, AssetGenerationDraft, BackupStatus, CodexAssistResponse, CredentialStatus, DirectorViewQuery, IntegrationSummary, JobSummary, PairingStatusSummary, ProjectSummary, ReferenceSummary, RuntimeReadinessSummary, ShotRevisionProposalSummary, ShotSummary, StudioSnapshot, Workspace } from './types'
+import type { AgentActivityEntry, AssetGenerationDraft, BackupStatus, CodexAssistResponse, CredentialStatus, DirectorSceneView, DirectorViewQuery, IntegrationSummary, JobSummary, PairingStatusSummary, ProjectSummary, ReferenceSummary, RuntimeReadinessSummary, ShotRevisionProposalSummary, ShotSummary, StudioSnapshot, Workspace } from './types'
 
 const SketchWorkspace = lazy(() => import('./components/SketchWorkspace'))
 
@@ -69,7 +69,7 @@ export default function App() {
   const directorViewRef = useRef<DirectorViewQuery | undefined>(undefined)
   // What the Scene workspace has open, so browser tools can describe the
   // selected object rather than the last shot the artist looked at.
-  const sceneViewRef = useRef<{ sceneId: string; instanceId?: string; referenceAssetId?: string; directorMode?: boolean } | undefined>(undefined)
+  const sceneViewRef = useRef<DirectorSceneView | undefined>(undefined)
   const workspaceRef = useRef<Workspace>('shot')
   const [sceneProposalSignal, setSceneProposalSignal] = useState(0)
   const [sceneBlockoutSignal, setSceneBlockoutSignal] = useState(0)
@@ -213,7 +213,7 @@ export default function App() {
       getDirectorView: () => {
         const scene = sceneViewRef.current
         return scene && workspaceRef.current === 'scene'
-          ? { kind: 'scene', sceneId: scene.sceneId, instanceId: scene.instanceId, referenceAssetId: scene.referenceAssetId, directorMode: scene.directorMode ?? false }
+          ? scene
           : directorViewRef.current
       },
       // A scene proposal is acted on in the scene inspector, so do not open the
