@@ -42,19 +42,22 @@ fork the modeling or texturing implementation.
   translates the root bone. Framewright decides the policy per object — Hold or
   Offset — exactly as M15 already implements it. Only one side moves the object.
 
-## Two things Framewright has to implement
+## Implemented consumer checks
 
-1. **Profile checking at the compiler's strength.** Today the rig inspector
-   matches bones by name. The compiler also checks each bone's parent, and it is
-   right to: a bone called `upperarm_l` parented to the pelvis is a coincidence,
-   not a skeleton.
-2. **The skeleton fingerprint**, to the digit as the contract specifies it —
-   ordinal bone ordering, integer quantization rather than formatted decimals,
-   quaternion sign canonicalized to `w >= 0`. Both sides compute it, so both
-   repositories keep a test asserting the same expected hex string against the
-   same fixture. That is what lets a rig with no standard profile — a spider, a
-   machine — carry clips honestly: a fingerprint match means *these clips were
-   made for this skeleton*, and claims nothing about retargeting.
+- **Profiles come from the compiler checkout.** Framewright reads
+  `profiles/skeletons/*.json` from the configured checkout and enforces required
+  bones, expected parents, optional and unlisted bones, exact counts, roots,
+  influence limits, and triangle budgets. If the directory is absent or
+  malformed, a skinned model remains an unknown skeleton and cannot become
+  animation-ready. The repository's `humanoid-a` data now exists only under
+  test fixtures.
+- **The skeleton fingerprint matches the compiler contract.** Both sides use
+  ordinal bone ordering, integer quantization rather than formatted decimals,
+  and quaternion sign canonicalization to `w >= 0`. Both repositories assert
+  the same expected hex string against the shared vector. That is what lets a
+  rig with no standard profile — a spider, a machine — carry clips honestly: a
+  fingerprint match means *these clips were made for this skeleton*, and claims
+  nothing about retargeting.
 
 ## Running it
 

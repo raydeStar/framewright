@@ -475,6 +475,7 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
   const [contractError, setContractError] = useState<string>()
   const [constraintsDraft, setConstraintsDraft] = useState<string[]>(shot.constraints)
   const [newConstraint, setNewConstraint] = useState('')
+  const syncedConstraints = useRef({ shotId: shot.id, constraints: shot.constraints })
   const [feedbackRequest, setFeedbackRequest] = useState<string>()
   const [quickGenerating, setQuickGenerating] = useState<'comfyui-fast-draft' | 'codex-imagegen'>()
   const [directRegenerating, setDirectRegenerating] = useState<'comfyui-fast-draft' | 'codex-imagegen'>()
@@ -578,7 +579,18 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
   useEffect(() => { if (!sketchLaunch) return; setSketchPurpose('Draft'); setCanvasMode('sketch') }, [sketchLaunch])
   useEffect(() => { resetIntent() }, [resetIntent, shot.id, shot.updatedAt])
   useEffect(() => { if (!archivedPreview) return; resetIntent(); setConstraintsDraft(shot.constraints); setNewConstraint(''); setPinningReference(undefined); setShowReferencePicker(false); setTool('select') }, [archivedPreview, resetIntent, setTool, shot.constraints])
-  useEffect(() => { setConstraintsDraft(shot.constraints); setNewConstraint(''); setContractError(undefined) }, [shot.id, shot.updatedAt, shot.constraints])
+  useEffect(() => {
+    const previous = syncedConstraints.current
+    const changedShot = previous.shotId !== shot.id
+    const sameRules = (left: string[], right: string[]) => left.length === right.length && left.every((value, index) => value === right[index])
+    // A completed reference or intent write can refresh this same shot just as
+    // the artist starts typing a rule. Sync untouched drafts, but never erase
+    // edits that began after the write was acknowledged on screen.
+    setConstraintsDraft(current => changedShot || sameRules(current, previous.constraints) || sameRules(current, shot.constraints) ? shot.constraints : current)
+    if (changedShot) setNewConstraint('')
+    setContractError(undefined)
+    syncedConstraints.current = { shotId: shot.id, constraints: shot.constraints }
+  }, [shot.id, shot.updatedAt, shot.constraints])
   useEffect(() => { void studioApi.candidates(shot.id).then(setCandidates) }, [shot.id, shot.version])
   const refreshMedia = useCallback(() => { void Promise.all([studioApi.assets(), studioApi.assetPlacements({ shotId: shot.id })]).then(([all, linked]) => { setMediaAssets(all); setMediaPlacements(linked) }) }, [shot.id])
   useEffect(() => { refreshMedia() }, [refreshMedia])

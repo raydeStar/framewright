@@ -175,6 +175,10 @@ public sealed class ProductionExportService(
         var jobs = (await db.Jobs.AsNoTracking().ToListAsync(cancellationToken)).OrderBy(x => x.CreatedAt).ToArray();
         var comments = (await db.Comments.AsNoTracking().ToListAsync(cancellationToken)).OrderBy(x => x.CreatedAt).ToArray();
         var reviewNotes = (await db.AssetReviewNotes.AsNoTracking().ToListAsync(cancellationToken)).OrderBy(x => x.CreatedAt).ToArray();
+        var visualAudits = (await db.ShotVisualAudits.AsNoTracking().ToListAsync(cancellationToken)).OrderBy(x => x.CreatedAt).ToArray();
+        var sketches = await db.SketchDocuments.AsNoTracking().OrderBy(x => x.ShotId).ToListAsync(cancellationToken);
+        var posePresets = await db.PosePresets.AsNoTracking().OrderBy(x => x.Name).ToListAsync(cancellationToken);
+        var shotProposals = (await db.ShotRevisionProposals.AsNoTracking().ToListAsync(cancellationToken)).OrderBy(x => x.CreatedAt).ToArray();
         var markups = (await db.FrameMarkups.AsNoTracking().ToListAsync(cancellationToken)).OrderBy(x => x.UpdatedAt).ToArray();
         var clips = await db.TimelineClips.AsNoTracking().OrderBy(x => x.Track).ThenBy(x => x.StartFrame).ToListAsync(cancellationToken);
         var voices = await db.VoiceProfiles.AsNoTracking().OrderBy(x => x.Name).ToListAsync(cancellationToken);
@@ -199,6 +203,12 @@ public sealed class ProductionExportService(
             .OrderBy(x => x.PlanId).ThenBy(x => x.SortOrder).ToListAsync(cancellationToken);
         var sceneShotBindings = (await db.SceneShotBindings.AsNoTracking().ToListAsync(cancellationToken))
             .OrderBy(x => x.CreatedAt).ToArray();
+        var musicCompositions = (await db.MusicCompositions.AsNoTracking().ToListAsync(cancellationToken))
+            .OrderBy(x => x.CreatedAt).ToArray();
+        var musicRevisions = (await db.MusicCompositionRevisions.AsNoTracking().ToListAsync(cancellationToken))
+            .OrderBy(x => x.CompositionId).ThenBy(x => x.RevisionNumber).ToArray();
+        var musicRenders = (await db.MusicRenders.AsNoTracking().ToListAsync(cancellationToken))
+            .OrderBy(x => x.CreatedAt).ToArray();
 
         var verifiedAssets = new List<VerifiedExportAsset>(assetRecords.Count);
         foreach (var asset in assetRecords)
@@ -206,10 +216,13 @@ public sealed class ProductionExportService(
 
         var payload = new
         {
-            // v4 adds the complete editable scene graph and immutable
-            // scene-to-shot bindings. Every referenced model/still is already
-            // part of the content-addressed asset inventory below.
-            schemaVersion = 4,
+            // v5 is round-trippable. In addition to the delivery-facing v4
+            // graph it carries the editable sketch, proposal, audit, pose and
+            // music records needed to open this project in another workspace.
+            // Credentials and machine-local provider configuration remain out.
+            schemaVersion = 5,
+            product = "Framewright",
+            sourceProjectId = projectRecord.Id,
             packageKind = readiness.CanExportProduction ? "Production" : "WorkingCopy",
             exportedAt,
             readiness,
@@ -247,62 +260,21 @@ public sealed class ProductionExportService(
             candidates,
             authorities,
             authorityVersions,
-            generationManifests = manifests.Select(x => new
-            {
-                x.Id,
-                x.ShotId,
-                x.ShotCode,
-                x.ShotVersion,
-                x.SketchId,
-                x.SketchRevision,
-                x.Route,
-                x.Purpose,
-                x.State,
-                x.CreativeBrief,
-                x.AuthoritiesJson,
-                x.ConstraintsJson,
-                x.ManifestJson,
-                x.ManifestHash,
-                x.ProviderCallMade,
-                x.CompositionAssetId,
-                x.CompositionAssetHash,
-                x.LastFrameAssetId,
-                x.LastFrameAssetHash,
-                x.CreatedAt
-            }),
-            generationJobs = jobs.Select(x => new
-            {
-                x.Id,
-                x.ShotId,
-                x.Kind,
-                x.State,
-                x.Backend,
-                x.ManifestId,
-                x.AdapterId,
-                x.OutputAssetId,
-                x.ProviderRequestId,
-                x.Attempt,
-                x.RetryOfJobId,
-                x.WorkType,
-                x.CreatedAt,
-                x.CompletedAt
-            }),
+            generationManifests = manifests,
+            generationJobs = jobs,
             review = new { comments, assetNotes = reviewNotes, markups },
+            comments,
+            assetReviewNotes = reviewNotes,
+            shotVisualAudits = visualAudits,
+            sketches,
+            posePresets,
+            shotRevisionProposals = shotProposals,
+            frameMarkups = markups,
             timeline = clips,
-            voiceProfiles = voices.Select(x => new
-            {
-                x.Id,
-                x.Name,
-                x.Kind,
-                x.Provider,
-                x.ProviderVoiceId,
-                x.CharacterName,
-                x.CharacterReferenceId,
-                x.SampleAssetId,
-                x.ConsentAttestation,
-                x.ConsentedAt,
-                x.CreatedAt
-            }),
+            voiceProfiles = voices,
+            musicCompositions,
+            musicCompositionRevisions = musicRevisions,
+            musicRenders,
             assetCollections = collections,
             assetPlacements = placements,
             scenes,
@@ -312,26 +284,7 @@ public sealed class ProductionExportService(
             sceneBlockoutPlans,
             sceneBlockoutItems,
             sceneShotBindings,
-            assets = verifiedAssets.Select(x => new
-            {
-                x.Record.Id,
-                x.Record.Kind,
-                x.Record.OriginalFileName,
-                x.Record.MimeType,
-                x.Record.Bytes,
-                x.Record.Width,
-                x.Record.Height,
-                x.Record.DurationSeconds,
-                x.Record.ContentHash,
-                x.Record.DisplayName,
-                x.Record.Source,
-                x.Record.RevisionFamilyId,
-                x.Record.RevisionNumber,
-                x.Record.ParentAssetId,
-                x.Record.RevisionPrompt,
-                x.Record.RevisionEngine,
-                x.ArchivePath
-            })
+            assets = verifiedAssets.Select(x => new PortableAssetRecord(x.Record, x.ArchivePath))
         };
 
         var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(payload, Json);
@@ -519,4 +472,29 @@ public sealed class ProductionExportService(
     }
 
     private sealed record VerifiedExportAsset(AssetRecord Record, string SourcePath, string ArchivePath);
+
+    /// <summary>
+    /// StoragePath is deliberately replaced by the archive path. An absolute or
+    /// machine-relative source path is not portable and must never become an
+    /// instruction to the importing workstation.
+    /// </summary>
+    private sealed record PortableAssetRecord(
+        Guid Id, Guid ProjectId, string Kind, string OriginalFileName, string MimeType,
+        long Bytes, int? Width, int? Height, double? DurationSeconds, string ContentHash,
+        string ArchivePath, DateTimeOffset CreatedAt, string DisplayName, Guid? CollectionId,
+        string TagsJson, string Notes, string Source, bool IsArchived, DateTimeOffset UpdatedAt,
+        Guid? RevisionFamilyId, int? RevisionNumber, bool IsCurrentRevision, Guid? ParentAssetId,
+        string RevisionPrompt, string RevisionEngine, DateTimeOffset? PreparationAcceptedAt,
+        string PreparationAcceptedBy, string PreparationAcceptanceNote, bool PreparationTopologyChanged)
+    {
+        public PortableAssetRecord(AssetRecord record, string archivePath) : this(
+            record.Id, record.ProjectId, record.Kind, record.OriginalFileName, record.MimeType,
+            record.Bytes, record.Width, record.Height, record.DurationSeconds, record.ContentHash,
+            archivePath, record.CreatedAt, record.DisplayName, record.CollectionId, record.TagsJson,
+            record.Notes, record.Source, record.IsArchived, record.UpdatedAt, record.RevisionFamilyId,
+            record.RevisionNumber, record.IsCurrentRevision, record.ParentAssetId,
+            record.RevisionPrompt, record.RevisionEngine, record.PreparationAcceptedAt,
+            record.PreparationAcceptedBy, record.PreparationAcceptanceNote,
+            record.PreparationTopologyChanged) { }
+    }
 }

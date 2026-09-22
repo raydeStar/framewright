@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M04, M05, M06, M07, M08, M13 and M15 are VERIFIED; M02, M03, M10 and M11 are CONTRACT_VERIFIED. M14 requires M09 acceptance as well as M13; a checked-out compiler alone does not satisfy that dependency. M12, M16, M17 and M18 remain open.
+**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M04, M05, M06, M07, M08, M13 and M15 are VERIFIED; M02, M03, M10, M11, M12 and M16 are CONTRACT_VERIFIED. M14 requires M09 acceptance as well as M13; a checked-out compiler alone does not satisfy that dependency. M17 and M18 remain open, with portable-package recovery groundwork implemented for M18.
 
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
@@ -436,11 +436,11 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 Reconciled after QC and the repository-destination decision on 2026-09-21. This summary supersedes the historical execution notes below; individual acceptance records remain the evidence authority.
 
 - **Repository:** Public `github.com/raydeStar/framewright` is the maintained Framewright line; the former private mirror is deprecated. Its public history was deliberately sanitized and has no merge base with the older private history, so publish reviewed snapshots as normal descendants of public `main`, never by force-pushing the private graph. `github.com/raydeStar/reference-asset-compiler` is the single implementation home for modeling, texturing, retopology, UV, rigging, deformation gates, payload construction, and compiler receipts. Framewright owns orchestration, validated import, library/scene state, shot binding, and review.
-- **Current MVP increment:** M12 now has an ordinary UI path for replacing one selected placeholder with an exact library revision while preserving instance identity, transform, plan provenance, annotations, pivot/motion, camera, lighting, and unrelated objects. Scene Director Mode uses the same working state. M16 now freezes a saved scene version, distinct shot camera, frame range, selected time, project delivery contract, and snapshot hash; the real Three.js canvas produces a delivery-sized PNG and advances the existing shot candidate/review path. Working-copy export schema v4 includes scenes, instances, annotations, proposals, blockout plans/items, and immutable scene-shot bindings with all referenced assets.
-- **Validation:** The complete `scripts/verify.ps1` gate passed in one invocation on isolated port 5195: dependency audits, frontend checks/build, public-content audit, locked restore, warning-free Release rebuild, 278 backend tests, all backup/setup/worker/release scripts, voice and YuE2 contract tests, NuGet vulnerability inspection, and 132 Playwright journeys with six intentional tablet exclusions. The known Three.js chunk-size advisory remains; scene modules are lazy-loaded. Focused scene-still proof also passed on desktop and tablet and byte-checked the encoded PNG dimensions.
-- **Compiler:** M08 generation and the M09 preparation route have recorded live workstation evidence. Inspect current ignored configuration and the compiler's pinned revision/capabilities before new work; old notes about an absent checkout or missing payload export are historical. Do not infer readiness for rigging from geometry/preparation success.
+- **Current MVP increment:** M12 has an ordinary UI path for replacing one selected placeholder with an exact library revision while preserving instance identity, transform, plan provenance, annotations, pivot/motion, camera, lighting, and unrelated objects. Scene Director Mode uses the same working state. M16 freezes a saved scene version, distinct shot camera, frame range, selected time, project delivery contract, and snapshot hash; the real Three.js canvas produces a delivery-sized PNG and advances the existing shot candidate/review path. Working-package schema v5 carries the complete editable project graph and content-addressed assets; the project switcher verifies and imports it as a separate inactive project with fresh relational identities, preserved revision groups/lineage, interrupted external jobs made terminal, and no machine-local storage paths.
+- **Validation:** The complete `scripts/verify.ps1` gate passed in one invocation on isolated port 5197: dependency audits, frontend checks/build, public-content audit, locked restore, warning-free Release rebuild, 283 backend tests, all backup/setup/worker/release scripts, voice and YuE2 contract tests, NuGet vulnerability inspection, and 134 Playwright journeys with six intentional tablet exclusions. The known Three.js chunk-size advisory remains; scene modules are lazy-loaded. The import proof exports, verifies, imports, activates, reopens, and serves the model from a fresh project, then imports the same package again with fresh IDs. Negative controls reject a checksum failure and a self-consistent forged GLB without creating a partial project.
+- **Compiler:** M08 generation and the M09 preparation route have recorded live workstation evidence. Framewright now reads the compiler-owned skeleton profiles from the configured checkout and enforces hierarchy, list, count, root, influence, and triangle-budget rules; no production humanoid fallback remains in this repository. The workstation's ignored local configuration points at the existing compiler checkout. Do not infer readiness for rigging from profile consumption or geometry/preparation success.
 - **Active acceptance:** M09 still needs the artist's recorded source/derivative verdict. M14 requires that prerequisite and M13 before live milestone advancement. M02/M03/M10/M11 still lack actual-host proof; M11 also needs human composition acceptance. The milestone table below is authoritative.
-- **Hosted CI:** GitHub Actions is blocked before execution by the account's Actions budget. Local tests do not replace that evidence; the owner must restore capacity before hosted CI can be rerun. Do not change spending settings or bypass checks.
+- **Hosted CI:** The last public-main baseline, `c21027b`, passed [GitHub Actions run 35670211224](https://github.com/raydeStar/framewright/actions/runs/35670211224). The current checkpoint still requires its own hosted run after push; local results do not replace that evidence.
 - **Next engineering action:** Follow the Sol handoff, confirm current source and any new research, and test the real Director Mode host connection early. Prepare a concrete M09 review from existing evidence without regenerating it. Continue only dependency-ready work, labeling permitted fixture-based development separately from live support.
 - **Consent and resources:** This continuation authorizes direct public-main delivery of reviewed Framewright work and propagation of compiler-owned implementation to its repository. It does not authorize provider calls, GPU jobs, downloads, artistic acceptance, deployment, or tagging. Preserve running applications and external queues. Existing live receipts are evidence of prior runs, not permission for another run.
 
@@ -450,9 +450,39 @@ Status: M12 manual replacement and M16 scene-still contracts are implemented and
 
 The replacement journey starts from an approved blockout, binds a chosen reusable model to the same instance, preserves its exact transform and source-plan identity, leaves every other object and scene setting untouched, saves, reloads, and draws the replacement. The scene can enter and leave Director Mode without forking or discarding unsaved state.
 
-The still journey saves a scene, selects an existing shot, edits an independent shot camera and time, renders the actual Three.js scene at the project delivery dimensions, imports the PNG through the validated content-addressed asset gate, creates the next working candidate, and opens existing Review. The service rechecks scene and shot versions after upload, stores an immutable snapshot and SHA-256, leaves later scene edits unable to rewrite it, survives restart, and exports the complete scene graph and binding in working-package schema v4. A regression caught and repaired SQLite's inability to order `DateTimeOffset` server-side.
+The still journey saves a scene, selects an existing shot, edits an independent shot camera and time, renders the actual Three.js scene at the project delivery dimensions, imports the PNG through the validated content-addressed asset gate, creates the next working candidate, and opens existing Review. The service rechecks scene and shot versions after upload, stores an immutable snapshot and SHA-256, leaves later scene edits unable to rewrite it, survives restart, and exports the complete scene graph and binding in working-package schema v5. A regression caught and repaired SQLite's inability to order `DateTimeOffset` server-side.
 
-Evidence: `scripts/verify.ps1` with `STUDIO_E2E_PORT=5195` passed as described in the current validation summary. Focused `SceneApiTests` passed eight tests; the new scene-still browser journey passed on desktop Chromium and emulated iPad Pro 11. No live provider, model download, production data, or external queue was used. Remaining full-goal evidence includes the M09 artist verdict, actual-host M02/M03/M10/M11 proof, M11 human composition acceptance, a compiler-owned M14 route and human deformation verdict, M17 deterministic animated render, package import/recovery proof, and physical tablet/stylus acceptance.
+Evidence: `scripts/verify.ps1` with `STUDIO_E2E_PORT=5197` passed as described in the current validation summary. Focused scene, rig-profile, and portable-package checks also passed on desktop Chromium and emulated iPad Pro 11. No live provider, model download, production data, or external queue was used. Remaining full-goal evidence includes the M09 artist verdict, actual-host M02/M03/M10/M11 proof, M11 human composition acceptance, a compiler-owned M14 route and human deformation verdict, M17 deterministic animated render, full packaged-runtime plus backup-restore recovery, and physical tablet/stylus acceptance.
+
+### M12 and M16 contract checkpoint - 2026-09-21
+
+```text
+Milestone / status / date: M12 / CONTRACT_VERIFIED and M16 / CONTRACT_VERIFIED / 2026-09-21
+Tested code revision or worktree identity: reviewed working tree based on public c21027b; the checkpoint commit immediately following this gate records the tested tree
+Outcome and supported constraints: Precise replacement and scene-to-shot still review are implemented through
+  the ordinary application and durable store. Replacement preserves the selected instance and unrelated scene
+  state. Still creation freezes scene/shot/camera/time/delivery inputs and enters ordinary candidate review.
+Results by evidence class: D and A pass in the complete backend/browser gate. M12 lacks its declared new live
+  generation evidence; M16 lacks the declared human visual acceptance. Neither status implies M14 or M17.
+Human approvals actually recorded: NONE for these milestone outputs.
+Known limits: actual-host direction remains contract-only; no provider or renderer was commissioned here.
+Next dependency-ready milestone: M09 remains active; M14 follows its artist verdict.
+```
+
+### Portable recovery groundwork - 2026-09-21
+
+```text
+Work / status / date: M18 editable package export/import groundwork / CONTRACT_VERIFIED / 2026-09-21
+Outcome: schema v5 exports the complete project-scoped editable graph and asset bytes. Import validates archive
+  paths, inventory lengths and hashes, resource ceilings, GLB structure, project scope, identities, and every
+  relational reference; stages content, remaps database and revision-family identities, commits atomically, and
+  creates a separate inactive project. In-flight external jobs become failed/interrupted and never resume.
+Evidence: export -> import -> activate -> reopen -> model-content retrieval passes; a second import receives
+  fresh IDs while content deduplicates. Checksum corruption and a forged self-consistent GLB both leave no
+  partial project. Desktop and tablet project-switcher journeys pass in the complete gate.
+Limit: this is not M18 completion. The actual packaged workstation runtime, full small-workshop scenario,
+  playable M17 output, separate backup restore, actual host, and human/physical-device evidence remain open.
+```
 
 ### Historical execution notes before main QC
 
@@ -490,13 +520,13 @@ Retained for provenance. Branch, environment, dependency, and next-action statem
 | M09 | IN_PROGRESS | Route built and run live; awaiting the artist's recorded verdict |
 | M10 | CONTRACT_VERIFIED | M10 acceptance record below; no actual agent host available |
 | M11 | CONTRACT_VERIFIED | M11 acceptance record below; no actual agent host and no human composition acceptance |
-| M12 | NOT_STARTED | None |
+| M12 | CONTRACT_VERIFIED | Precise replacement/app persistence pass; declared live evidence remains |
 | M13 | VERIFIED | M13 acceptance record below |
 | M14 | NOT_STARTED | Compiler checked out; requires M09's recorded acceptance and M13 |
 | M15 | VERIFIED | M15 acceptance record below |
-| M16 | NOT_STARTED | None |
+| M16 | CONTRACT_VERIFIED | Scene-to-shot/app persistence pass; human visual acceptance remains |
 | M17 | NOT_STARTED | None |
-| M18 | NOT_STARTED | None |
+| M18 | NOT_STARTED | Portable import/export groundwork passes; full packaged/recovery scenario depends on all milestones |
 
 ### M00 acceptance record
 

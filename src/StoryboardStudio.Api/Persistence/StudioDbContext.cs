@@ -77,7 +77,10 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<PosePresetRecord>().HasIndex(x => new { x.ProjectId, x.Name }).IsUnique();
         modelBuilder.Entity<GenerationManifestRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<GenerationManifestRecord>().HasIndex(x => new { x.ShotId, x.CreatedAt });
-        modelBuilder.Entity<GenerationManifestRecord>().HasIndex(x => x.ManifestHash).IsUnique();
+        // The same immutable request can be carried into a separately imported
+        // project. Its hash is unique within that project, not across the whole
+        // workstation.
+        modelBuilder.Entity<GenerationManifestRecord>().HasIndex(x => new { x.ProjectId, x.ManifestHash }).IsUnique();
         modelBuilder.Entity<AssetRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<AssetRecord>().HasIndex(x => new { x.ProjectId, x.ContentHash }).IsUnique();
         modelBuilder.Entity<AssetRecord>().HasIndex(x => new { x.RevisionFamilyId, x.RevisionNumber });

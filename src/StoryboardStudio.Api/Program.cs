@@ -63,6 +63,7 @@ builder.Services.AddScoped<IProjectScope, ProjectScope>();
 builder.Services.AddDbContext<StudioDbContext>(options => options.UseSqlite(connectionString));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<StudioRepository>();
+builder.Services.AddSingleton<ICompilerSkeletonProfiles, CompilerSkeletonProfiles>();
 builder.Services.AddScoped<AssetStore>();
 builder.Services.AddSingleton<IVideoMediaProbe, FfprobeVideoMediaProbe>();
 builder.Services.AddScoped<AuthorityLibraryService>();
@@ -81,6 +82,7 @@ builder.Services.AddScoped<QwenVoiceService>();
 builder.Services.AddScoped<VoiceSynthesisService>();
 builder.Services.AddScoped<AudioMasteringService>();
 builder.Services.AddScoped<ProductionExportService>();
+builder.Services.AddScoped<PortableProjectImportService>();
 builder.Services.AddSingleton<IProviderCredentialStore, ProviderCredentialStore>();
 builder.Services.AddSingleton<PairingService>();
 builder.Services.AddSingleton<ICodexRuntime, CodexRuntime>();
@@ -117,7 +119,7 @@ builder.Services.AddProblemDetails();
 // FormOptions defaults to roughly 128 MB and Kestrel defaults to roughly
 // 30 MB. Media imports deliberately support up to 500 MB, so the form parser
 // and request feature must agree with the app's own streaming limits.
-builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = AssetStore.MaxMediaRequestBytes);
+builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = PortableProjectImportService.MaxPackageBytes + AssetStore.MultipartOverheadBytes);
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
@@ -148,6 +150,8 @@ app.Use(async (context, next) =>
             requestSize.MaxRequestBodySize = AssetStore.MaxMediaRequestBytes;
         else if (context.Request.Path.Equals("/api/assets/models", StringComparison.OrdinalIgnoreCase))
             requestSize.MaxRequestBodySize = AssetStore.MaxModelRequestBytes;
+        else if (context.Request.Path.Equals("/api/projects/import", StringComparison.OrdinalIgnoreCase))
+            requestSize.MaxRequestBodySize = PortableProjectImportService.MaxPackageBytes + AssetStore.MultipartOverheadBytes;
     }
     var pairing = context.RequestServices.GetRequiredService<PairingService>();
     var allowLan = app.Configuration.GetValue("Studio:AllowLan", false);
@@ -474,6 +478,18 @@ app.MapGet("/api/export/working-package", async (
     var package = await export.CreateAsync(allowWorkingCopy: true, cancellationToken);
     return Results.File(package.Content, "application/zip", package.FileName);
 });
+app.MapPost("/api/projects/import", async Task<IResult> (
+    HttpContext context,
+    PortableProjectImportService imports,
+    CancellationToken cancellationToken) =>
+{
+    if (!context.Request.HasFormContentType)
+        return Results.BadRequest(new { error = "A multipart Framewright project package is required." });
+    var form = await context.Request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("file");
+    if (file is null) return Results.BadRequest(new { error = "The multipart field 'file' is required." });
+    return ToHttpResult(await imports.ImportAsync(file, cancellationToken));
+}).DisableAntiforgery();
 app.MapGet("/api/export/audio/status", async (AudioMasteringService mastering, CancellationToken cancellationToken) => Results.Ok(await mastering.StatusAsync(cancellationToken)));
 app.MapGet("/api/export/audio-mix", async Task<IResult> (AudioMasteringService mastering, CancellationToken cancellationToken) =>
 {

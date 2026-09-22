@@ -325,6 +325,8 @@ public sealed class StudioRepository(
             await db.Shots.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.Comments.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.AssetReviewNotes.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.ShotVisualAudits.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.ShotRevisionProposals.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.Jobs.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.ShotVersions.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.SketchDocuments.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
@@ -339,6 +341,13 @@ public sealed class StudioRepository(
             await db.MusicRenders.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.MusicCompositionRevisions.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.MusicCompositions.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.SceneShotBindings.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.SceneAnnotations.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.SceneProposals.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.SceneBlockoutItems.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.SceneBlockoutPlans.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.SceneInstances.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+            await db.Scenes.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.AssetCollections.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
             await db.Assets.IgnoreQueryFilters().Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
 

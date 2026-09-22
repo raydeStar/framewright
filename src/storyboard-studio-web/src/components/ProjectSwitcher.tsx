@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BadgeCheck, Check, ChevronDown, CircleAlert, FolderPlus, LoaderCircle, Plus, Sparkles, Trash2, X } from 'lucide-react'
+import { BadgeCheck, Check, ChevronDown, CircleAlert, FolderPlus, LoaderCircle, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { ApiError, studioApi } from '../api'
 import Dialog from './Dialog'
 import type { ProjectInterviewProposal, ProjectListItem, ProjectSummary } from '../types'
@@ -23,6 +23,7 @@ export default function ProjectSwitcher({ project, onSwitched, onError }: {
   const [creating, setCreating] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<ProjectListItem>()
   const trigger = useRef<HTMLButtonElement>(null)
+  const packageInput = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     try { setProjects(await studioApi.projects()) }
@@ -42,6 +43,20 @@ export default function ProjectSwitcher({ project, onSwitched, onError }: {
       onSwitched(switched.name)
     } catch (reason) { onError(reason instanceof Error ? reason.message : 'Could not switch project.') }
     finally { setBusyId(undefined) }
+  }
+
+  const importPackage = async (file?: File) => {
+    if (!file || busyId) return
+    setBusyId('import')
+    try {
+      const imported = await studioApi.importProject(file)
+      setOpen(false); setProjects(undefined)
+      onSwitched(`${imported.name} imported with ${imported.assetCount} assets and ${imported.sceneCount} scenes. Switch to it when you are ready.`)
+    } catch (reason) { onError(reason instanceof Error ? reason.message : 'Could not import the project package.') }
+    finally {
+      setBusyId(undefined)
+      if (packageInput.current) packageInput.current.value = ''
+    }
   }
 
   return <div className="project-identity">
@@ -95,6 +110,10 @@ export default function ProjectSwitcher({ project, onSwitched, onError }: {
         </div>)}
         <div className="project-menu-foot">
           <button type="button" role="menuitem" onClick={() => { setOpen(false); setCreating(true) }}><Plus size={15} />New project</button>
+          <button type="button" role="menuitem" disabled={Boolean(busyId)} onClick={() => packageInput.current?.click()}>
+            {busyId === 'import' ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />}{busyId === 'import' ? 'Checking package…' : 'Import package'}
+          </button>
+          <input ref={packageInput} type="file" accept=".zip,application/zip" hidden onChange={event => void importPackage(event.target.files?.[0])} />
         </div>
       </div>
     </>}

@@ -8,22 +8,18 @@ namespace StoryboardStudio.Api.Services;
 /// profile this build actually knows; anything else is reported as an unknown
 /// skeleton, never as a nearly-right humanoid.
 /// </summary>
-public sealed record HumanoidRigProfile(string Id, string Name, string[] RequiredBones)
-{
-    /// <summary>
-    /// The one body class this build supports. More body classes, hand and
-    /// facial rigs, and retargeting are deliberately out of scope here.
-    /// </summary>
-    public static readonly HumanoidRigProfile HumanoidA = new(
-        "humanoid-a", "Humanoid A (spine, arms, legs)",
-        [
-            "Hips", "Spine", "Chest", "Neck", "Head",
-            "LeftUpperArm", "LeftLowerArm", "LeftHand",
-            "RightUpperArm", "RightLowerArm", "RightHand",
-            "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
-            "RightUpperLeg", "RightLowerLeg", "RightFoot",
-        ]);
-}
+public sealed record HumanoidRigProfile(
+    string Id,
+    string Name,
+    string[] RequiredBones,
+    IReadOnlyDictionary<string, string> ExpectedParents,
+    string[] OptionalBones,
+    bool AllowUnlistedBones,
+    int? ExactBoneCount,
+    string? RootBone,
+    bool RootMayBeArmatureObject,
+    int MaxInfluences,
+    int TriangleBudget);
 
 /// <summary>One bone as the file describes it, with its rest pose in both forms.</summary>
 public sealed record GlbBoneSummary(
@@ -71,15 +67,22 @@ public static class GlbRigInspector
         false, "none", "No skeleton", false, [], [], 0, 0, 0, 0, [],
         true, true, true, 0, [], false);
 
-    public static GlbRigProfile Inspect(ReadOnlySpan<byte> json, ReadOnlySpan<byte> binary, HumanoidRigProfile? profile = null)
+    public static GlbRigProfile Inspect(
+        ReadOnlySpan<byte> json, ReadOnlySpan<byte> binary,
+        IReadOnlyList<HumanoidRigProfile>? profiles = null,
+        int triangleCount = 0,
+        string? profileLoadDetail = null)
     {
         using var document = JsonDocument.Parse(json.ToArray());
-        return Inspect(document.RootElement, binary, profile);
+        return Inspect(document.RootElement, binary, profiles, triangleCount, profileLoadDetail);
     }
 
-    public static GlbRigProfile Inspect(JsonElement root, ReadOnlySpan<byte> binary, HumanoidRigProfile? profile = null)
+    public static GlbRigProfile Inspect(
+        JsonElement root, ReadOnlySpan<byte> binary,
+        IReadOnlyList<HumanoidRigProfile>? profiles = null,
+        int triangleCount = 0,
+        string? profileLoadDetail = null)
     {
-        var expected = profile ?? HumanoidRigProfile.HumanoidA;
         var skins = Array(root, "skins");
         if (skins.Length == 0) return NoSkeleton;
 
@@ -160,13 +163,24 @@ public static class GlbRigInspector
         var (weightsValid, checkedVertices, skinnedVertices, maxInfluences) =
             ValidateSkin(root, meshes, accessors, bufferViews, binary, joints.Length, findings);
 
-        var present = bones.Select(bone => bone.Name).ToHashSet(StringComparer.Ordinal);
-        var missing = expected.RequiredBones.Where(bone => !present.Contains(bone)).ToArray();
-        var unexpected = bones.Select(bone => bone.Name)
-            .Where(name => !expected.RequiredBones.Contains(name, StringComparer.Ordinal)).ToArray();
-        var matched = missing.Length == 0;
-        if (!matched)
-            findings.Add($"This skeleton does not match {expected.Name}: {missing.Length} of its {expected.RequiredBones.Length} bones are missing, starting with {missing[0]}.");
+        var availableProfiles = profiles ?? [];
+        var matches = availableProfiles
+            .Select(profile => Match(profile, bones, maxInfluences, triangleCount))
+            .OrderBy(match => match.Failures.Length)
+            .ThenBy(match => match.Profile.Id, StringComparer.Ordinal)
+            .ToArray();
+        var chosen = matches.FirstOrDefault(match => match.Failures.Length == 0);
+        var closest = chosen ?? matches.FirstOrDefault();
+        var matched = chosen is not null;
+        var missing = closest?.Missing ?? [];
+        var unexpected = closest?.Unexpected ?? [];
+        if (availableProfiles.Count == 0)
+            findings.Add(profileLoadDetail ?? "No compiler skeleton profiles are available, so this rig cannot be declared animation-ready.");
+        else if (!matched && closest is not null)
+        {
+            findings.Add($"This skeleton does not match compiler profile {closest.Profile.Id}.");
+            findings.AddRange(closest.Failures);
+        }
 
         var ready = matched && transformsFinite && bindPoseValid && weightsValid && skins.Length == 1;
         if (!ready && matched)
@@ -177,8 +191,8 @@ public static class GlbRigInspector
 
         return new GlbRigProfile(
             HasSkeleton: true,
-            ProfileId: matched ? expected.Id : "unknown",
-            ProfileName: matched ? expected.Name : "Unknown skeleton",
+            ProfileId: matched ? chosen!.Profile.Id : "unknown",
+            ProfileName: matched ? chosen!.Profile.Name : "Unknown skeleton",
             ProfileMatched: matched,
             MissingBones: missing, UnexpectedBones: unexpected,
             SkinCount: skins.Length, BoneCount: bones.Count,
@@ -189,6 +203,54 @@ public static class GlbRigInspector
             Findings: [.. findings], AnimationReady: ready,
             Fingerprint: fingerprint.Fingerprint);
     }
+
+    private static ProfileMatch Match(
+        HumanoidRigProfile profile,
+        List<GlbBoneSummary> bones,
+        int maxInfluences,
+        int triangleCount)
+    {
+        var groupedBones = bones.GroupBy(bone => bone.Name, StringComparer.Ordinal).ToArray();
+        var present = groupedBones.Select(group => group.Key).ToHashSet(StringComparer.Ordinal);
+        var parents = groupedBones.ToDictionary(group => group.Key, group => group.First().Parent, StringComparer.Ordinal);
+        var duplicateNames = groupedBones.Where(group => group.Skip(1).Any()).Select(group => group.Key).ToArray();
+        var missing = profile.RequiredBones.Where(bone => !present.Contains(bone)).ToArray();
+        var listed = profile.RequiredBones.Concat(profile.OptionalBones).ToHashSet(StringComparer.Ordinal);
+        if (profile.RootBone is { Length: > 0 } declaredRoot) listed.Add(declaredRoot);
+        var unexpected = bones.Select(bone => bone.Name).Where(name => !listed.Contains(name)).ToArray();
+        var failures = new List<string>();
+        if (duplicateNames.Length > 0)
+            failures.Add($"{duplicateNames.Length} bone name(s) are duplicated, starting with {duplicateNames[0]}.");
+        if (missing.Length > 0)
+            failures.Add($"{missing.Length} required bone(s) are missing, starting with {missing[0]}.");
+        var parentMismatches = profile.ExpectedParents
+            .Where(pair => parents.TryGetValue(pair.Key, out var actual) && !string.Equals(actual, pair.Value, StringComparison.Ordinal))
+            .Select(pair => $"{pair.Key} must be parented to {pair.Value}.")
+            .ToArray();
+        failures.AddRange(parentMismatches);
+        if (!profile.AllowUnlistedBones && unexpected.Length > 0)
+            failures.Add($"{unexpected.Length} unlisted bone(s) are present, starting with {unexpected[0]}.");
+        if (profile.ExactBoneCount is { } exact && bones.Count != exact)
+            failures.Add($"The profile requires exactly {exact} bones; this skeleton has {bones.Count}.");
+        if (profile.RootBone is { Length: > 0 } root)
+        {
+            if (parents.TryGetValue(root, out var rootParent) && rootParent is not null)
+                failures.Add($"Root bone {root} must not have a bone parent.");
+            else if (!present.Contains(root) && !profile.RootMayBeArmatureObject)
+                failures.Add($"Root bone {root} is missing and the profile does not permit the armature object to replace it.");
+        }
+        if (maxInfluences > profile.MaxInfluences)
+            failures.Add($"A vertex uses {maxInfluences} influences; the profile permits {profile.MaxInfluences}.");
+        if (triangleCount > profile.TriangleBudget)
+            failures.Add($"The payload has {triangleCount:N0} triangles; the profile budget is {profile.TriangleBudget:N0}.");
+        return new(profile, missing, unexpected, [.. failures]);
+    }
+
+    private sealed record ProfileMatch(
+        HumanoidRigProfile Profile,
+        string[] Missing,
+        string[] Unexpected,
+        string[] Failures);
 
     private static GlbRigProfile Unknown(int skinCount, List<string> findings) => new(
         true, "unknown", "Unknown skeleton", false, [], [], skinCount, 0, 0, 0, [],

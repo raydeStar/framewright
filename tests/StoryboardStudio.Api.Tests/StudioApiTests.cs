@@ -31,6 +31,7 @@ public class StudioApiFactory : WebApplicationFactory<Program>
     private readonly Action<IServiceCollection>? configureServices;
     public string DataRoot { get; }
     public string DisabledCodexExecutable => Path.Combine(DataRoot, "codex-disabled-for-tests.exe");
+    public string SkeletonProfilePath => Path.Combine(DataRoot, "rig-profiles");
 
     public StudioApiFactory()
         : this(Path.Combine(Path.GetTempPath(), "storyboard-studio-tests", Guid.NewGuid().ToString("N")), true) { }
@@ -57,6 +58,7 @@ public class StudioApiFactory : WebApplicationFactory<Program>
         this.startGenerationWorker = startGenerationWorker;
         this.videoMediaProbe = videoMediaProbe;
         Directory.CreateDirectory(DataRoot);
+        TestRigProfiles.WriteTo(SkeletonProfilePath);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -77,6 +79,7 @@ public class StudioApiFactory : WebApplicationFactory<Program>
             // signed-in Codex CLI or spend a minute waiting for it.
             ["Integrations:Codex:Executable"] = DisabledCodexExecutable,
             ["Integrations:Codex:NonInteractiveImageEnabled"] = "false",
+            ["Integrations:ReferenceAssetCompiler:SkeletonProfilePath"] = SkeletonProfilePath,
             ["QwenTts:Enabled"] = "false",
             ["Studio:Backups:Enabled"] = "false",
             ["Studio:DataRoot"] = DataRoot,
@@ -1771,7 +1774,7 @@ public sealed class StudioApiTests : IClassFixture<StudioApiFactory>
         Assert.Equal("application/zip", response.Content.Headers.ContentType?.MediaType);
         using var archive = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read); var manifestEntry = archive.GetEntry("production-manifest.json"); Assert.NotNull(manifestEntry);
         using var json = JsonDocument.Parse(manifestEntry!.Open()); var root = json.RootElement;
-        Assert.Equal(4, root.GetProperty("schemaVersion").GetInt32()); Assert.Equal("WorkingCopy", root.GetProperty("packageKind").GetString());
+        Assert.Equal(5, root.GetProperty("schemaVersion").GetInt32()); Assert.Equal("WorkingCopy", root.GetProperty("packageKind").GetString());
         Assert.True(root.GetProperty("policy").GetProperty("audioIsSeparate").GetBoolean()); Assert.False(root.GetProperty("policy").GetProperty("generatedBackgroundMusicAllowed").GetBoolean()); Assert.True(root.GetProperty("shots").GetArrayLength() >= 6); Assert.True(root.GetProperty("timeline").GetArrayLength() >= 2);
         Assert.Equal(JsonValueKind.Array, root.GetProperty("scenes").ValueKind);
         Assert.Equal(JsonValueKind.Array, root.GetProperty("sceneInstances").ValueKind);

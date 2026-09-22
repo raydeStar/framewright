@@ -1,6 +1,6 @@
 # Sol handoff: finish the Director Mode workflow
 
-Prepared 2026-09-21 after the WIP review and private-main integration. Baseline: `1ffb720aaf18d4a50ccbeb406e867737ef12af8f`. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
+Prepared 2026-09-21 and refreshed after the first public-main MVP increments. Public baseline before the current checkpoint: `c21027b129da6799477993146240d8fc548e9e39`. This is a continuation brief, not an instruction to start generation or a claim of release readiness.
 
 > **Repository destination update — 2026-09-21:** `github.com/raydeStar/framewright` is now the maintained Framewright repository and the former private mirror is deprecated. Publish authorized Framewright work to public `main`. Geometry, retopology, UV, material, texture, rigging, deformation-gate, payload, and compiler-receipt changes belong in `github.com/raydeStar/reference-asset-compiler`; Framewright consumes that versioned contract and owns orchestration, import, scene use, and review.
 
@@ -37,7 +37,7 @@ The artist's ambition does not remove the current explicit Generate/Render or ra
 
 ## What the checkpoint actually proves
 
-The latest QC reviewed 46 commits, repaired data-integrity and UI lifecycle defects, and pushed to private `origin/main`. Its detailed receipt is in the goal's **WIP quality-control record - 2026-09-21**.
+The historical pre-public QC reviewed 46 commits and repaired data-integrity and UI lifecycle defects. Its detailed receipt is in the goal's **WIP quality-control record - 2026-09-21**. The maintained remote is now public `raydeStar/framewright`; the private push named in that older receipt is provenance, not the current destination.
 
 - Application fixes at `3abed12`: database-enforced scene concurrency; edits retained during save; atomic model import/revision/lineage/delivery; no current-selection reset when an older source finishes preparation; malformed GLB rejection; glass-stage preflight; readiness retry; current-state async scene callbacks; independent selection materials and resource disposal; configuration precedence and analyzer fixes.
 - Test launcher at `7ac0216`: `STUDIO_E2E_PORT` override and disposable test binaries, so existing apps can keep their port and Debug assemblies.
@@ -46,11 +46,11 @@ The latest QC reviewed 46 commits, repaired data-integrity and UI lifecycle defe
 - The full verification script passed its pre-browser checks, then exposed occupied-port/locked-binary startup problems. After the launcher repair, the complete browser suite passed separately. Do not describe that as one final successful `verify.ps1` invocation.
 - No new live generation, actual-host commissioning, or packaged release acceptance occurred during QC. Earlier milestone records contain separate live worker evidence. The Three.js bundle still has a Vite size warning.
 
-The first implemented MVP increment after that handoff adds precise placeholder replacement, full-view Scene Director Mode, and a real browser-rendered scene still that freezes saved scene state, a distinct shot camera, timing, delivery settings, and a content hash into the ordinary candidate-review path. Working-copy exports now include the editable scene graph and scene-to-shot bindings. The complete local gate passed with 278 backend tests and 132 browser journeys plus six intentional tablet exclusions; no provider or production queue was contacted.
+The implemented MVP increments add precise placeholder replacement, full-view Scene Director Mode, and a real browser-rendered scene still that freezes saved scene state, a distinct shot camera, timing, delivery settings, and a content hash into the ordinary candidate-review path. Working packages now round-trip the complete editable project graph into a separate project with fresh identities and verified content. Framewright also consumes skeleton profiles owned by the compiler checkout rather than carrying a product fallback. The complete local gate passed with 283 backend tests and 134 browser journeys plus six intentional tablet exclusions; no provider or production queue was contacted.
 
 Ignored evidence, when still present locally: `artifacts/qc/regressions-before.log`, `regressions-after.log`, `verify-final-5182.log`, `browser-final.log`, `{model,scene}-{desktop,tablet}.png`, and `src/storyboard-studio-web/playwright-report/index.html`. Do not expect these files in a fresh clone or commit private media to make them portable.
 
-[Hosted CI run 35659270918](https://github.com/raydeStar/framewright-private/actions/runs/35659270918) did not start its jobs because an Actions budget prevented execution. This remains an external evidence gap. The account owner must restore capacity; do not disable workflow checks or change spending settings to manufacture green CI.
+The last public baseline passed [hosted run 35670211224](https://github.com/raydeStar/framewright/actions/runs/35670211224). Require a fresh green public run for the current pushed checkpoint as well.
 
 ## Where to resume
 
@@ -62,9 +62,9 @@ The browser registry in `src/storyboard-studio-web/src/webmcp.ts` currently expo
 
 **Close M09 with the right evidence.** The preparation route has run live; the prepared sword derivative still awaits the artist's recorded source/derivative verdict. Locate its existing fixed-view evidence and present a concrete comparison. A later favorable texture verdict on a different hero asset does not accept that sword derivative. A mechanical pass is not a production-ready declaration. Do not regenerate merely to obtain a fresh-looking receipt.
 
-**Respect the two dependency chains.** M12 completes precise placeholder replacement after M08/M11. M14 requires M09 acceptance and M13, then integrates a real supported rig-creation route and deformation review. A compiler checkout alone does not satisfy M14. M16 joins replacement and existing motion with shot timing, a distinct shot camera, frozen scene state, and a real reviewed still. M17 joins the accepted rig and shot/render path into an actual animated take. M18 proves the connected packaged/recovery scenario. Consult the exact milestone contracts before coding; do not skip the rig or substitute a viewport recording to claim completion.
+**Respect the two dependency chains.** M12's precise replacement and M16's scene-to-shot path are now `CONTRACT_VERIFIED`; their declared live/human evidence still matters. M14 requires M09 acceptance and M13, then integrates a real supported rig-creation route and deformation review. A compiler checkout or consumed profile alone does not satisfy M14. M17 joins the accepted rig and shot/render path into an actual animated take. M18 now has round-trip package groundwork, but completion still proves the connected packaged runtime, backup restore, and full scenario. Consult the exact milestone contracts before coding; do not skip the rig or substitute a viewport recording to claim completion.
 
-**Keep compiler ownership clear.** Read [REFERENCE_ASSET_COMPILER.md](REFERENCE_ASSET_COMPILER.md) and the compiler checkout's canonical `docs/BROWSER_STUDIO_CONTRACT.md`. Verify current pinned revision, capabilities, profile hierarchy checks, and skeleton fingerprint compatibility against source and fixtures. The Framewright note identifies potential profile/fingerprint gaps; determine whether they remain before implementing them. `humanoid-a` is a Framewright test fixture, not a commissioned engine profile. The compiler owns generation/preparation/rigging, source conditioning, and verdicts. Framewright owns validated import, user review, library/scene state, and applying root motion once. Do not replace the reference-conditioned pipeline with an eyeballed Blender reconstruction or quietly patch the other repository without authorization.
+**Keep compiler ownership clear.** Read [REFERENCE_ASSET_COMPILER.md](REFERENCE_ASSET_COMPILER.md) and the compiler checkout's canonical `docs/BROWSER_STUDIO_CONTRACT.md`. Framewright now reads `profiles/skeletons/*.json` from that checkout and enforces its hierarchy, list, count, root, influence, and triangle-budget contracts; its fingerprint remains byte-compatible with the compiler vector. `humanoid-a` exists only as a deterministic Framewright test fixture. The compiler owns generation/preparation/rigging, source conditioning, and verdicts. Framewright owns validated import, user review, library/scene state, and applying root motion once. Do not replace the reference-conditioned pipeline with an eyeballed Blender reconstruction.
 
 ## Source map
 
@@ -101,7 +101,7 @@ $env:STUDIO_E2E_PORT = '5182'
 .\scripts\verify.ps1
 ```
 
-Check that the port is actually free first; 5182 was available during QC, not reserved forever. The gate restores dependencies and runs audits, builds, backend/script tests, and Playwright. Use focused commands from AGENTS.md during iteration instead of running the full gate for every edit. Report the exact tested revision, command outcomes, skips, environment, artifacts, and unrun checks. Restored hosted CI, actual-host proof, authorized live-worker proof, human acceptance, and packaged recovery remain separate evidence categories.
+Check that the port is actually free first; no test port is reserved forever. The gate restores dependencies and runs audits, builds, backend/script tests, and Playwright. Use focused commands from AGENTS.md during iteration instead of running the full gate for every edit. Report the exact tested revision, command outcomes, skips, environment, artifacts, and unrun checks. Hosted CI, actual-host proof, authorized live-worker proof, human acceptance, and full packaged recovery remain separate evidence categories.
 
 Use disposable data and bounded licensed fixtures. Preserve active applications, production databases/media, GPU work, and external queues. Keep local configuration, tokens, model weights, and generated/private assets out of Git. Work in the existing checkout without new linked worktrees. The maintained Framewright destination is public `raydeStar/framewright`; do not resume the deprecated private mirror. Keep compiler-owned implementation in `raydeStar/reference-asset-compiler` and consume its pinned contract here.
 

@@ -1,4 +1,4 @@
-import type { AssetCollectionSummary, AssetPlacementSummary, AssetUsageSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
+import type { AssetCollectionSummary, AssetPlacementSummary, AssetUsageSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PortableProjectImportSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
 import type { AssetReviewNoteSummary, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
@@ -24,6 +24,19 @@ async function optionalRequest<T>(url: string): Promise<T | null> {
   }
   const text = await response.text()
   return text ? JSON.parse(text) as T : null
+}
+
+async function uploadProjectPackage(file: File): Promise<PortableProjectImportSummary> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetch('/api/projects/import', { method: 'POST', body: form })
+  if (!response.ok) {
+    const text = await response.text()
+    let problem: { error?: string; title?: string } | undefined
+    try { problem = JSON.parse(text) as { error?: string; title?: string } } catch { /* A corrupt proxy response is still shown verbatim. */ }
+    throw new ApiError(problem?.error || problem?.title || text || `${response.status} ${response.statusText}`, response.status)
+  }
+  return response.json() as Promise<PortableProjectImportSummary>
 }
 
 /** The shot view an agent is asking about, as query parameters the service can re-derive state from. */
@@ -63,6 +76,7 @@ export const studioApi = {
   createProject: (body: { name: string; production: string; sequenceCode: string; sequenceName: string; framesPerSecond: number; aspectRatio: string; deliveryWidth: number; deliveryHeight: number; colorSpace?: ProjectSummary['colorSpace']; audioSampleRate?: ProjectSummary['audioSampleRate']; visualStyle?: string; worldCanon?: string; promptDirectives?: string; negativeDirectives?: string }) => request<ProjectSummary>('/api/projects', { method: 'POST', body: JSON.stringify(body) }),
   activateProject: (projectId: string) => request<ProjectSummary>(`/api/projects/${projectId}/activate`, { method: 'POST' }),
   deleteProject: (projectId: string, acceptRatifiedLoss = false) => request<ProjectDeletionSummary>(`/api/projects/${projectId}?acceptRatifiedLoss=${acceptRatifiedLoss}`, { method: 'DELETE' }),
+  importProject: uploadProjectPackage,
   assetReviewNotes: (assetId: string) => request<AssetReviewNoteSummary[]>(`/api/assets/${assetId}/review-notes`),
   addAssetReviewNote: (assetId: string, body: { x: number; y: number; body: string }) => request<AssetReviewNoteSummary>(`/api/assets/${assetId}/review-notes`, { method: 'POST', body: JSON.stringify(body) }),
   moveAssetReviewNote: (noteId: string, x: number, y: number) => request<AssetReviewNoteSummary>(`/api/asset-review-notes/${noteId}/position`, { method: 'PUT', body: JSON.stringify({ x, y }) }),

@@ -25,13 +25,15 @@ public sealed class AssetStore
     private readonly StudioDbContext db;
     private readonly IProjectScope projectScope;
     private readonly TimeProvider timeProvider;
+    private readonly ICompilerSkeletonProfiles skeletonProfiles;
     private readonly string root;
 
-    public AssetStore(StudioDbContext db, IProjectScope projectScope, TimeProvider timeProvider, IConfiguration configuration, IWebHostEnvironment environment)
+    public AssetStore(StudioDbContext db, IProjectScope projectScope, TimeProvider timeProvider, IConfiguration configuration, IWebHostEnvironment environment, ICompilerSkeletonProfiles skeletonProfiles)
     {
         this.db = db;
         this.projectScope = projectScope;
         this.timeProvider = timeProvider;
+        this.skeletonProfiles = skeletonProfiles;
         root = StudioPaths.ResolveAssetRoot(configuration, environment);
     }
 
@@ -172,7 +174,7 @@ public sealed class AssetStore
                 finally { ArrayPool<byte>.Shared.Return(buffer); }
             }
 
-            var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(temporaryPath, cancellationToken));
+            var inspection = Inspect(await File.ReadAllBytesAsync(temporaryPath, cancellationToken));
             if (!inspection.Ok) return RepositoryResult<AssetSummary>.Invalid(inspection.Error!);
 
             var existing = await db.Assets.AsNoTracking().SingleOrDefaultAsync(asset => asset.ContentHash == contentHash, cancellationToken);
@@ -266,7 +268,7 @@ public sealed class AssetStore
         var path = Path.Combine(root, asset.StoragePath.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(path)) return RepositoryResult<ModelProfileSummary>.Unavailable("The stored model file is missing from the asset root.");
 
-        var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
+        var inspection = Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
         if (!inspection.Ok) return RepositoryResult<ModelProfileSummary>.Invalid(inspection.Error!);
         var profile = inspection.Profile!;
         var limits = GlbSupportProfile.Default;
@@ -299,7 +301,7 @@ public sealed class AssetStore
         if (asset is null || asset.Kind != nameof(AssetKind.Model)) return null;
         var path = Path.Combine(root, asset.StoragePath.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(path)) return null;
-        var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
+        var inspection = Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
         return inspection.Ok ? (inspection.Profile!.Rig, inspection.Profile!.Clips) : null;
     }
 
@@ -332,7 +334,7 @@ public sealed class AssetStore
         var path = Path.Combine(root, asset.StoragePath.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(path)) return RepositoryResult<RigPoseSummary>.Unavailable("The stored model file is missing from the asset root.");
 
-        var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
+        var inspection = Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
         if (!inspection.Ok) return RepositoryResult<RigPoseSummary>.Invalid(inspection.Error!);
         var rig = inspection.Profile!.Rig;
         if (!rig.HasSkeleton) return RepositoryResult<RigPoseSummary>.Invalid("This model is a static prop: it has no skeleton to pose.");
@@ -348,6 +350,9 @@ public sealed class AssetStore
             asset.Id, asset.ContentHash, rig.ProfileId,
             [.. result.Joints.Select(joint => new RigJointPlacementSummary(joint.Bone, joint.Parent, joint.Position, joint.RestPosition))]));
     }
+
+    private GlbInspectionResult Inspect(byte[] bytes) =>
+        GlbModelInspector.Inspect(bytes, skeletonProfiles: skeletonProfiles.Load());
 
     public async Task<RepositoryResult<AssetSummary>> ImportGeneratedMediaAsync(Stream input, string fileName, string mimeType, long? expectedLength, AssetKind kind, CancellationToken cancellationToken, string source = "Generated media")
     {
@@ -882,6 +887,38 @@ public sealed class AssetStore
         var normalized = (value ?? "").Trim();
         if (normalized.Length == 0) normalized = fallback;
         return normalized.Length <= limit ? normalized : normalized[..limit];
+    }
+
+    internal static async Task<string?> ValidatePortablePayloadAsync(
+        string path,
+        AssetKind kind,
+        string mimeType,
+        int? width,
+        int? height,
+        CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(path);
+        if (kind == AssetKind.Image)
+        {
+            var image = await InspectImageAsync(path, cancellationToken);
+            if (image is null) return "the bytes are not a supported PNG or JPEG image";
+            if (!extension.Equals(image.Extension, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(mimeType, image.MimeType, StringComparison.OrdinalIgnoreCase)
+                || width != image.Width || height != image.Height)
+                return "the image extension, MIME type, or dimensions do not match its bytes";
+            return null;
+        }
+        if (kind is AssetKind.Audio or AssetKind.Video)
+        {
+            var media = await InspectMediaAsync(path, kind, cancellationToken);
+            if (media is null) return kind == AssetKind.Audio
+                ? "the bytes are not a supported audio container"
+                : "the bytes are not a supported video container";
+            if (!extension.Equals(media.Extension, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(mimeType, media.MimeType, StringComparison.OrdinalIgnoreCase))
+                return "the media extension or MIME type does not match its bytes";
+        }
+        return null;
     }
 
     private static async Task<ImageInfo?> InspectImageAsync(string path, CancellationToken cancellationToken)

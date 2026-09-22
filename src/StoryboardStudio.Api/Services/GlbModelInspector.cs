@@ -84,7 +84,10 @@ public static class GlbModelInspector
     /// the accessor bounds are read, so inspection cost does not scale with the
     /// size of the geometry payload.
     /// </summary>
-    public static GlbInspectionResult Inspect(ReadOnlySpan<byte> bytes, GlbSupportProfile? profile = null)
+    public static GlbInspectionResult Inspect(
+        ReadOnlySpan<byte> bytes,
+        GlbSupportProfile? profile = null,
+        CompilerSkeletonProfileSet? skeletonProfiles = null)
     {
         var limits = profile ?? GlbSupportProfile.Default;
         if (bytes.Length > limits.MaxBytes)
@@ -138,7 +141,7 @@ public static class GlbModelInspector
             // The skin is read from the file's own bytes rather than taken on
             // trust from the JSON, so the binary chunk travels with the document.
             var binary = binaryChunkBytes > 0 ? bytes.Slice(binaryChunkOffset, (int)binaryChunkBytes) : default;
-            return Describe(json.RootElement, binaryChunkBytes, binary, limits);
+            return Describe(json.RootElement, binaryChunkBytes, binary, limits, skeletonProfiles);
         }
         catch (Exception error) when (error is InvalidOperationException or FormatException or OverflowException)
         {
@@ -147,7 +150,12 @@ public static class GlbModelInspector
         finally { json?.Dispose() ; }
     }
 
-    private static GlbInspectionResult Describe(JsonElement root, long binaryChunkBytes, ReadOnlySpan<byte> binary, GlbSupportProfile limits)
+    private static GlbInspectionResult Describe(
+        JsonElement root,
+        long binaryChunkBytes,
+        ReadOnlySpan<byte> binary,
+        GlbSupportProfile limits,
+        CompilerSkeletonProfileSet? skeletonProfiles)
     {
         if (!root.TryGetProperty("asset", out var assetNode) || !assetNode.TryGetProperty("version", out var versionNode)
             || versionNode.GetString() is not { } specVersion)
@@ -272,7 +280,8 @@ public static class GlbModelInspector
             BoundsMin: [Round(min.X), Round(min.Y), Round(min.Z)],
             BoundsMax: [Round(max.X), Round(max.Y), Round(max.Z)],
             Dimensions: [Round(max.X - min.X), Round(max.Y - min.Y), Round(max.Z - min.Z)],
-            Rig: GlbRigInspector.Inspect(root, binary),
+            Rig: GlbRigInspector.Inspect(
+                root, binary, skeletonProfiles?.Profiles, (int)triangleCount, skeletonProfiles?.Detail),
             Clips: GlbClipInspector.Inspect(root, binary)));
     }
 

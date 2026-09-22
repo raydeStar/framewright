@@ -1,4 +1,5 @@
 using StoryboardStudio.Api.Services;
+using Microsoft.Extensions.Configuration;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -17,10 +18,13 @@ namespace StoryboardStudio.Api.Tests;
 /// </summary>
 public sealed class RiggedModelTests
 {
+    private static GlbInspectionResult Inspect(byte[] bytes) =>
+        GlbModelInspector.Inspect(bytes, skeletonProfiles: TestRigProfiles.Set);
+
     [Fact]
     public void AKnownGoodHumanoidReportsItsProfileSkeletonAndBindData()
     {
-        var result = GlbModelInspector.Inspect(ModelFixtures.RiggedFigure());
+        var result = Inspect(ModelFixtures.RiggedFigure());
         Assert.True(result.Ok, result.Error);
         var rig = result.Profile!.Rig;
 
@@ -69,8 +73,8 @@ public sealed class RiggedModelTests
         // compiler, so this moves one bone below that rounding and requires the
         // fingerprint to notice. The fixture's own transforms are exact at four
         // decimals, which is why this case has to be made deliberately.
-        var base_ = GlbModelInspector.Inspect(ModelFixtures.RiggedFigure());
-        var nudged = GlbModelInspector.Inspect(MutateRig(document =>
+        var base_ = Inspect(ModelFixtures.RiggedFigure());
+        var nudged = Inspect(MutateRig(document =>
         {
             var node = document["nodes"]![6]!;
             var translation = node["translation"]!.AsArray();
@@ -81,7 +85,7 @@ public sealed class RiggedModelTests
         Assert.NotNull(base_.Profile!.Rig.Fingerprint);
         Assert.NotEqual(base_.Profile!.Rig.Fingerprint, nudged.Profile!.Rig.Fingerprint);
         // A tenth of that is below the quantization step and is the same rig.
-        var imperceptible = GlbModelInspector.Inspect(MutateRig(document =>
+        var imperceptible = Inspect(MutateRig(document =>
         {
             var node = document["nodes"]![6]!;
             var translation = node["translation"]!.AsArray();
@@ -93,7 +97,7 @@ public sealed class RiggedModelTests
     [Fact]
     public void ArbitrarilyNamedBonesAreAnUnknownSkeletonRatherThanAnAlmostHumanoid()
     {
-        var result = GlbModelInspector.Inspect(ModelFixtures.RiggedWrongProfile());
+        var result = Inspect(ModelFixtures.RiggedWrongProfile());
         Assert.True(result.Ok, result.Error);
         var rig = result.Profile!.Rig;
 
@@ -112,9 +116,67 @@ public sealed class RiggedModelTests
     }
 
     [Fact]
+    public void CompilerProfilesEnforceHierarchyListsCountsAndPayloadBudget()
+    {
+        var baseline = TestRigProfiles.HumanoidA;
+        var wrongParents = new Dictionary<string, string>(baseline.ExpectedParents, StringComparer.Ordinal)
+        {
+            ["Head"] = "Chest"
+        };
+        var requiredWithoutHand = baseline.RequiredBones.Where(name => name != "LeftHand").ToArray();
+        var cases = new (HumanoidRigProfile Profile, string Finding)[]
+        {
+            (baseline with { ExpectedParents = wrongParents }, "Head must be parented to Chest"),
+            (baseline with { RequiredBones = requiredWithoutHand, OptionalBones = [] }, "unlisted bone"),
+            (baseline with { ExactBoneCount = 18 }, "exactly 18 bones"),
+            (baseline with { TriangleBudget = 1 }, "profile budget is 1"),
+        };
+
+        foreach (var (profile, finding) in cases)
+        {
+            var result = GlbModelInspector.Inspect(
+                ModelFixtures.RiggedFigure(), skeletonProfiles: new([profile], null));
+            Assert.True(result.Ok, result.Error);
+            Assert.False(result.Profile!.Rig.ProfileMatched);
+            Assert.False(result.Profile.Rig.AnimationReady);
+            Assert.Contains(result.Profile.Rig.Findings,
+                item => item.Contains(finding, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var optionalHand = baseline with { RequiredBones = requiredWithoutHand, OptionalBones = ["LeftHand"] };
+        var accepted = GlbModelInspector.Inspect(
+            ModelFixtures.RiggedFigure(), skeletonProfiles: new([optionalHand], null));
+        Assert.True(accepted.Profile!.Rig.AnimationReady);
+    }
+
+    [Fact]
+    public void ProductProfilesAreReadFromTheConfiguredCompilerDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "framewright-rig-profiles", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var profiles = TestRigProfiles.WriteTo(root);
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Integrations:ReferenceAssetCompiler:SkeletonProfilePath"] = profiles
+            }).Build();
+            var loaded = new CompilerSkeletonProfiles(configuration).Load();
+            var profile = Assert.Single(loaded.Profiles);
+            Assert.Equal("humanoid-a", profile.Id);
+            Assert.Equal("Humanoid A", profile.Name);
+            Assert.Equal("Chest", profile.ExpectedParents["LeftUpperArm"]);
+            Assert.Equal(17, profile.ExactBoneCount);
+            Assert.False(profile.AllowUnlistedBones);
+            Assert.Equal(4, profile.MaxInfluences);
+            Assert.Equal(20_000, profile.TriangleBudget);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void ABrokenSkinFailsWithTheReasonAndIsNeverAnimationReady()
     {
-        var result = GlbModelInspector.Inspect(ModelFixtures.RiggedBrokenSkin());
+        var result = Inspect(ModelFixtures.RiggedBrokenSkin());
         Assert.True(result.Ok, result.Error);
         var rig = result.Profile!.Rig;
 
@@ -128,7 +190,7 @@ public sealed class RiggedModelTests
     [Fact]
     public void AStaticPropHasNoSkeletonAndThatIsNotAFailure()
     {
-        var result = GlbModelInspector.Inspect(ModelFixtures.AsymmetricBlock());
+        var result = Inspect(ModelFixtures.AsymmetricBlock());
         Assert.True(result.Ok, result.Error);
         var rig = result.Profile!.Rig;
 
@@ -144,24 +206,33 @@ public sealed class RiggedModelTests
     {
         // A joint that is not a node in the file.
         var danglingJoint = MutateRig(document => document["skins"]![0]!["joints"] = new JsonArray(4096));
-        var dangling = GlbModelInspector.Inspect(danglingJoint);
+        var dangling = Inspect(danglingJoint);
         Assert.True(dangling.Ok, dangling.Error);
         Assert.False(dangling.Profile!.Rig.AnimationReady);
         Assert.Contains(dangling.Profile!.Rig.Findings, finding => finding.Contains("not nodes in this file", StringComparison.Ordinal));
 
         // A bind matrix set that does not match the joint count.
         var shortBind = MutateRig(document => document["accessors"]![4]!["count"] = 3);
-        var bind = GlbModelInspector.Inspect(shortBind);
+        var bind = Inspect(shortBind);
         Assert.True(bind.Ok, bind.Error);
         Assert.False(bind.Profile!.Rig.BindPoseValid);
         Assert.False(bind.Profile!.Rig.AnimationReady);
 
         // A skin with no bind matrices at all.
         var noBind = MutateRig(document => document["skins"]![0]!.AsObject().Remove("inverseBindMatrices"));
-        var missing = GlbModelInspector.Inspect(noBind);
+        var missing = Inspect(noBind);
         Assert.True(missing.Ok, missing.Error);
         Assert.False(missing.Profile!.Rig.BindPoseValid);
         Assert.Contains(missing.Profile!.Rig.Findings, finding => finding.Contains("no inverse bind matrices", StringComparison.Ordinal));
+
+        // glTF permits duplicate node display names. They make a named profile
+        // ambiguous, but malformed input must receive a bounded finding rather
+        // than throwing from profile matching.
+        var duplicateNames = MutateRig(document => document["nodes"]![2]!["name"] = document["nodes"]![1]!["name"]!.GetValue<string>());
+        var duplicate = Inspect(duplicateNames);
+        Assert.True(duplicate.Ok, duplicate.Error);
+        Assert.False(duplicate.Profile!.Rig.AnimationReady);
+        Assert.Contains(duplicate.Profile.Rig.Findings, finding => finding.Contains("duplicated", StringComparison.Ordinal));
     }
 
     [Fact]

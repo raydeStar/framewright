@@ -39,6 +39,9 @@ $env:Integrations__OpenAI__SubmissionEnabled = 'false'
 $compilerStub = if ($env:OS -eq 'Windows_NT') { 'e2e-compiler-stub.cmd' } else { 'e2e-compiler-stub.sh' }
 $env:Integrations__ReferenceAssetCompiler__Executable = (Join-Path $PSScriptRoot $compilerStub)
 $env:Integrations__ReferenceAssetCompiler__SubmissionEnabled = 'true'
+# The old humanoid-a skeleton is explicitly a deterministic fixture. Product
+# runtime reads the compiler checkout's profiles instead of carrying this copy.
+$env:Integrations__ReferenceAssetCompiler__SkeletonProfilePath = (Join-Path $repoRoot 'tests\fixtures\rig-profiles')
 
 $stopFile = $env:STUDIO_E2E_STOP_FILE
 if ([string]::IsNullOrWhiteSpace($stopFile)) {

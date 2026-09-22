@@ -124,7 +124,7 @@ public sealed class SceneApiTests
                     new MemoryStream(await exportResponse.Content.ReadAsByteArrayAsync()),
                     ZipArchiveMode.Read);
                 using var manifest = JsonDocument.Parse(package.GetEntry("production-manifest.json")!.Open());
-                Assert.Equal(4, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
+                Assert.Equal(5, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
                 Assert.Contains(manifest.RootElement.GetProperty("scenes").EnumerateArray(),
                     item => item.GetProperty("id").GetGuid() == sceneId);
                 Assert.Contains(manifest.RootElement.GetProperty("sceneInstances").EnumerateArray(),

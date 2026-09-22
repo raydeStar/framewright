@@ -560,7 +560,11 @@ test('an agent reads a reference into a plan and the artist builds and corrects 
   await replacement.getByLabel('Replacement model').selectOption(modelId)
   await replacement.getByRole('button', { name: 'Replace this object' }).click()
   await expect(page.getByTestId('scene-placement')).toContainText(`${modelName} · revision 1`)
+  const replacementSave = page.waitForResponse(response => response.request().method() === 'PUT'
+    && new URL(response.url()).pathname === `/api/scenes/${built.id}`
+    && response.ok())
   await page.getByTestId('scene-save').click()
+  await replacementSave
   await expect(page.getByTestId('scene-version')).toContainText('saved')
 
   await page.reload()

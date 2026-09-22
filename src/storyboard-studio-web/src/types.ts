@@ -9,6 +9,7 @@ export interface ProjectSummary { id: string; name: string; production: string; 
 /** One row in the project switcher. Counts come from the server, which reads them across the scope. */
 export interface ProjectListItem { id: string; name: string; production: string; sequenceCode: string; sequenceName: string; shotCount: number; authorityCount: number; isActive: boolean; updatedAt: string }
 export interface ProjectDeletionSummary { name: string; shots: number; authorities: number; ratifiedVersions: number; assetRecords: number }
+export interface PortableProjectImportSummary { projectId: string; name: string; shotCount: number; assetCount: number; sceneCount: number; sceneShotBindingCount: number; idsRemapped: boolean; detail: string }
 export interface ProposedAuthority { name: string; category: string; description: string; lockedConstraint: string; accent: string }
 /** A Codex proposal for a new project. Never applied automatically — it fills the editable form. */
 export interface ProjectInterviewProposal { name: string; production: string; sequenceCode: string; sequenceName: string; framesPerSecond: number; aspectRatio: string; deliveryWidth: number; deliveryHeight: number; visualStyle: string; worldCanon: string; promptDirectives: string; negativeDirectives: string; starterAuthorities: ProposedAuthority[]; rationale: string; live: boolean; detail: string }

@@ -26,6 +26,7 @@ public static class StudioDatabaseInitializer
     private const string AcknowledgedFailureMigration = "20260920-acknowledged-failures-v15";
     private const string PreparedDerivativeMigration = "20260920-prepared-derivatives-v16";
     private const string SceneShotBindingMigration = "20260921-scene-shot-bindings-v17";
+    private const string PortableProjectMigration = "20260922-portable-projects-v18";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -247,6 +248,24 @@ public static class StudioDatabaseInitializer
                 () => EnsureSceneShotBindingTableAsync(db, cancellationToken), cancellationToken);
         }
 
+        if (!await HasMigrationAsync(db, PortableProjectMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+            {
+                await CreatePreMigrationBackupAsync(db, databasePath, PortableProjectMigration, cancellationToken);
+                migrationBackupCreated = true;
+            }
+
+            await RunMigrationAsync(db, PortableProjectMigration, async () =>
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "DROP INDEX IF EXISTS \"IX_GenerationManifests_ManifestHash\";", cancellationToken);
+                await db.Database.ExecuteSqlRawAsync(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_GenerationManifests_ProjectId_ManifestHash\" ON \"GenerationManifests\" (\"ProjectId\", \"ManifestHash\");",
+                    cancellationToken);
+            }, cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -378,6 +397,7 @@ public static class StudioDatabaseInitializer
             AcknowledgedFailureMigration => "a-failure-an-artist-has-seen-stays-seen",
             PreparedDerivativeMigration => "per-asset-preparation-acceptance-and-topology-change-that-cannot-be-inherited",
             SceneShotBindingMigration => "immutable-scene-snapshot-shot-camera-timing-delivery-and-reviewed-still-binding",
+            PortableProjectMigration => "round-trippable-project-package-with-project-local-manifest-hash-identity",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
@@ -858,7 +878,7 @@ public static class StudioDatabaseInitializer
                 "CreatedAt" TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS "IX_GenerationManifests_ShotId_CreatedAt" ON "GenerationManifests" ("ShotId", "CreatedAt");
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_GenerationManifests_ManifestHash" ON "GenerationManifests" ("ManifestHash");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_GenerationManifests_ProjectId_ManifestHash" ON "GenerationManifests" ("ProjectId", "ManifestHash");
 
             CREATE TABLE IF NOT EXISTS "Assets" (
                 "Id" TEXT NOT NULL CONSTRAINT "PK_Assets" PRIMARY KEY,
