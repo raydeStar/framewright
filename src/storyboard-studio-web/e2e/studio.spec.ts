@@ -1343,9 +1343,20 @@ test('music placement uses the project frame rate rather than a hidden 24fps ass
 
 test('asset creator directs music to the versioned composition studio', async ({ page }) => {
   const verifyConsole = failOnConsoleErrors(page)
+  let releaseAssetLibrary!: () => void
+  const assetLibraryReady = new Promise<void>(resolve => { releaseAssetLibrary = resolve })
+  await page.route('**/api/assets*', async route => {
+    if (new URL(route.request().url()).pathname !== '/api/assets') return route.fallback()
+    await assetLibraryReady
+    await route.continue()
+  })
   await page.goto('/')
   await page.getByRole('button', { name: 'Assets', exact: true }).click()
-  await page.getByRole('button', { name: 'Create new' }).click()
+  const createNew = page.locator('.asset-hero-actions').getByRole('button', { name: 'Create new' })
+  await expect(createNew).toBeDisabled()
+  releaseAssetLibrary()
+  await expect(createNew).toBeEnabled()
+  await createNew.click()
   const creator = page.getByRole('dialog', { name: 'New asset' })
   await creator.getByRole('tab', { name: 'Music' }).click()
   await expect(creator.locator('.preview-tag')).toHaveText('Editable')

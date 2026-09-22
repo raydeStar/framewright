@@ -168,13 +168,13 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   if (selected?.kind === 'Model') return <ModelInspectionWorkspace asset={selected} onBack={() => setSelectedId(undefined)} onError={setError} onChanged={async message => { await refresh(); onToast(message) }} />
   if (selected?.kind === 'Image') return <ImageRevisionWorkspace asset={selected} collections={collections} shots={studio.shots} references={generationReferences} onBack={() => setSelectedId(undefined)} onOpenGeneration={onOpenGeneration} onChanged={async message => { await refresh(); onToast(message) }} onEditAuthority={onEditAuthority} />
 
-  return <main className="workspace asset-workspace">
+  return <main className="workspace asset-workspace" aria-busy={loading}>
     <header className="asset-hero">
       <div><p className="eyebrow">Project media pool</p><h1>Asset library</h1><p>One searchable home for approved references, working images, music, audio, and video takes.</p></div>
       <div className="asset-hero-actions">
         <input ref={fileRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,audio/*,video/mp4,video/webm,.glb,model/gltf-binary" onChange={event => void importFiles(event.target.files ?? undefined)} />
-        <button className="secondary" onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={17} />Import media</button>
-        <button className="primary" onClick={() => setCreateOpen(true)}><Plus size={18} />Create new</button>
+        <button className="secondary" onClick={() => fileRef.current?.click()} disabled={busy || loading}><Upload size={17} />Import media</button>
+        <button className="primary" onClick={() => setCreateOpen(true)} disabled={loading}><Plus size={18} />Create new</button>
       </div>
     </header>
     <div className="asset-layout">
