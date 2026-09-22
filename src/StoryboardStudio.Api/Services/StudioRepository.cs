@@ -1,12 +1,12 @@
-using Microsoft.EntityFrameworkCore;
-using StoryboardStudio.Api.Persistence;
-using StoryboardStudio.Core;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using StoryboardStudio.Api.Persistence;
+using StoryboardStudio.Core;
 
 namespace StoryboardStudio.Api.Services;
 
@@ -1809,7 +1809,7 @@ public sealed class StudioRepository(
                 return (null, "The selected production video is not a completed Max-quality take for the current project delivery format. Promote and review a matching take before ratifying.");
             var mediaValidation = await videoMediaProbe.ValidateAsync(
                 assets.ResolveContentPath(productionAsset),
-                new VideoMediaExpectation(project.DeliveryWidth, project.DeliveryHeight, project.FramesPerSecond, shot.DurationFrames),
+                new VideoMediaExpectation(project.DeliveryWidth, project.DeliveryHeight, project.FramesPerSecond, shot.DurationFrames, project.ColorSpace),
                 cancellationToken);
             if (!mediaValidation.IsValid)
                 return (null, $"The selected production video's encoded stream does not match the current project delivery format. {mediaValidation.Detail}");

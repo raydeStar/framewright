@@ -1,12 +1,28 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Check, Copy, Image, LoaderCircle, Maximize2, MessageCirclePlus, Minimize2, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
-import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
+import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
 // three.js loads only when a scene is actually opened.
 const SceneViewport = lazy(() => import('./SceneViewport'))
 
 const axes = ['X', 'Y', 'Z'] as const
+
+function interpolateCamera(start: SceneCameraSummary, end: SceneCameraSummary, ratio: number): SceneCameraSummary {
+  const amount = Math.min(1, Math.max(0, ratio))
+  const linear = (from: number, to: number) => from + (to - from) * amount
+  const angle = (from: number, to: number) => {
+    const turn = Math.atan2(Math.sin(to - from), Math.cos(to - from))
+    return from + turn * amount
+  }
+  return {
+    yaw: angle(start.yaw, end.yaw),
+    pitch: linear(start.pitch, end.pitch),
+    distance: linear(start.distance, end.distance),
+    target: start.target.map((value, index) => linear(value, end.target[index] ?? value)),
+    fieldOfView: linear(start.fieldOfView, end.fieldOfView),
+  }
+}
 
 /**
  * A small editable scene: distinct instances of exact model revisions, an
@@ -17,7 +33,7 @@ const axes = ['X', 'Y', 'Z'] as const
  * is refused by the service and surfaced here, so newer work is never silently
  * overwritten.
  */
-export default function SceneWorkspace({ studio, onToast, proposalSignal, blockoutSignal, directorMode, onDirectorMode, onDirectorView, onShotRendered }: {
+export default function SceneWorkspace({ studio, onToast, proposalSignal, blockoutSignal, directorMode, onDirectorMode, onDirectorView, onShotRendered, onTakeRendered }: {
   studio: StudioSnapshot
   onToast: (message: string) => void
   /** Bumped when a browser agent stages a scene proposal. */
@@ -29,6 +45,7 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   /** Publishes what is open so browser tools describe this exact selection. */
   onDirectorView?: (view: DirectorSceneView | undefined) => void
   onShotRendered?: (shotId: string) => void
+  onTakeRendered?: (shotId: string) => void
 }) {
   const [list, setList] = useState<SceneListItem[]>([])
   const [scene, setScene] = useState<SceneSummary>()
@@ -59,6 +76,7 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   const [shotStart, setShotStart] = useState(0)
   const [shotStill, setShotStill] = useState(0)
   const [shotBindings, setShotBindings] = useState<SceneShotBindingSummary[]>([])
+  const [sceneRender, setSceneRender] = useState<SceneRenderSummary>()
   const [captureStill, setCaptureStill] = useState<((request: { camera: SceneCameraSummary; time: number; width: number; height: number }) => Promise<Blob>)>()
   const shotSceneId = useRef<string | undefined>(undefined)
   // Opening a scene is asynchronous, and the artist can create or open another
@@ -296,6 +314,12 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   const reference = useMemo(() => references.find(asset => asset.id === referenceId), [references, referenceId])
   const shot = useMemo(() => studio.shots.find(candidate => candidate.id === shotId), [shotId, studio.shots])
   const shotEnd = shot ? shotStart + shot.durationFrames / studio.project.framesPerSecond : shotStart
+  const approvedBinding = useMemo(() => shotBindings.find(binding =>
+    binding.shotId === shot?.id &&
+    binding.shotVersion === shot.version &&
+    binding.sceneVersion === scene?.version &&
+    binding.stillAssetId === shot.currentAssetId &&
+    shot.approval === 'Ratified'), [scene?.version, shot, shotBindings])
   const selectedNotes = useMemo(
     () => annotations.filter(note => note.instanceId === selectedId && note.state === 'Open'),
     [annotations, selectedId])
@@ -332,6 +356,39 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
       onShotRendered?.(binding.shotId)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'The scene still could not be rendered.') }
     finally { setBusy(false) }
+  }
+
+  const renderTake = async () => {
+    if (!scene || !approvedBinding || !captureStill) return
+    if (dirty) { setError('Save the scene before rendering, so every frame can cite an exact scene version.'); return }
+    setBusy(true); setError(undefined); setPlaying(false)
+    try {
+      let render = await studioApi.prepareSceneRender(scene.id, approvedBinding.id)
+      setSceneRender(render)
+      for (const frameIndex of render.missingFrames) {
+        const ratio = render.frameCount <= 1 ? 1 : frameIndex / (render.frameCount - 1)
+        const frame = await captureStill({
+          camera: interpolateCamera(render.startCamera, render.endCamera, ratio),
+          time: render.startTime + frameIndex / render.framesPerSecond,
+          width: render.width,
+          height: render.height,
+        })
+        const receipt = await studioApi.uploadSceneRenderFrame(render.jobId, frameIndex, frame)
+        render = {
+          ...render,
+          progress: Math.min(90, Math.floor(receipt.uploadedFrames * 90 / receipt.frameCount)),
+          phase: `Captured ${receipt.uploadedFrames} of ${receipt.frameCount} exact frames`,
+          missingFrames: render.missingFrames.filter(index => index !== frameIndex),
+        }
+        setSceneRender(render)
+      }
+      render = await studioApi.completeSceneRender(render.jobId)
+      setSceneRender(render)
+      onToast(`${render.shotCode} has an exact-frame animated take ready in Shot review.`)
+      onTakeRendered?.(render.shotId)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The animated scene take could not be rendered.')
+    } finally { setBusy(false) }
   }
 
   // Replacing a stand-in changes only what its existing scene object draws.
@@ -742,6 +799,18 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                     <button type="button" className="primary scene-render-still" disabled={busy || dirty || !shotCamera || !captureStill}
                       onClick={() => void renderStill()}>{busy ? 'Rendering…' : 'Render still for review'}</button>
                     <p className="model-note">This explicit action freezes the saved scene, this separate shot camera, timing, and the {studio.project.deliveryWidth} × {studio.project.deliveryHeight} {studio.project.colorSpace} delivery canvas. It creates a working candidate; approval still happens in Review.</p>
+                    {approvedBinding && <>
+                      <button type="button" className="primary scene-render-still" data-testid="scene-render-take"
+                        disabled={busy || dirty || !captureStill}
+                        onClick={() => void renderTake()}>
+                        <Play size={16} />{busy && sceneRender ? sceneRender.phase : 'Render animated take'}
+                      </button>
+                      <p className="model-note" data-testid="scene-render-status">
+                        {sceneRender
+                          ? `${sceneRender.progress}% · ${sceneRender.phase}`
+                          : `Uses the approved still as its gate, draws ${shot?.durationFrames ?? 0} exact frames, and encodes a reviewable ${studio.project.framesPerSecond} fps take. Camera motion runs from the saved scene view to the approved shot camera.`}
+                      </p>
+                    </>}
                   </>}
               {shotBindings.length > 0 && <ul className="scene-shot-bindings">
                 {shotBindings.slice(0, 3).map(binding => <li key={binding.id}>

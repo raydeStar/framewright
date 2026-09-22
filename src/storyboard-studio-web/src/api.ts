@@ -1,5 +1,5 @@
 import type { AssetCollectionSummary, AssetPlacementSummary, AssetUsageSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PortableProjectImportSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneRenderFrameReceipt, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -178,6 +178,27 @@ export const studioApi = {
     }
     return response.json() as Promise<SceneShotBindingSummary>
   },
+  prepareSceneRender: (sceneId: string, bindingId: string) =>
+    request<SceneRenderSummary>(`/api/scenes/${sceneId}/shot-renders`, { method: 'POST', body: JSON.stringify({ bindingId }) }),
+  sceneRender: (jobId: string) => request<SceneRenderSummary>(`/api/scene-renders/${jobId}`),
+  uploadSceneRenderFrame: async (jobId: string, frameIndex: number, frame: Blob) => {
+    const bytes = await frame.arrayBuffer()
+    if (bytes.byteLength === 0) throw new Error(`The scene renderer produced an empty frame at index ${frameIndex}.`)
+    const form = new FormData()
+    form.append('file', new Blob([bytes], { type: 'image/png' }), `frame-${String(frameIndex).padStart(6, '0')}.png`)
+    const response = await fetch(`/api/scene-renders/${jobId}/frames/${frameIndex}`, {
+      method: 'POST', headers: { 'X-Storyboard-Studio': '1' }, body: form,
+    })
+    if (!response.ok) {
+      const text = await response.text()
+      let problem: { error?: string; title?: string } | undefined
+      try { problem = JSON.parse(text) as { error?: string; title?: string } } catch { /* Preserve plain service error text. */ }
+      throw new ApiError(problem?.error || problem?.title || text || `${response.status} ${response.statusText}`, response.status)
+    }
+    return response.json() as Promise<SceneRenderFrameReceipt>
+  },
+  completeSceneRender: (jobId: string) =>
+    request<SceneRenderSummary>(`/api/scene-renders/${jobId}/complete`, { method: 'POST' }),
   sceneMotionSample: (sceneId: string, instanceId: string, time: number) =>
     request<SceneMotionSampleSummary>(`/api/scenes/${sceneId}/instances/${instanceId}/motion-sample?time=${time}`),
   sceneAnnotations: (sceneId: string) => request<SceneAnnotationSummary[]>(`/api/scenes/${sceneId}/annotations`),

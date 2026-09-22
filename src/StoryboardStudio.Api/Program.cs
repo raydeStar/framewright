@@ -1,11 +1,11 @@
-using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.AspNetCore.Http.Features;
-using Microsoft.EntityFrameworkCore;
-using ModelContextProtocol.Server;
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.EntityFrameworkCore;
+using ModelContextProtocol.Server;
 using StoryboardStudio.Api.Persistence;
 using StoryboardStudio.Api.Services;
 using StoryboardStudio.Core;
@@ -74,6 +74,8 @@ builder.Services.AddScoped<SceneDirectionService>();
 builder.Services.AddScoped<SceneBlockoutService>();
 builder.Services.AddScoped<SceneMotionService>();
 builder.Services.AddScoped<SceneShotService>();
+builder.Services.AddScoped<SceneRenderService>();
+builder.Services.AddSingleton<ISceneVideoEncoder, FfmpegSceneVideoEncoder>();
 builder.Services.AddSingleton<ICompilerGateway, CompilerGateway>();
 builder.Services.AddScoped<ModelGenerationService>();
 builder.Services.AddScoped<VisualConsistencyService>();
@@ -145,6 +147,9 @@ app.Use(async (context, next) =>
             requestSize.MaxRequestBodySize = AssetStore.MaxImageRequestBytes;
         else if (context.Request.Path.StartsWithSegments("/api/scenes", StringComparison.OrdinalIgnoreCase) &&
                  context.Request.Path.Value?.EndsWith("/shot-stills", StringComparison.OrdinalIgnoreCase) == true)
+            requestSize.MaxRequestBodySize = AssetStore.MaxImageRequestBytes;
+        else if (context.Request.Path.StartsWithSegments("/api/scene-renders", StringComparison.OrdinalIgnoreCase) &&
+                 context.Request.Path.Value?.Contains("/frames/", StringComparison.OrdinalIgnoreCase) == true)
             requestSize.MaxRequestBodySize = AssetStore.MaxImageRequestBytes;
         else if (context.Request.Path.StartsWithSegments("/api/assets/media", StringComparison.OrdinalIgnoreCase))
             requestSize.MaxRequestBodySize = AssetStore.MaxMediaRequestBytes;
@@ -288,10 +293,17 @@ app.MapGet("/api/jobs/{jobId:guid}", async Task<IResult> (
 
 app.MapPost("/api/jobs/{jobId:guid}/retry", async Task<IResult> (
     Guid jobId, GenerationOrchestrator orchestrator, AssetImageGenerationService assetGeneration,
-    AudioGenerationJobService audioGeneration, StudioDbContext db, GenerationJobSignal queue,
+    AudioGenerationJobService audioGeneration, SceneRenderService sceneRenders,
+    StudioRepository repository, StudioDbContext db, GenerationJobSignal queue,
     CancellationToken cancellationToken) =>
 {
     var workType = await db.Jobs.Where(x => x.Id == jobId).Select(x => x.WorkType).SingleOrDefaultAsync(cancellationToken);
+    if (string.Equals(workType, SceneRenderService.WorkType, StringComparison.Ordinal))
+    {
+        var retried = await sceneRenders.RetryAsync(jobId, cancellationToken);
+        if (retried.Kind != RepositoryResultKind.Ok || retried.Value is null) return ToHttpResult(retried);
+        return ToHttpResult(await repository.JobAsync(retried.Value.JobId, cancellationToken));
+    }
     var result = string.Equals(workType, "Asset", StringComparison.Ordinal)
         ? await assetGeneration.RetryAsync(jobId, cancellationToken)
         : string.Equals(workType, AudioGenerationJobService.VoiceWorkType, StringComparison.Ordinal)
@@ -550,6 +562,28 @@ app.MapPost("/api/scenes/{sceneId:guid}/shot-stills", async Task<IResult> (
         sceneId, shotId, expectedSceneVersion, expectedShotVersion,
         camera, startTime, endTime, stillTime, file, cancellationToken));
 }).DisableAntiforgery();
+app.MapPost("/api/scenes/{sceneId:guid}/shot-renders", async Task<IResult> (
+    Guid sceneId, PrepareSceneRenderRequest request, SceneRenderService sceneRenders, CancellationToken cancellationToken)
+    => ToHttpResult(await sceneRenders.PrepareAsync(sceneId, request, cancellationToken)));
+app.MapGet("/api/scene-renders/{jobId:guid}", async Task<IResult> (
+    Guid jobId, SceneRenderService sceneRenders, CancellationToken cancellationToken)
+    => ToHttpResult(await sceneRenders.GetAsync(jobId, cancellationToken)));
+app.MapPost("/api/scene-renders/{jobId:guid}/frames/{frameIndex:int}", async Task<IResult> (
+    Guid jobId, int frameIndex, HttpContext context, SceneRenderService sceneRenders, CancellationToken cancellationToken) =>
+{
+    if (context.Request.Headers["X-Storyboard-Studio"] != "1")
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!context.Request.HasFormContentType)
+        return Results.BadRequest(new { error = "A multipart scene frame is required." });
+    var form = await context.Request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("file");
+    return file is null
+        ? Results.BadRequest(new { error = "The multipart field 'file' is required." })
+        : ToHttpResult(await sceneRenders.UploadFrameAsync(jobId, frameIndex, file, cancellationToken));
+}).DisableAntiforgery();
+app.MapPost("/api/scene-renders/{jobId:guid}/complete", async Task<IResult> (
+    Guid jobId, SceneRenderService sceneRenders, CancellationToken cancellationToken)
+    => ToHttpResult(await sceneRenders.CompleteAsync(jobId, cancellationToken)));
 app.MapGet("/api/scenes/{sceneId:guid}/annotations", async Task<IResult> (Guid sceneId, SceneDirectionService direction, CancellationToken cancellationToken)
     => ToHttpResult(await direction.ListAnnotationsAsync(sceneId, cancellationToken)));
 app.MapPost("/api/scenes/{sceneId:guid}/annotations", async Task<IResult> (Guid sceneId, CreateSceneAnnotationRequest request, SceneDirectionService direction, CancellationToken cancellationToken)

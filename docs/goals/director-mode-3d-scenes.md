@@ -5,7 +5,7 @@
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M02, M03, M04, M05, M06, M07, M08, M10, M13 and M15 are VERIFIED; M11, M12 and M16 are CONTRACT_VERIFIED. M11 now lacks only recorded human composition acceptance. M14 requires M09 acceptance as well as M13; a checked-out compiler alone does not satisfy that dependency. M17 and M18 remain open, with portable-package recovery groundwork implemented for M18.
+**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M02, M03, M04, M05, M06, M07, M08, M10, M13 and M15 are VERIFIED; M11, M12, M16 and M17 are CONTRACT_VERIFIED. M11 now lacks only recorded human composition acceptance. M14 requires M09 acceptance as well as M13; a checked-out compiler alone does not satisfy that dependency. M17's application route is implemented, while its M14-rig, actual encoded-frame review, human acceptance, and packaged proof remain open. M18 remains open with portable-package recovery groundwork implemented.
 
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
@@ -436,13 +436,13 @@ Update this section after each milestone. Store verbose logs, images, captures, 
 Reconciled after QC and the repository-destination decision on 2026-09-21. This summary supersedes the historical execution notes below; individual acceptance records remain the evidence authority.
 
 - **Repository:** Public `github.com/raydeStar/framewright` is the maintained Framewright line; the former private mirror is deprecated. Its public history was deliberately sanitized and has no merge base with the older private history, so publish reviewed snapshots as normal descendants of public `main`, never by force-pushing the private graph. `github.com/raydeStar/reference-asset-compiler` is the single implementation home for modeling, texturing, retopology, UV, rigging, deformation gates, payload construction, and compiler receipts. Framewright owns orchestration, validated import, library/scene state, shot binding, and review.
-- **Current MVP increment:** M12 has an ordinary UI path for replacing one selected placeholder with an exact library revision while preserving instance identity, transform, plan provenance, annotations, pivot/motion, camera, lighting, and unrelated objects. Scene Director Mode uses the same working state. M16 freezes a saved scene version, distinct shot camera, frame range, selected time, project delivery contract, and snapshot hash; the real Three.js canvas produces a delivery-sized PNG and advances the existing shot candidate/review path. Working-package schema v5 carries the complete editable project graph and content-addressed assets; the project switcher verifies and imports it as a separate inactive project with fresh relational identities, preserved revision groups/lineage, interrupted external jobs made terminal, and no machine-local storage paths.
-- **Validation:** The complete `scripts/verify.ps1` gate passed in one invocation on isolated port 5201: dependency audits, frontend checks/build, public-content audit, locked restore, warning-free Release rebuild, 283 backend tests, all backup/setup/worker/release scripts, voice and YuE2 contract tests, NuGet vulnerability inspection, and 134 Playwright journeys with six intentional tablet exclusions. The known Three.js chunk-size advisory remains; scene modules are lazy-loaded. The import proof exports, verifies, imports, activates, reopens, and serves the model from a fresh project, then imports the same package again with fresh IDs. Negative controls reject a checksum failure and a self-consistent forged GLB without creating a partial project.
+- **Current MVP increment:** M12 has an ordinary UI path for replacing one selected placeholder with an exact library revision while preserving instance identity, transform, plan provenance, annotations, pivot/motion, camera, lighting, and unrelated objects. Scene Director Mode uses the same working state. M16 freezes a saved scene version, distinct shot camera, frame range, selected time, project delivery contract, and snapshot hash; the real Three.js canvas produces a delivery-sized PNG and advances the existing shot candidate/review path. M17 now starts only from that ratified still, freezes the scene/assets/timing/cameras/format/encoder, draws exact scene times through the same Three.js renderer, resumes validated PNG frames by index after restart, and uses local FFmpeg to create a probed Max take in existing shot review. Working-package schema v5 already carries the completed job/manifest/video lineage and complete editable project graph.
+- **Validation:** The complete `scripts/verify.ps1` gate passed in one invocation on isolated port 5203: dependency audits, frontend checks/build, public-content audit, locked restore, warning-free Release rebuild, 287 backend tests, all backup/setup/worker/release scripts, voice and YuE2 contract tests, NuGet vulnerability inspection, and 134 Playwright journeys with six intentional tablet exclusions. The known Three.js chunk-size advisory remains; scene modules are lazy-loaded. The import proof exports, verifies, imports, activates, reopens, and serves the model from a fresh project, then imports the same package again with fresh IDs. Negative controls reject a checksum failure and a self-consistent forged GLB without creating a partial project.
 - **Packaged recovery:** The current recovery checkpoint publishes the self-contained Windows package with its offline restore tool, runs it on a disposable data root, writes an image, exports and reimports the editable project with fresh IDs, activates it, takes a verified backup, adds a distinct post-snapshot asset, stops, restores offline, starts a new packaged process, and proves the imported project, pre-snapshot bytes/hash, exact removal of post-snapshot data, and SQLite integrity. The resident artist app remains running on its own database and port. This is M18 groundwork, not proof of the complete M17-bearing graph.
 - **Compiler:** M08 generation and the M09 preparation route have recorded live workstation evidence. Framewright now reads the compiler-owned skeleton profiles from the configured checkout and enforces hierarchy, list, count, root, influence, and triangle-budget rules; no production humanoid fallback remains in this repository. The workstation's ignored local configuration points at the existing compiler checkout. Do not infer readiness for rigging from profile consumption or geometry/preparation success.
-- **Active acceptance:** M09 still needs the artist's recorded source/derivative verdict. M14 requires that prerequisite and M13 before live milestone advancement. M02, M03, and M10 have actual-host proof and are VERIFIED. M11 has D/A/H evidence and still needs human composition acceptance. The milestone table below is authoritative.
-- **Hosted CI:** Public recovery baseline `539d3a4` passed [GitHub Actions run 35687307712](https://github.com/raydeStar/framewright/actions/runs/35687307712): build/API, container runtime, and all browser acceptance checks were green.
-- **Next engineering action:** Record the artist's M09 verdict from the prepared source/derivative comparison without regenerating it. If accepted, advance the M14 compiler-owned rigging route; continue only dependency-ready work and label fixture-based development separately from live support.
+- **Active acceptance:** M09 still needs the artist's recorded source/derivative verdict. M14 requires that prerequisite and M13 before live milestone advancement. M02, M03, and M10 have actual-host proof and are VERIFIED. M11 has D/A/H evidence and still needs human composition acceptance. M17 still needs the M14-created rig, an actual local encoded take with representative-frame inspection and human acceptance, and packaged proof. The milestone table below is authoritative.
+- **Hosted CI:** Public recovery baseline `d6e47af` passed [GitHub Actions run 35690353988](https://github.com/raydeStar/framewright/actions/runs/35690353988): build/API, container runtime, and all browser acceptance checks were green. The M17 checkpoint described below is newer and must receive its own exact-head hosted result after push.
+- **Next engineering action:** Record the artist's M09 verdict from the prepared source/derivative comparison without regenerating it. If accepted, advance the compiler-owned M14 rigging route, then exercise the prepared M17 action with that rig and record the encoded-frame/human evidence. Continue dependency-ready work and label fixture-based development separately from live support.
 - **Consent and resources:** This continuation authorizes direct public-main delivery of reviewed Framewright work and propagation of compiler-owned implementation to its repository. It does not authorize provider calls, GPU jobs, downloads, artistic acceptance, deployment, or tagging. Preserve running applications and external queues. Existing live receipts are evidence of prior runs, not permission for another run.
 
 ### MVP implementation checkpoint - 2026-09-21
@@ -468,6 +468,35 @@ Results by evidence class: D and A pass in the complete backend/browser gate. M1
 Human approvals actually recorded: NONE for these milestone outputs.
 Known limits: M11 still lacks human composition acceptance; M12 and M16 retain their declared live/human evidence ceilings. No provider or renderer was commissioned here.
 Next dependency-ready milestone: M09 remains active; M14 follows its artist verdict.
+```
+
+### M17 exact-frame render contract checkpoint - 2026-09-22
+
+```text
+Milestone / status / date: M17 / CONTRACT_VERIFIED / 2026-09-22
+Tested code revision or worktree identity: reviewed working tree based on public d6e47af; the checkpoint commit
+  immediately following this gate records the tested tree
+Outcome and supported constraints: One explicit Render animated take action starts only from the current ratified
+  scene still. It freezes the binding snapshot/hash, exact model and clip hashes, scene and shot revisions, inclusive
+  start/exclusive-end timing, inspection-to-shot camera motion, delivery canvas/rate/Rec.709 contract, and FFmpeg
+  version. Three.js draws numbered PNGs at exact scene times; the service validates dimensions and content, resumes
+  missing indexes after restart, refuses conflicting duplicate pixels, and encodes H.264 without recording the
+  viewport. The decoded stream must match width, height, frame rate, frame count, and duration before the video
+  enters the existing Max-take review/ratification path. Failed encoding preserves frames and explicit retry lineage.
+Results by evidence class: D and A pass for rigid motion, camera interpolation, restart, idempotency, encoder failure,
+  retry, media-probe, promotion, duplicate completion, and final video ratification. Release build, frontend checks,
+  production bundle, 287 backend tests, and the complete 134-pass browser matrix plus six intentional tablet skips
+  pass locally, including all 22 scene journeys on desktop Chromium and emulated iPad Pro 11 WebKit. A separate
+  four-frame workstation FFmpeg/FFprobe smoke confirmed 64 x 64, 24 fps, four decoded
+  frames, limited range, and complete BT.709 matrix/transfer/primaries tags with the production argument set. L/V/P
+  remain open: the application test uses a controlled encoder boundary and the smoke is not the complete M14-derived
+  live scene; no representative rendered frame was accepted by the artist; no packaged M17 run was performed.
+Human approvals actually recorded: NONE for the animated take.
+Known limits: bounded to 240 frames, 4096 x 2160, Rec.709, silent H.264 MP4, linear camera interpolation, one local
+  FFmpeg process, and exact-frame Three.js output. Sound remains separately editable. M14 is still not complete, so
+  fixture motion cannot stand in for the required generated-rig/deformation evidence.
+Next dependency-ready milestone: close M09, complete compiler-owned M14, then run this prepared render action on the
+  accepted rig and record representative-frame, playable-output, human, and packaged recovery evidence.
 ```
 
 ### Portable recovery groundwork - 2026-09-21
@@ -530,7 +559,7 @@ Retained for provenance. Branch, environment, dependency, and next-action statem
 | M14 | NOT_STARTED | Compiler checked out; requires M09's recorded acceptance and M13 |
 | M15 | VERIFIED | M15 acceptance record below |
 | M16 | CONTRACT_VERIFIED | Scene-to-shot/app persistence pass; human visual acceptance remains |
-| M17 | NOT_STARTED | None |
+| M17 | CONTRACT_VERIFIED | Exact-frame/restart/encode/promotion contract passes; M14 rig, actual rendered-frame/human, and packaged evidence remain |
 | M18 | NOT_STARTED | Portable import/export groundwork passes; full packaged/recovery scenario depends on all milestones |
 
 ### M00 acceptance record

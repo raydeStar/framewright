@@ -1,10 +1,10 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using StoryboardStudio.Api.Persistence;
 using StoryboardStudio.Api.Services;
 using StoryboardStudio.Core;
-using System.Net;
-using System.Text;
-using System.Text.Json;
 
 namespace StoryboardStudio.Api.Tests;
 
@@ -1006,6 +1006,23 @@ public sealed class GenerationAdapterContractTests : IDisposable
     }
 
     [Fact]
+    public void ProductionVideoProbeRequiresCompleteRec709StreamTagsWhenRequested()
+    {
+        var incomplete = new VideoMediaMetadata(1920, 1080, 24, 48, 2, "tv", "bt709");
+        var refused = FfprobeVideoMediaProbe.Validate(
+            incomplete,
+            new VideoMediaExpectation(1920, 1080, 24, 48, "Rec.709"));
+        Assert.False(refused.IsValid);
+        Assert.Contains("BT.709", refused.Detail, StringComparison.OrdinalIgnoreCase);
+
+        var complete = incomplete with { ColorTransfer = "bt709", ColorPrimaries = "bt709" };
+        var accepted = FfprobeVideoMediaProbe.Validate(
+            complete,
+            new VideoMediaExpectation(1920, 1080, 24, 48, "Rec.709"));
+        Assert.True(accepted.IsValid, accepted.Detail);
+    }
+
+    [Fact]
     public void ProductionVideoProbeParsesCountedFramesAndRationalRate()
     {
         var metadata = FfprobeVideoMediaProbe.Parse("""
@@ -1017,7 +1034,11 @@ public sealed class GenerationAdapterContractTests : IDisposable
                 "r_frame_rate": "25/1",
                 "nb_frames": "136",
                 "nb_read_frames": "137",
-                "duration": "5.480000"
+                "duration": "5.480000",
+                "color_range": "tv",
+                "color_space": "bt709",
+                "color_transfer": "bt709",
+                "color_primaries": "bt709"
               }],
               "format": { "duration": "5.480000" }
             }
@@ -1029,6 +1050,10 @@ public sealed class GenerationAdapterContractTests : IDisposable
         Assert.Equal(25, metadata.FramesPerSecond);
         Assert.Equal(137, metadata.FrameCount);
         Assert.Equal(5.48, metadata.DurationSeconds, 3);
+        Assert.Equal("tv", metadata.ColorRange);
+        Assert.Equal("bt709", metadata.ColorSpace);
+        Assert.Equal("bt709", metadata.ColorTransfer);
+        Assert.Equal("bt709", metadata.ColorPrimaries);
     }
 
     private static GenerationExecutionContext Context(string imagePath, GenerationProgressReporter? report = null)

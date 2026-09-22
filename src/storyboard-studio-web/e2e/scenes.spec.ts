@@ -251,9 +251,67 @@ test('a saved scene renders a delivery-sized still into the ordinary review path
   const candidates = await (await page.request.get(`/api/shots/${targetShot.id}/candidates`)).json()
   expect(candidates.find((item: { isCurrent: boolean }) => item.isCurrent).assetId).toBe(binding.stillAssetId)
 
+  const ratified = await page.request.post(`/api/shots/${targetShot.id}/ratify`, {
+    data: { expectedVersion: reviewed.version, reason: 'Approved scene still for exact-frame browser proof.' },
+  })
+  expect(ratified.ok()).toBeTruthy()
+  await page.reload()
   await page.getByRole('button', { name: 'Scene', exact: true }).click()
   await expect(page.getByTestId('scene-shot').getByAltText(`${targetShot.code} scene still`)).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('scene-shot-still.png'), fullPage: true })
+
+  // The animated action remains an explicit artist click. The browser draws
+  // exact scene times to PNG; the service owns resumable storage and encoding.
+  const renderJobId = crypto.randomUUID()
+  const renderManifestId = crypto.randomUUID()
+  const renderSummary = {
+    jobId: renderJobId, manifestId: renderManifestId, bindingId: binding.id,
+    sceneId: scene.id, shotId: targetShot.id, shotCode: targetShot.code, sourceShotVersion: reviewed.version,
+    state: 'Running', progress: 0, phase: 'Waiting for exact scene frames', error: null,
+    width: delivery.deliveryWidth, height: delivery.deliveryHeight,
+    framesPerSecond: delivery.framesPerSecond, frameCount: 2,
+    startTime: 0, endTime: 2 / delivery.framesPerSecond,
+    startCamera: { yaw: 0.1, pitch: 0.35, distance: 8, target: [0, 0.8, 0], fieldOfView: 42 },
+    endCamera: binding.camera,
+    missingFrames: [0, 1], encoder: 'browser-proof-ffmpeg', manifestHash: 'a'.repeat(64),
+    attempt: 1, retryOfJobId: null, outputAssetId: null, outputAssetUrl: null, promoted: false,
+  }
+  const uploadedFrames: Buffer[] = []
+  await page.route(`**/api/scenes/${scene.id}/shot-renders`, route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(renderSummary),
+  }))
+  await page.route('**/api/scene-renders/**', route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    const frame = path.match(/\/frames\/(\d+)$/)
+    if (request.method() === 'POST' && frame) {
+      uploadedFrames.push(request.postDataBuffer() ?? Buffer.alloc(0))
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        jobId: renderJobId, frameIndex: Number(frame[1]), contentHash: String(frame[1]).padStart(64, '0'),
+        alreadyPresent: false, uploadedFrames: uploadedFrames.length, frameCount: 2,
+      }) })
+    }
+    if (request.method() === 'POST' && path.endsWith('/complete')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        ...renderSummary, state: 'Completed', progress: 100, phase: 'Animated take ready for review',
+        missingFrames: [], outputAssetId: crypto.randomUUID(), outputAssetUrl: '/api/assets/proof/content', promoted: true,
+      }) })
+    }
+    return route.continue()
+  })
+
+  const take = page.getByTestId('scene-render-take')
+  await expect(take).toBeEnabled()
+  await take.click()
+  await expect(page.getByText(`${targetShot.code} has an exact-frame animated take ready in Shot review.`)).toBeVisible()
+  expect(uploadedFrames).toHaveLength(2)
+  const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  // Chromium exposes the PNG bytes inside the multipart body. WebKit exposes a
+  // non-empty FormData representation but not its binary payload byte-for-byte;
+  // its real delivery PNG is already proven above through this same capture.
+  expect(uploadedFrames.every(frame => frame.length > 0)).toBeTruthy()
+  if (testInfo.project.name === 'desktop')
+    expect(uploadedFrames.every(frame => frame.indexOf(pngSignature) >= 0)).toBeTruthy()
   verifyConsole()
 })
 

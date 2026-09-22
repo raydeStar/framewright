@@ -24,7 +24,7 @@ export interface LibraryAuthoritySummary { id: string; slug: string; name: strin
 export interface LibraryAuthorityVersionSummary { id: string; libraryAuthorityId: string; version: number; description: string; lockedConstraint: string; imageUrl?: string; contentHash: string; ratifiedAt: string; originProjectId?: string }
 export interface CommentSummary { id: string; shotId: string; version: number; x: number; y: number; body: string; state: string; createdAt: string; referenceId?: string; referenceVersion?: number }
 export interface AssetReviewNoteSummary { id: string; assetId: string; x: number; y: number; body: string; state: string; createdAt: string }
-export interface JobSummary { id: string; shotId: string; shotCode: string; kind: string; state: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'; progress: number; phase: string; backend: string; createdAt: string; completedAt?: string; error?: string; manifestId?: string; adapterId?: string; outputAssetId?: string; outputAssetUrl?: string; providerRequestId?: string; attempt: number; retryOfJobId?: string; lastHeartbeatAt?: string; workType: 'Shot' | 'Asset' | 'Voice' | 'Music' | 'VoiceDesign'; acknowledgedAt?: string }
+export interface JobSummary { id: string; shotId: string; shotCode: string; kind: string; state: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'; progress: number; phase: string; backend: string; createdAt: string; completedAt?: string; error?: string; manifestId?: string; adapterId?: string; outputAssetId?: string; outputAssetUrl?: string; providerRequestId?: string; attempt: number; retryOfJobId?: string; lastHeartbeatAt?: string; workType: 'Shot' | 'Asset' | 'Voice' | 'Music' | 'VoiceDesign' | 'SceneRender'; acknowledgedAt?: string }
 export interface StudioSnapshot { project: ProjectSummary; shots: ShotSummary[]; references: ReferenceSummary[]; comments: CommentSummary[]; jobs: JobSummary[]; serverTime: string; demoMode: boolean }
 export interface IntegrationSummary { id: string; name: string; state: 'Connected' | 'Ready' | 'NeedsSetup' | 'Offline' | 'Protected'; headline: string; detail: string; endpoint?: string; canInspect: boolean; canSubmit: boolean; checkedAt: string }
 export interface CodexAssistResponse { mode: string; headline: string; message: string; findings: string[]; suggestedActions: string[]; live: boolean; completedAt: string }
@@ -161,6 +161,23 @@ export interface SceneShotBindingSummary {
   startTime: number; endTime: number; stillTime: number
   deliveryWidth: number; deliveryHeight: number; framesPerSecond: number; colorSpace: string
   snapshotHash: string; stillAssetId: string; stillAssetUrl: string; createdAt: string
+}
+/** A resumable exact-frame take being assembled from an accepted scene still. */
+export interface SceneRenderSummary {
+  jobId: string; manifestId: string; bindingId: string
+  sceneId: string; shotId: string; shotCode: string; sourceShotVersion: number
+  state: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'
+  progress: number; phase: string; error?: string
+  width: number; height: number; framesPerSecond: number; frameCount: number
+  startTime: number; endTime: number
+  startCamera: SceneCameraSummary; endCamera: SceneCameraSummary
+  missingFrames: number[]; encoder: string; manifestHash: string
+  attempt: number; retryOfJobId?: string
+  outputAssetId?: string; outputAssetUrl?: string; promoted: boolean
+}
+export interface SceneRenderFrameReceipt {
+  jobId: string; frameIndex: number; contentHash: string; alreadyPresent: boolean
+  uploadedFrames: number; frameCount: number
 }
 /** A note on one scene object, bound to the revision it was measured against. */
 export interface SceneAnnotationSummary {

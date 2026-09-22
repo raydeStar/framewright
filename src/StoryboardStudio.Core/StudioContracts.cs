@@ -158,6 +158,36 @@ public sealed record SceneShotBindingSummary(
     string SnapshotHash, Guid StillAssetId, string StillAssetUrl, DateTimeOffset CreatedAt);
 
 /// <summary>
+/// Starts a deterministic animated take from one accepted scene still. The
+/// binding is the immutable authority: it identifies the saved scene, shot,
+/// camera, timing, delivery format, and still the artist already approved.
+/// </summary>
+public sealed record PrepareSceneRenderRequest(Guid BindingId);
+
+/// <summary>Receipt for one exact browser-rendered frame in a scene take.</summary>
+public sealed record SceneRenderFrameReceipt(
+    Guid JobId, int FrameIndex, string ContentHash, bool AlreadyPresent,
+    int UploadedFrames, int FrameCount);
+
+/// <summary>
+/// Durable state for a deterministic scene render. MissingFrames lets the
+/// browser resume after navigation or an application restart without drawing
+/// frames the service has already validated.
+/// </summary>
+public sealed record SceneRenderSummary(
+    Guid JobId, Guid ManifestId, Guid BindingId,
+    Guid SceneId, Guid ShotId, string ShotCode, int SourceShotVersion,
+    JobState State, int Progress, string Phase, string? Error,
+    int Width, int Height, int FramesPerSecond, int FrameCount,
+    double StartTime, double EndTime,
+    SceneCameraSummary StartCamera, SceneCameraSummary EndCamera,
+    IReadOnlyList<int> MissingFrames,
+    string Encoder, string ManifestHash,
+    int Attempt, Guid? RetryOfJobId,
+    Guid? OutputAssetId = null, string? OutputAssetUrl = null,
+    bool Promoted = false);
+
+/// <summary>
 /// One object in a construction plan: what it is for, what would stand in for
 /// it, roughly where it goes, and how sure the plan is about it. Confidence is
 /// carried per object because a reference shows some things plainly and hides

@@ -8,14 +8,19 @@ public sealed record VideoMediaExpectation(
     int Width,
     int Height,
     int FramesPerSecond,
-    int FrameCount);
+    int FrameCount,
+    string? ColorSpace = null);
 
 public sealed record VideoMediaMetadata(
     int Width,
     int Height,
     double FramesPerSecond,
     long FrameCount,
-    double DurationSeconds);
+    double DurationSeconds,
+    string? ColorRange = null,
+    string? ColorSpace = null,
+    string? ColorTransfer = null,
+    string? ColorPrimaries = null);
 
 public sealed record VideoMediaValidation(
     bool IsValid,
@@ -63,7 +68,7 @@ internal sealed class FfprobeVideoMediaProbe(IConfiguration configuration) : IVi
             "-v", "error",
             "-count_frames",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,nb_read_frames,duration:format=duration",
+            "-show_entries", "stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,nb_read_frames,duration,color_range,color_space,color_transfer,color_primaries:format=duration",
             "-of", "json",
             path
         }) start.ArgumentList.Add(argument);
@@ -133,7 +138,16 @@ internal sealed class FfprobeVideoMediaProbe(IConfiguration configuration) : IVi
         if (frameCount is not > 0) return null;
         if (duration is not > 0) duration = frameCount.Value / framesPerSecond.Value;
 
-        return new(width, height, framesPerSecond.Value, frameCount.Value, duration.Value);
+        return new(
+            width,
+            height,
+            framesPerSecond.Value,
+            frameCount.Value,
+            duration.Value,
+            ReadString(stream, "color_range"),
+            ReadString(stream, "color_space"),
+            ReadString(stream, "color_transfer"),
+            ReadString(stream, "color_primaries"));
     }
 
     internal static VideoMediaValidation Validate(VideoMediaMetadata actual, VideoMediaExpectation expected)
@@ -149,6 +163,12 @@ internal sealed class FfprobeVideoMediaProbe(IConfiguration configuration) : IVi
         var frameTolerance = Math.Max(0.001, 0.5 / expected.FramesPerSecond);
         if (Math.Abs(actual.DurationSeconds - expectedDuration) > frameTolerance)
             return new(false, $"The rendered video lasts {actual.DurationSeconds:0.###} seconds; {expected.FrameCount} frames at {expected.FramesPerSecond} fps requires {expectedDuration:0.###} seconds.", actual);
+        if (string.Equals(expected.ColorSpace, "Rec.709", StringComparison.OrdinalIgnoreCase) &&
+            (!string.Equals(actual.ColorRange, "tv", StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(actual.ColorSpace, "bt709", StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(actual.ColorTransfer, "bt709", StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(actual.ColorPrimaries, "bt709", StringComparison.OrdinalIgnoreCase)))
+            return new(false, "The rendered video does not carry the required limited-range BT.709 matrix, transfer, and primaries metadata.", actual);
 
         return new(true, $"Verified {actual.Width} x {actual.Height}, {actual.FramesPerSecond:0.###} fps, {actual.FrameCount} frames.", actual);
     }
@@ -207,6 +227,11 @@ internal sealed class FfprobeVideoMediaProbe(IConfiguration configuration) : IVi
         if (node.ValueKind == JsonValueKind.Number && node.TryGetInt64(out var number)) return number;
         return long.TryParse(node.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out number) ? number : null;
     }
+
+    private static string? ReadString(JsonElement parent, string name)
+        => parent.TryGetProperty(name, out var node) && node.ValueKind == JsonValueKind.String
+            ? node.GetString()
+            : null;
 
     private static double? ReadDouble(JsonElement parent, string name)
     {
