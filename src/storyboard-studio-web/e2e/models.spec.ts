@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 const block = fileURLToPath(new URL('../../../fixtures/glb/asymmetric-block.glb', import.meta.url))
 const post = fileURLToPath(new URL('../../../fixtures/glb/asymmetric-post.glb', import.meta.url))
 const figure = fileURLToPath(new URL('../../../fixtures/glb/rigged-figure.glb', import.meta.url))
+const animatedFigure = fileURLToPath(new URL('../../../fixtures/glb/clip-arm-raise.glb', import.meta.url))
 const wrongProfile = fileURLToPath(new URL('../../../fixtures/glb/rigged-wrong-profile.glb', import.meta.url))
 
 /**
@@ -45,6 +46,47 @@ async function openAssets(page: Page) {
   await page.getByRole('button', { name: 'Assets', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Asset library' })).toBeVisible()
 }
+
+test('inspect two clips, play them, and export all, one, or no animations', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  const name = `animation-preview-${testInfo.project.name}-${Date.now()}`
+  await openAssets(page)
+  await page.locator('input[type="file"]').setInputFiles({
+    name: `${name}.glb`, mimeType: 'model/gltf-binary',
+    buffer: ownFixture(animatedFigure, name),
+  })
+  await page.getByRole('button', { name: /^Models/ }).click()
+  await page.getByRole('button', { name: `Open ${name}` }).click()
+  await expect(page.getByTestId('model-viewer')).toHaveAttribute('data-state', 'ready')
+  await expect(page.getByTestId('model-animation-select')).toHaveCount(1)
+  await page.getByTestId('model-animation-select').selectOption('Arm raise')
+  await page.getByTestId('model-animation-play').click()
+  await expect.poll(async () => Number(await page.getByTestId('model-animation-time').inputValue()))
+    .toBeGreaterThan(0.05)
+  await page.getByTestId('model-animation-play').click()
+  await page.getByRole('button', { name: 'Next animation' }).click()
+  await expect(page.getByTestId('model-animation-select')).toHaveValue('Step forward')
+  await page.getByTestId('model-animation-select').selectOption('')
+  await expect(page.getByTestId('model-animation-play')).toBeDisabled()
+
+  const exportedNames = async () => {
+    const pending = page.waitForEvent('download')
+    await page.getByTestId('model-export-button').click()
+    const downloaded = await pending
+    const bytes = readFileSync(await downloaded.path())
+    const jsonLength = bytes.readUInt32LE(12)
+    const document = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString('utf8'))
+    expect(document.meshes.length).toBeGreaterThan(0)
+    expect(document.skins.length).toBeGreaterThan(0)
+    return (document.animations ?? []).map((animation: { name: string }) => animation.name)
+  }
+  expect(await exportedNames()).toEqual(['Arm raise', 'Step forward'])
+  await page.getByRole('button', { name: 'None', exact: true }).click()
+  expect(await exportedNames()).toEqual([])
+  await page.getByLabel('Arm raise 2.0s').check()
+  expect(await exportedNames()).toEqual(['Arm raise'])
+  verifyConsole()
+})
 
 test('a supported model imports, reports its real measurements, and inspects without moving', async ({ page }, testInfo) => {
   const verifyConsole = failOnConsoleErrors(page)

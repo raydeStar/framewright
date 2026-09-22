@@ -38,6 +38,56 @@ if ($arguments -contains '--version') {
     exit 0
 }
 
+if ($arguments.Count -ge 3 -and $arguments[0] -eq 'export-animations') {
+    # The browser journey needs a real downloadable GLB. Keep its BIN payload
+    # untouched while selecting the fixture's named JSON animations.
+    $source = $arguments[1]
+    $output = $arguments[2]
+    $requested = @()
+    for ($index = 3; $index -lt $arguments.Count; $index++) {
+        if ($arguments[$index] -ne '--clip' -or $index + 1 -ge $arguments.Count) {
+            Write-Error 'RAC_ERROR expected --clip NAME'
+            exit 2
+        }
+        $requested += $arguments[++$index]
+    }
+    if ($source -eq $output -or (Test-Path -LiteralPath $output)) {
+        Write-Error 'RAC_ERROR choose a fresh output path'
+        exit 2
+    }
+    $bytes = [IO.File]::ReadAllBytes($source)
+    if ($bytes.Length -lt 20 -or [BitConverter]::ToUInt32($bytes, 0) -ne 0x46546c67 -or
+        [BitConverter]::ToUInt32($bytes, 8) -ne $bytes.Length) {
+        Write-Error 'RAC_ERROR expected a complete GLB'
+        exit 2
+    }
+    $jsonLength = [int][BitConverter]::ToUInt32($bytes, 12)
+    $document = [Text.Encoding]::UTF8.GetString($bytes, 20, $jsonLength) | ConvertFrom-Json
+    $available = @($document.animations | ForEach-Object { $_.name })
+    if (@($requested | Select-Object -Unique).Count -ne $requested.Count -or
+        @($requested | Where-Object { $_ -notin $available }).Count -gt 0) {
+        Write-Error 'RAC_ERROR clips must be unique and present'
+        exit 2
+    }
+    if ($requested.Count -eq 0) { $document.PSObject.Properties.Remove('animations') }
+    else { $document.animations = @($document.animations | Where-Object { $_.name -in $requested }) }
+    $json = [Text.Encoding]::UTF8.GetBytes(($document | ConvertTo-Json -Depth 100 -Compress))
+    $padding = (4 - ($json.Length % 4)) % 4
+    $remainderStart = 20 + $jsonLength
+    $result = New-Object byte[] (20 + $json.Length + $padding + $bytes.Length - $remainderStart)
+    [BitConverter]::GetBytes([uint32]0x46546c67).CopyTo($result, 0)
+    [BitConverter]::GetBytes([uint32]2).CopyTo($result, 4)
+    [BitConverter]::GetBytes([uint32]$result.Length).CopyTo($result, 8)
+    [BitConverter]::GetBytes([uint32]($json.Length + $padding)).CopyTo($result, 12)
+    [BitConverter]::GetBytes([uint32]0x4e4f534a).CopyTo($result, 16)
+    $json.CopyTo($result, 20)
+    for ($index = 0; $index -lt $padding; $index++) { $result[20 + $json.Length + $index] = 32 }
+    [Array]::Copy($bytes, $remainderStart, $result, 20 + $json.Length + $padding, $bytes.Length - $remainderStart)
+    [IO.File]::WriteAllBytes($output, $result)
+    Write-Output (@{ output = $output; clips = $requested; bytes = $result.Length } | ConvertTo-Json -Compress)
+    exit 0
+}
+
 if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     if ($arguments -contains '--list') {
         $report = [ordered]@{

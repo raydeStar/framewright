@@ -69,6 +69,17 @@ production profiles remain unchanged. A matching browser rig is usable for
 posing; it does not constitute creative approval or UE production certification.
 Floor normalization, component preservation, material repair and rig stress
 tests remain compiler-owned. See its canonical contract for invocation/evidence.
+The clip-selective export command was validated against compiler commit
+`15791dd` (2026-09-22), also on the `0.1.2` CLI.
+
+The asset inspector reads the named clips from each imported GLB revision and
+previews them on that revision's rig. Its previous/next picker, play/pause and
+time scrub do not change the stored asset. For a download, Framewright sends
+the checked clip names to `rac export-animations`; the compiler packages a
+GLB containing all, some, or none of the animation declarations. The library
+revision is immutable. The compiler preserves the original binary chunk, so
+selective exports can retain unused animation bytes rather than becoming
+proportionally smaller.
 
 The pinned wheel gives contracts and receipts. It does **not** give the Blender
 stages or the pinned workflow bundles; those need a configured checkout, the

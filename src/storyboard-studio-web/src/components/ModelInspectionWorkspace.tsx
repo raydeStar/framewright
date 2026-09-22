@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { Archive, ArrowLeft, Bone, Box, Check, Layers3, LoaderCircle, LockKeyhole, Ruler, TriangleAlert, Upload } from 'lucide-react'
+import { Archive, ArrowLeft, Bone, Box, Check, Download, Layers3, LoaderCircle, LockKeyhole, Ruler, TriangleAlert, Upload } from 'lucide-react'
 import { studioApi } from '../api'
 import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorMode'
 import { useAssetDirectorView } from './useAssetDirectorView'
@@ -33,6 +33,8 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
   const [notes, setNotes] = useState(asset.notes)
   const revisionFile = useRef<HTMLInputElement>(null)
   const [pose, setPose] = useState<RigPoseSummary>()
+  const [exportClips, setExportClips] = useState<string[]>([])
+  const [exporting, setExporting] = useState(false)
 
   const active = revisions.find(item => item.id === activeId) ?? asset
   const current = revisions.find(item => item.isCurrentRevision) ?? revisions[0]
@@ -85,9 +87,12 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
     // A pose belongs to the revision it was calculated from, so switching
     // revisions drops it rather than showing one model's bones against
     // another's mesh.
-    setProfile(undefined); setFailure(undefined); setPose(undefined)
+    setProfile(undefined); setFailure(undefined); setPose(undefined); setExportClips([])
     studioApi.modelProfile(activeId)
-      .then(loaded => { if (live) setProfile(loaded) })
+      .then(loaded => { if (live) {
+        setProfile(loaded)
+        setExportClips((loaded.clips ?? []).filter(clip => clip.supported).map(clip => clip.name))
+      } })
       .catch(reason => { if (live) setFailure(reason instanceof Error ? reason.message : 'This model could not be inspected.') })
     return () => { live = false }
   }, [activeId])
@@ -147,6 +152,31 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
     return 'Test pose applied to the skeleton. Nothing was saved.'
   })
 
+  const supportedClips = (profile?.clips ?? []).filter(clip => clip.supported)
+  const exportModel = async () => {
+    setExporting(true); setFailure(undefined)
+    try {
+      const query = new URLSearchParams()
+      for (const clip of exportClips) query.append('clip', clip)
+      const response = await fetch(`/api/assets/${activeId}/animation-export?${query}`)
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new Error(detail || `Export failed (${response.status}).`)
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${active.displayName.replace(/[^a-z0-9._-]+/gi, '-') || 'model'}-${exportClips.length ? 'animated' : 'rest-pose'}.glb`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (reason) {
+      setFailure(reason instanceof Error ? reason.message : 'The model could not be exported.')
+    } finally { setExporting(false) }
+  }
+
   return <main className={`workspace model-workspace${director.directorMode ? ' director-mode' : ''}`} data-testid="model-workspace">
     <header className="model-header">
       <button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />Asset library</button>
@@ -166,6 +196,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
                 contentUrl={profile.contentUrl}
                 label={profile.displayName}
                 dimensions={[profile.dimensions[0], profile.dimensions[1], profile.dimensions[2]]}
+                supportedClipNames={supportedClips.map(clip => clip.name)}
                 onError={message => { setFailure(message); onError(message) }}
               />
             </Suspense>
@@ -198,6 +229,30 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
         </section>
 
         {profile && <>
+          <section data-testid="model-animation-export">
+            <h2><Download size={15} />Export GLB</h2>
+            <p className="model-note">Choose the animations to include. The geometry, rig, textures, and this library revision stay unchanged.</p>
+            {supportedClips.length > 0 ? <>
+              <div className="model-export-shortcuts">
+                <button type="button" onClick={() => setExportClips(supportedClips.map(clip => clip.name))}>All</button>
+                <button type="button" onClick={() => setExportClips([])}>None</button>
+              </div>
+              <div className="model-export-clips">
+                {supportedClips.map(clip => <label key={clip.name}>
+                  <input type="checkbox" checked={exportClips.includes(clip.name)}
+                    onChange={event => setExportClips(current => event.target.checked
+                      ? [...current, clip.name] : current.filter(name => name !== clip.name))} />
+                  <span>{clip.name.replaceAll('_', ' ')} <small>{clip.duration.toFixed(1)}s</small></span>
+                </label>)}
+              </div>
+            </> : <p className="model-note">This revision has no supported animation clips. Export a rest-pose model.</p>}
+            {(profile.clips ?? []).filter(clip => !clip.supported).map(clip =>
+              <p className="model-note" key={clip.name}>{clip.name} cannot be exported here: {clip.findings.join('; ')}</p>)}
+            <button type="button" className="primary compact" data-testid="model-export-button"
+              disabled={exporting} onClick={() => void exportModel()}>
+              <Download size={15} />{exporting ? 'Exporting…' : `Download GLB · ${exportClips.length} ${exportClips.length === 1 ? 'clip' : 'clips'}`}
+            </button>
+          </section>
           <section data-testid="model-dimensions">
             <h2><Ruler size={15} />Dimensions</h2>
             <dl>

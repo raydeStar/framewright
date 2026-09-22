@@ -66,6 +66,10 @@ public sealed class ModelPreparationApiTests
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
 
+        public Task<CompilerAnimationExport> ExportAnimationsAsync(
+            string sourcePath, IReadOnlyList<string> clips, CancellationToken cancellationToken) =>
+            Task.FromResult(new CompilerAnimationExport(null, "This fixture does not export animations."));
+
         public async Task<CompilerStageRun> RunStageAsync(
             string stage, string sourcePath, string outputPath, string reportPath,
             CancellationToken cancellationToken,

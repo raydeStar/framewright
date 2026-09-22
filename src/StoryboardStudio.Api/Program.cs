@@ -971,6 +971,27 @@ app.MapGet("/api/assets/{assetId:guid}/content", async Task<IResult> (
     return Results.File(path, asset.MimeType, enableRangeProcessing: true);
 });
 
+app.MapGet("/api/assets/{assetId:guid}/animation-export", async Task<IResult> (
+    Guid assetId, HttpRequest request, AssetStore assets, ICompilerGateway compiler,
+    CancellationToken cancellationToken) =>
+{
+    var profile = await assets.ModelProfileAsync(assetId, cancellationToken);
+    if (profile.Kind != RepositoryResultKind.Ok || profile.Value is null) return ToHttpResult(profile);
+    var names = request.Query["clip"].Select(value => value ?? "").ToArray();
+    var known = (profile.Value.Clips ?? []).Where(clip => clip.Supported).Select(clip => clip.Name).ToArray();
+    if (names.Length != names.Distinct(StringComparer.Ordinal).Count()
+        || names.Any(name => !known.Contains(name, StringComparer.Ordinal)))
+        return Results.BadRequest(new { error = "Select distinct, supported animations from this model revision." });
+    var asset = await assets.GetAsync(assetId, cancellationToken);
+    if (asset is null) return Results.NotFound();
+    var result = await compiler.ExportAnimationsAsync(
+        assets.ResolveContentPath(asset), names, cancellationToken);
+    if (result.Content is null)
+        return Results.Problem(result.Error ?? "Animation export failed.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    return Results.File(result.Content, "model/gltf-binary", $"{assetId:N}-selected.glb");
+});
+
 app.MapGet("/api/assets/{assetId:guid}/review-notes", async (
     Guid assetId, StudioRepository repository, CancellationToken cancellationToken)
     => Results.Ok(await repository.GetAssetReviewNotesAsync(assetId, cancellationToken)));

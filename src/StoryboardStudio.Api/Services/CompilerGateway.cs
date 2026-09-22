@@ -41,6 +41,8 @@ public sealed record CompilerStageRun(
     bool Ok, string Stage, int ExitCode, double Seconds,
     string? PayloadPath, string? ReceiptJson, string? Error, IReadOnlyList<string> Log);
 
+public sealed record CompilerAnimationExport(byte[]? Content, string? Error);
+
 /// <summary>
 /// The one place this studio talks to the Reference Asset Compiler.
 ///
@@ -54,6 +56,9 @@ public sealed record CompilerStageRun(
 public interface ICompilerGateway
 {
     Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken);
+
+    Task<CompilerAnimationExport> ExportAnimationsAsync(
+        string sourcePath, IReadOnlyList<string> clips, CancellationToken cancellationToken);
 
     Task<CompilerStageRun> RunStageAsync(
         string stage, string sourcePath, string outputPath, string reportPath,
@@ -94,6 +99,26 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
 
     private TimeSpan Timeout => TimeSpan.FromMinutes(
         Math.Clamp(configuration.GetValue($"{Section}:StageTimeoutMinutes", 60), 1, 600));
+
+    public async Task<CompilerAnimationExport> ExportAnimationsAsync(
+        string sourcePath, IReadOnlyList<string> clips, CancellationToken cancellationToken)
+    {
+        var output = Path.Combine(Path.GetTempPath(), $"framewright-clips-{Guid.NewGuid():N}.glb");
+        try
+        {
+            var arguments = new List<string> { "export-animations", sourcePath, output };
+            foreach (var clip in clips) { arguments.Add("--clip"); arguments.Add(clip); }
+            var run = await RunAsync(arguments, TimeSpan.FromSeconds(90), cancellationToken);
+            if (!run.Started || run.ExitCode != 0 || !File.Exists(output))
+                return new(null, Tail(run.StandardError) ??
+                    "The Reference Asset Compiler could not export these animations.");
+            return new(await File.ReadAllBytesAsync(output, cancellationToken), null);
+        }
+        finally
+        {
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
 
     public async Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken)
     {

@@ -77,6 +77,10 @@ public sealed class ModelGenerationApiTests
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
 
+        public Task<CompilerAnimationExport> ExportAnimationsAsync(
+            string sourcePath, IReadOnlyList<string> clips, CancellationToken cancellationToken) =>
+            Task.FromResult(new CompilerAnimationExport(null, "This fixture does not export animations."));
+
         /// <summary>Per stage, what it was told beyond its three paths.</summary>
         public Dictionary<string, IReadOnlyDictionary<string, string>> Options { get; } = [];
 

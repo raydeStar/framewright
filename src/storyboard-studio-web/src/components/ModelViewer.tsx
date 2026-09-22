@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Mesh, MeshStandardMaterial, PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type Material, type Object3D } from 'three'
+import { AmbientLight, AnimationMixer, Box3, Color, DirectionalLight, GridHelper, LoopRepeat, Mesh, MeshStandardMaterial, PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type Material, type Object3D } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { sharpenTextures } from './textureQuality'
@@ -27,6 +27,7 @@ export interface ModelViewerProps {
   label: string
   /** Scene-space dimensions from the server, used to frame the opening view. */
   dimensions: [number, number, number]
+  supportedClipNames?: string[]
   onError?: (message: string) => void
 }
 
@@ -35,20 +36,28 @@ type ViewerState = 'loading' | 'ready' | 'failed' | 'unsupported'
 const openingYaw = 0.9
 const openingPitch = 0.42
 
-export default function ModelViewer({ contentUrl, label, dimensions, onError }: ModelViewerProps) {
+export default function ModelViewer({ contentUrl, label, dimensions, supportedClipNames, onError }: ModelViewerProps) {
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewerState>('loading')
   const [detail, setDetail] = useState('Preparing the model surface')
   const [readout, setReadout] = useState({ yaw: openingYaw, pitch: openingPitch })
   const [painted, setPainted] = useState(true)
   const [wired, setWired] = useState(false)
+  const [clipNames, setClipNames] = useState<string[]>([])
+  const [selectedClip, setSelectedClip] = useState<string | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [clipTime, setClipTime] = useState(0)
+  const [clipDuration, setClipDuration] = useState(0)
+  const allowedClips = useRef(supportedClipNames)
+  allowedClips.current = supportedClipNames
   // The renderer reads these rather than React state, because it runs inside an
   // effect that must not be torn down and rebuilt to change how a surface looks.
   const display = useRef({ painted: true, wired: false })
   // One camera, one source of truth. The renderer reads this; the pointer and
   // keyboard paths both write to it, so they can never drift apart.
   const view = useRef({ yaw: openingYaw, pitch: openingPitch, distance: 1, target: new Vector3() })
-  const surface = useRef<{ place: () => void; frame: () => void; show: () => void } | undefined>(undefined)
+  const surface = useRef<{ place: () => void; frame: () => void; show: () => void;
+    selectClip: (name: string | null) => void; play: (value: boolean) => void; seek: (seconds: number) => void } | undefined>(undefined)
   const drag = useRef<{ pointerId: number; x: number; y: number; panning: boolean } | undefined>(undefined)
   const reportError = useRef(onError)
   reportError.current = onError
@@ -79,6 +88,12 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
     const camera = new PerspectiveCamera(38, 1, 0.01, 1000)
     const span = Math.max(width, height, depth, 0.001)
     let loaded: Object3D | undefined
+    let mixer: AnimationMixer | undefined
+    let clips: AnimationClip[] = []
+    let action: AnimationAction | undefined
+    let currentClip: AnimationClip | undefined
+    let motionFrame = 0
+    let previousFrame = 0
 
     view.current = { yaw: openingYaw, pitch: openingPitch, distance: span * 2.6, target: new Vector3() }
 
@@ -182,7 +197,46 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
       })
     }
 
-    surface.current = { place, frame, show }
+    const tick = (now: number) => {
+      if (disposed || !mixer || !action || !currentClip) return
+      const seconds = Math.min((now - previousFrame) / 1000, 0.1)
+      previousFrame = now
+      mixer.update(seconds)
+      setClipTime(action.time % currentClip.duration)
+      draw()
+      motionFrame = requestAnimationFrame(tick)
+    }
+    const play = (value: boolean) => {
+      cancelAnimationFrame(motionFrame)
+      setPlaying(value && Boolean(action))
+      if (value && action) {
+        previousFrame = performance.now()
+        motionFrame = requestAnimationFrame(tick)
+      }
+    }
+    const selectClip = (name: string | null) => {
+      play(false)
+      mixer?.stopAllAction()
+      action = undefined
+      currentClip = clips.find(clip => clip.name === name)
+      if (mixer && currentClip) {
+        action = mixer.clipAction(currentClip)
+        action.reset().setLoop(LoopRepeat, Infinity).play()
+        mixer.update(0)
+      }
+      setSelectedClip(currentClip?.name ?? null)
+      setClipDuration(currentClip?.duration ?? 0)
+      setClipTime(0)
+      draw()
+    }
+    const seek = (seconds: number) => {
+      if (!mixer || !action || !currentClip) return
+      action.time = Math.min(Math.max(seconds, 0), currentClip.duration)
+      mixer.update(0)
+      setClipTime(action.time)
+      draw()
+    }
+    surface.current = { place, frame, show, selectClip, play, seek }
 
     const resize = () => {
       const width = Math.max(1, container.clientWidth)
@@ -210,6 +264,10 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
         if (disposed) { release(gltf.scene); return }
         loaded = gltf.scene
         scene.add(loaded)
+        clips = gltf.animations.filter(clip =>
+          clip.duration > 0 && (!allowedClips.current || allowedClips.current.includes(clip.name)))
+        if (clips.length > 0) mixer = new AnimationMixer(loaded)
+        setClipNames(clips.map(clip => clip.name))
         sharpenTextures(loaded, renderer)
         dress(loaded)
         show()
@@ -254,6 +312,9 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
 
     return () => {
       disposed = true
+      cancelAnimationFrame(motionFrame)
+      mixer?.stopAllAction()
+      if (loaded) mixer?.uncacheRoot(loaded)
       surface.current = undefined
       // Restore the owned materials before releasing: clay must not hide the silverware.
       for (const { mesh, own, plain } of dressed) { mesh.material = own; plain.dispose() }
@@ -327,6 +388,14 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
     if (drag.current?.pointerId === event.pointerId) drag.current = undefined
   }
 
+  const cycleClip = (direction: number) => {
+    if (clipNames.length === 0) return
+    const index = clipNames.indexOf(selectedClip ?? '')
+    const next = index < 0 ? (direction < 0 ? clipNames.length - 1 : 0)
+      : (index + direction + clipNames.length) % clipNames.length
+    surface.current?.selectClip(clipNames[next])
+  }
+
   return <div className="model-viewer" data-testid="model-viewer" data-state={state}>
     <div
       ref={host}
@@ -359,6 +428,22 @@ export default function ModelViewer({ contentUrl, label, dimensions, onError }: 
         <button type="button" disabled={state !== 'ready'} onClick={() => { view.current.yaw = openingYaw; view.current.pitch = openingPitch; surface.current?.frame() }}>Reset view</button>
       </div>
     </div>
+    {clipNames.length > 0 && <div className="model-animation-bar" data-testid="model-animation-bar">
+      <strong>Animation</strong>
+      <button type="button" aria-label="Previous animation" onClick={() => cycleClip(-1)}>‹</button>
+      <select aria-label="Preview animation" data-testid="model-animation-select" value={selectedClip ?? ''}
+        onChange={event => surface.current?.selectClip(event.target.value || null)}>
+        <option value="">Rest pose</option>
+        {clipNames.map(name => <option key={name} value={name}>{name.replaceAll('_', ' ')}</option>)}
+      </select>
+      <button type="button" aria-label="Next animation" onClick={() => cycleClip(1)}>›</button>
+      <button type="button" data-testid="model-animation-play" disabled={!selectedClip}
+        onClick={() => surface.current?.play(!playing)}>{playing ? 'Pause' : 'Play'}</button>
+      <input type="range" aria-label="Animation time" data-testid="model-animation-time"
+        min={0} max={clipDuration} step={0.01} value={clipTime} disabled={!selectedClip}
+        onChange={event => surface.current?.seek(Number(event.target.value))} />
+      <span>{clipTime.toFixed(1)} / {clipDuration.toFixed(1)}s</span>
+    </div>}
     <p className="model-viewer-orbit" data-testid="model-viewer-orbit">
       Inspection camera · yaw {readout.yaw.toFixed(2)} · pitch {readout.pitch.toFixed(2)}
     </p>
