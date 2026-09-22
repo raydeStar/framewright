@@ -11,7 +11,7 @@ Framewright's automated gate proves deterministic application contracts. It does
 | Persistent FIFO claims, active-lease exclusion, expired-lease recovery, and explicit retry | Durable queue tests using SQLite |
 | Voice requests queue before provider work and attach completed media | Voice synthesis contract tests |
 | Additive schema ledger and verified pre-migration backup | Schema migration tests |
-| Backup inventory/hash verification and recovery behavior | Backup operation tests, restore script canaries, and packaged export/import -> backup -> offline restore -> restart smoke |
+| Backup inventory/hash verification and recovery behavior | Backup operation tests, restore script canaries, isolated-workspace round trip of rig/clip/motion/annotation/revision/still lineage, and packaged export/import -> backup -> offline restore -> restart smoke |
 | Max-video binding required for video approval | Video ratification/export contract test |
 | Browser navigation and fast draft UX | Default Playwright suite using isolated local state and mocked provider boundaries |
 | Frontend type, lint, formatting, and production bundle | `npm run check` and `npm run build` |

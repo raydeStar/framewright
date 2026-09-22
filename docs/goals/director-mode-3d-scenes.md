@@ -1817,6 +1817,42 @@ remains CONTRACT_VERIFIED until the artist records composition acceptance using
 a meaningful reference. M09 remains the active milestone pending the prepared
 sword verdict.
 
+### M18 portable scene-graph recovery groundwork - 2026-09-21
+
+Scope: strengthen the existing working-package contract at the current dependency
+boundary without claiming the unfinished animated-take milestone. The new API
+regression creates a rigged character with a compatible clip, a compiler-owned
+runtime derivative with rigid-part motion, an object annotation, and a frozen
+scene still bound into ordinary shot/candidate review. It exports that project,
+imports it into a second factory with a separate data root, activates the fresh
+workspace, and exercises the imported graph through normal APIs.
+
+Observed evidence:
+
+- All project, shot, scene, instance, asset, clip, annotation, binding, and
+  candidate identities are remapped. The derivative keeps its content hash,
+  parent/revision family, and a relative storage path that does not reference
+  the source data root.
+- The imported scene keeps its camera, clip timing/root-motion setting, and
+  rigid hinge motion. The imported rig and clip profiles remain compatible, and
+  a real motion-sample request returns character joints after the round trip.
+- The object annotation targets the remapped prop and derivative. The frozen
+  still remains readable; its binding targets the remapped shot/current
+  candidate and preserves the immutable scene snapshot hash.
+- `dotnet test tests/StoryboardStudio.Api.Tests/StoryboardStudio.Api.Tests.csproj
+  --configuration Release --nologo --filter
+  "FullyQualifiedName~PortableProjectTests"` passed **4/4**.
+- `dotnet test Framewright.slnx --configuration Release --nologo` passed
+  **284/284**. `./scripts/public-release-audit.ps1` also passed. The running
+  artist application and its Debug binaries were preserved.
+
+Status impact: this is D/A recovery evidence and M18 groundwork. M18 remains
+open because M17 has not supplied the accepted playable animated take, the
+connected full acceptance graph has not been exercised in a packaged runtime,
+and the required human checks remain outstanding. The last full browser gate on
+the preceding recovery baseline remains 134 passes with six intentional tablet
+exclusions; it was not rerun for this backend-only regression.
+
 ### Acceptance record template
 
 ```text

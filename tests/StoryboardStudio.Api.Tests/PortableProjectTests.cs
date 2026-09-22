@@ -1,8 +1,5 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using StoryboardStudio.Api.Persistence;
-using StoryboardStudio.Api.Services;
-using StoryboardStudio.Core;
+using System.Buffers.Binary;
+using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
@@ -11,6 +8,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using StoryboardStudio.Api.Persistence;
+using StoryboardStudio.Api.Services;
+using StoryboardStudio.Core;
 
 namespace StoryboardStudio.Api.Tests;
 
@@ -100,6 +102,187 @@ public sealed class PortableProjectTests
     }
 
     [Fact]
+    public async Task AWorkingPackageRoundTripsTheMvpSceneGraphIntoAnIsolatedWorkspace()
+    {
+        byte[] package;
+        Guid sourceProjectId, sourceShotId, sourceSceneId, sourcePropId, sourceCharacterId, sourceClipId;
+        Guid sourceCharacterInstanceId, sourcePropInstanceId, sourceAnnotationId, sourceBindingId, sourceCandidateId;
+        string sourceSnapshotHash, sourceDerivativeHash, sourceDataRoot;
+
+        using (var sourceFactory = new StudioApiFactory())
+        using (var sourceClient = sourceFactory.CreateClient())
+        {
+            sourceDataRoot = sourceFactory.DataRoot;
+            var studio = await sourceClient.GetFromJsonAsync<StudioSnapshot>("/api/studio")
+                ?? throw new InvalidOperationException();
+            sourceProjectId = studio.Project.Id;
+
+            var shotResponse = await sourceClient.PostAsJsonAsync("/api/shots", new CreateShotRequest(
+                "SC-980", "Portable motion proof", "A rig, clip, prop, note, and frozen still travel together.",
+                48, "Unbound", "Hold for review.", [], []));
+            shotResponse.EnsureSuccessStatusCode();
+            var shot = await shotResponse.Content.ReadFromJsonAsync<ShotSummary>()
+                ?? throw new InvalidOperationException();
+            sourceShotId = shot.Id;
+
+            sourcePropId = await ImportModelAsync(sourceClient, ModelFixtures.AsymmetricBlock(), "portable-prop.glb");
+            var derivativeId = await ImportModelAsync(sourceClient, ModelFixtures.DensePropRuntime(), "portable-prop-runtime.glb");
+            var revision = await sourceClient.PostAsJsonAsync($"/api/assets/{sourcePropId}/revisions",
+                new AddAssetRevisionRequest(derivativeId, "Use the compiler-owned runtime derivative.", "Portable graph proof"));
+            revision.EnsureSuccessStatusCode();
+            sourceCharacterId = await ImportModelAsync(sourceClient, ModelFixtures.RiggedFigure(), "portable-character.glb");
+            sourceClipId = await ImportModelAsync(sourceClient, ModelFixtures.ClipArmRaise(), "portable-arm-raise.glb");
+
+            sourceSceneId = await CreateSceneAsync(sourceClient, "Portable animated workshop");
+            sourceCharacterInstanceId = Guid.NewGuid();
+            sourcePropInstanceId = Guid.NewGuid();
+            var saved = await sourceClient.PutAsJsonAsync($"/api/scenes/{sourceSceneId}", new
+            {
+                expectedVersion = 1,
+                name = "Portable animated workshop",
+                camera = Camera(),
+                environment = Environment(),
+                instances = new object[]
+                {
+                    new
+                    {
+                        id = sourceCharacterInstanceId, assetId = sourceCharacterId, name = "Portable lead",
+                        position = (double[])[-1.5, 0d, 0d], rotation = (double[])[0d, 0.2, 0d], scale = (double[])[1d, 1d, 1d],
+                        clip = new { clipAssetId = sourceClipId, clipName = "Arm raise", start = 0d, end = 2d, speed = 1d, time = 0.5d, loop = false, rootMotion = "Hold" },
+                    },
+                    new
+                    {
+                        id = sourcePropInstanceId, assetId = derivativeId, name = "Portable door",
+                        position = (double[])[2d, 0d, -1d], rotation = (double[])[0d, 0d, 0d], scale = (double[])[1d, 1d, 1d],
+                        motion = new { pivot = (double[])[-1d, 0d, 0d], axis = "Y", fromRadians = 0d, toRadians = 1.2d, seconds = 2d, pingPong = false },
+                    },
+                },
+            });
+            saved.EnsureSuccessStatusCode();
+
+            var noteResponse = await sourceClient.PostAsJsonAsync($"/api/scenes/{sourceSceneId}/annotations", new
+            {
+                instanceId = sourcePropInstanceId,
+                anchor = (double[])[0.25, 0.75, 0.1],
+                camera = Camera(),
+                body = "Keep the hinge readable in the final framing.",
+            });
+            noteResponse.EnsureSuccessStatusCode();
+            using (var note = await noteResponse.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException())
+                sourceAnnotationId = note.RootElement.GetProperty("id").GetGuid();
+
+            var shotCamera = new SceneCameraSummary(0.72, 0.31, 7.25, [0.1, 0.9, -0.4], 35);
+            using var rendered = await RenderStillAsync(
+                sourceClient, sourceSceneId, sourceShotId, expectedSceneVersion: 2, expectedShotVersion: 1,
+                shotCamera, startTime: 0, endTime: 2, stillTime: 1,
+                PngHeader(studio.Project.DeliveryWidth, studio.Project.DeliveryHeight));
+            rendered.EnsureSuccessStatusCode();
+            var binding = await rendered.Content.ReadFromJsonAsync<SceneShotBindingSummary>()
+                ?? throw new InvalidOperationException();
+            sourceBindingId = binding.Id;
+            sourceSnapshotHash = binding.SnapshotHash;
+
+            var candidates = await sourceClient.GetFromJsonAsync<CandidateVersionSummary[]>($"/api/shots/{sourceShotId}/candidates")
+                ?? throw new InvalidOperationException();
+            sourceCandidateId = candidates.Single(x => x.IsCurrent).Id;
+            package = await sourceClient.GetByteArrayAsync("/api/export/working-package");
+
+            using var scope = sourceFactory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+            sourceDerivativeHash = (await db.Assets.AsNoTracking().SingleAsync(x => x.Id == derivativeId)).ContentHash;
+        }
+
+        using var targetFactory = new StudioApiFactory();
+        using var targetClient = targetFactory.CreateClient();
+        Assert.NotEqual(sourceDataRoot, targetFactory.DataRoot);
+        var importedResponse = await ImportPackageAsync(targetClient, package, "portable-mvp-graph.zip");
+        importedResponse.EnsureSuccessStatusCode();
+        var imported = await importedResponse.Content.ReadFromJsonAsync<PortableProjectImportSummary>()
+            ?? throw new InvalidOperationException();
+        Assert.NotEqual(sourceProjectId, imported.ProjectId);
+        Assert.True(imported.IdsRemapped);
+        (await targetClient.PostAsync($"/api/projects/{imported.ProjectId}/activate", null)).EnsureSuccessStatusCode();
+
+        var reopened = await targetClient.GetFromJsonAsync<StudioSnapshot>("/api/studio")
+            ?? throw new InvalidOperationException();
+        var importedShot = reopened.Shots.Single(x => x.Code == "SC-980");
+        Assert.NotEqual(sourceShotId, importedShot.Id);
+        Assert.Equal(2, importedShot.Version);
+
+        var scenes = await targetClient.GetFromJsonAsync<SceneListItem[]>("/api/scenes")
+            ?? throw new InvalidOperationException();
+        var importedScene = scenes.Single(x => x.Name == "Portable animated workshop");
+        Assert.NotEqual(sourceSceneId, importedScene.Id);
+        using var scene = await targetClient.GetFromJsonAsync<JsonDocument>($"/api/scenes/{importedScene.Id}")
+            ?? throw new InvalidOperationException();
+        var instances = scene.RootElement.GetProperty("instances").EnumerateArray().ToArray();
+        var character = instances.Single(x => x.GetProperty("name").GetString() == "Portable lead");
+        var prop = instances.Single(x => x.GetProperty("name").GetString() == "Portable door");
+        var importedCharacterInstanceId = character.GetProperty("id").GetGuid();
+        var importedPropInstanceId = prop.GetProperty("id").GetGuid();
+        var importedCharacterId = character.GetProperty("assetId").GetGuid();
+        var importedClipId = character.GetProperty("clip").GetProperty("clipAssetId").GetGuid();
+        var importedPropId = prop.GetProperty("assetId").GetGuid();
+        Assert.NotEqual(sourceCharacterInstanceId, importedCharacterInstanceId);
+        Assert.NotEqual(sourcePropInstanceId, importedPropInstanceId);
+        Assert.NotEqual(sourceCharacterId, importedCharacterId);
+        Assert.NotEqual(sourceClipId, importedClipId);
+        Assert.Equal("Arm raise", character.GetProperty("clip").GetProperty("clipName").GetString());
+        Assert.Equal(0.5, character.GetProperty("clip").GetProperty("time").GetDouble(), 4);
+        Assert.Equal("Y", prop.GetProperty("motion").GetProperty("axis").GetString());
+        Assert.Equal(1.2, prop.GetProperty("motion").GetProperty("toRadians").GetDouble(), 4);
+        Assert.Equal(0.72, scene.RootElement.GetProperty("camera").GetProperty("yaw").GetDouble(), 4);
+
+        using var rig = await targetClient.GetFromJsonAsync<JsonDocument>($"/api/assets/{importedCharacterId}/model-profile")
+            ?? throw new InvalidOperationException();
+        Assert.True(rig.RootElement.GetProperty("rig").GetProperty("animationReady").GetBoolean());
+        using var clip = await targetClient.GetFromJsonAsync<JsonDocument>($"/api/assets/{importedClipId}/model-profile")
+            ?? throw new InvalidOperationException();
+        Assert.Contains(clip.RootElement.GetProperty("clips").EnumerateArray(),
+            item => item.GetProperty("name").GetString() == "Arm raise" && item.GetProperty("supported").GetBoolean());
+        using var sample = await targetClient.GetFromJsonAsync<JsonDocument>(
+            $"/api/scenes/{importedScene.Id}/instances/{importedCharacterInstanceId}/motion-sample?time=1")
+            ?? throw new InvalidOperationException();
+        Assert.Equal("Character", sample.RootElement.GetProperty("kind").GetString());
+        Assert.NotEmpty(sample.RootElement.GetProperty("joints").EnumerateArray());
+
+        using var notes = await targetClient.GetFromJsonAsync<JsonDocument>($"/api/scenes/{importedScene.Id}/annotations")
+            ?? throw new InvalidOperationException();
+        var importedNote = Assert.Single(notes.RootElement.EnumerateArray().ToArray());
+        Assert.NotEqual(sourceAnnotationId, importedNote.GetProperty("id").GetGuid());
+        Assert.Equal(importedPropInstanceId, importedNote.GetProperty("instanceId").GetGuid());
+        Assert.Equal(importedPropId, importedNote.GetProperty("assetId").GetGuid());
+        Assert.Equal("Keep the hinge readable in the final framing.", importedNote.GetProperty("body").GetString());
+
+        var bindings = await targetClient.GetFromJsonAsync<SceneShotBindingSummary[]>($"/api/scenes/{importedScene.Id}/shot-stills")
+            ?? throw new InvalidOperationException();
+        var importedBinding = Assert.Single(bindings);
+        Assert.NotEqual(sourceBindingId, importedBinding.Id);
+        Assert.Equal(importedShot.Id, importedBinding.ShotId);
+        Assert.Equal(sourceSnapshotHash, importedBinding.SnapshotHash);
+        Assert.Equal(importedShot.CurrentAssetId, importedBinding.StillAssetId);
+        Assert.Equal(HttpStatusCode.OK, (await targetClient.GetAsync(importedBinding.StillAssetUrl)).StatusCode);
+        var importedCandidates = await targetClient.GetFromJsonAsync<CandidateVersionSummary[]>($"/api/shots/{importedShot.Id}/candidates")
+            ?? throw new InvalidOperationException();
+        var importedCandidate = importedCandidates.Single(x => x.IsCurrent);
+        Assert.NotEqual(sourceCandidateId, importedCandidate.Id);
+        Assert.Equal(importedBinding.StillAssetId, importedCandidate.AssetId);
+
+        using var targetScope = targetFactory.Services.CreateScope();
+        var targetDb = targetScope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var importedDerivative = await targetDb.Assets.AsNoTracking().SingleAsync(x => x.Id == importedPropId);
+        Assert.Equal(sourceDerivativeHash, importedDerivative.ContentHash);
+        Assert.NotNull(importedDerivative.RevisionFamilyId);
+        Assert.NotNull(importedDerivative.ParentAssetId);
+        Assert.NotEqual(sourcePropId, importedDerivative.ParentAssetId);
+        Assert.False(Path.IsPathRooted(importedDerivative.StoragePath));
+        Assert.DoesNotContain(sourceDataRoot, importedDerivative.StoragePath, StringComparison.OrdinalIgnoreCase);
+        var importedParent = await targetDb.Assets.AsNoTracking().SingleAsync(x => x.Id == importedDerivative.ParentAssetId);
+        Assert.Equal(imported.ProjectId, importedParent.ProjectId);
+        Assert.Equal(importedDerivative.RevisionFamilyId, importedParent.RevisionFamilyId);
+    }
+
+    [Fact]
     public async Task AChecksumFailureCreatesNoPartialProject()
     {
         using var factory = new StudioApiFactory();
@@ -179,6 +362,61 @@ public sealed class PortableProjectTests
         file.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
         content.Add(file, "file", fileName);
         return client.PostAsync("/api/projects/import", content);
+    }
+
+    private static object Camera() => new
+    {
+        yaw = 0.72,
+        pitch = 0.31,
+        distance = 7.25d,
+        target = (double[])[0.1, 0.9, -0.4],
+        fieldOfView = 35d,
+    };
+
+    private static object Environment() => new
+    {
+        keyIntensity = 2.4d,
+        keyYaw = 0.65d,
+        keyPitch = 0.85d,
+        ambientIntensity = 1.1d,
+    };
+
+    private static async Task<HttpResponseMessage> RenderStillAsync(
+        HttpClient client,
+        Guid sceneId,
+        Guid shotId,
+        int expectedSceneVersion,
+        int expectedShotVersion,
+        SceneCameraSummary camera,
+        double startTime,
+        double endTime,
+        double stillTime,
+        byte[] png)
+    {
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(png);
+        file.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        content.Add(file, "file", "portable-scene-still.png");
+        content.Add(new StringContent(shotId.ToString()), "shotId");
+        content.Add(new StringContent(expectedSceneVersion.ToString(CultureInfo.InvariantCulture)), "expectedSceneVersion");
+        content.Add(new StringContent(expectedShotVersion.ToString(CultureInfo.InvariantCulture)), "expectedShotVersion");
+        content.Add(new StringContent(startTime.ToString(CultureInfo.InvariantCulture)), "startTime");
+        content.Add(new StringContent(endTime.ToString(CultureInfo.InvariantCulture)), "endTime");
+        content.Add(new StringContent(stillTime.ToString(CultureInfo.InvariantCulture)), "stillTime");
+        content.Add(new StringContent(JsonSerializer.Serialize(camera)), "camera");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/scenes/{sceneId}/shot-stills") { Content = content };
+        request.Headers.Add("X-Storyboard-Studio", "1");
+        return await client.SendAsync(request);
+    }
+
+    private static byte[] PngHeader(int width, int height)
+    {
+        var bytes = new byte[25];
+        new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }.CopyTo(bytes, 0);
+        "IHDR"u8.CopyTo(bytes.AsSpan(12, 4));
+        BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(16, 4), width);
+        BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(20, 4), height);
+        return bytes;
     }
 
     private static byte[] RewriteEntry(byte[] package, string path, Func<byte[], byte[]> rewrite)
