@@ -29,7 +29,7 @@ public sealed record EditShotRevisionProposalRequest(
     string Rationale,
     string DesiredMediaType);
 
-public sealed class WebMcpStoryboardService(
+public sealed partial class WebMcpStoryboardService(
     StudioDbContext db,
     ContinuityService continuity,
     TimeProvider timeProvider)

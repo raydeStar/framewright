@@ -9,9 +9,9 @@ type ModelContext = { registerTool: (tool: BrowserTool, options: { signal: Abort
 declare global { interface Document { modelContext?: ModelContext } }
 
 const emptySchema = { type: 'object', properties: {}, required: [], additionalProperties: false } as const
-const noShotOpen: WebMcpEnvelope = {
-  ok: false, status: 'error', code: 'no_shot_open',
-  message: 'No shot is open in the workspace. Ask the artist to open one, then read the context again.', retryable: true,
+const noSubjectOpen: WebMcpEnvelope = {
+  ok: false, status: 'error', code: 'no_subject_open',
+  message: 'Open a shot, scene, or library asset, then read the director context again.', retryable: true,
 }
 const noSceneOpen: WebMcpEnvelope = {
   ok: false, status: 'error', code: 'no_scene_open',
@@ -24,6 +24,10 @@ const noReferenceSelected: WebMcpEnvelope = {
 const unsavedScene: WebMcpEnvelope = {
   ok: false, status: 'conflict', code: 'unsaved_scene',
   message: 'This scene has unsaved camera or object changes. Save or reopen it before asking an agent to read or propose against it.', retryable: true,
+}
+const comparisonView: WebMcpEnvelope = {
+  ok: false, status: 'error', code: 'comparison_view',
+  message: 'Two image revisions are on screen. Switch to Single view before reading one revision for direction.', retryable: true,
 }
 const wrongSurface: WebMcpEnvelope = {
   ok: false, status: 'error', code: 'wrong_surface',
@@ -106,13 +110,14 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
     },
     {
       name: 'get_director_context', title: 'Get director context',
-      description: 'Read the exact saved shot or scene state on screen and a token that binds later proposals to it. Unsaved scene drafts are refused rather than described as older state.',
+      description: 'Read the exact saved shot, scene, or library asset state on screen and a token that binds later proposals to it. Unsaved scene drafts are refused rather than described as older state.',
       inputSchema: emptySchema, annotations: read,
       execute: run('get_director_context', (_input, signal) => {
         const view = options.getDirectorView()
-        if (!view) return Promise.resolve(noShotOpen)
-        // One tool, two surfaces: the packet describes whichever the artist has
+        if (!view) return Promise.resolve(noSubjectOpen)
+        // One tool, several surfaces: the packet describes whichever the artist has
         // open, so an agent never has to guess which workspace it is looking at.
+        if (view.kind === 'asset') return view.comparing ? Promise.resolve(comparisonView) : studioApi.webMcpAssetContext(view, signal)
         if (view.kind === 'scene' && view.dirty) return Promise.resolve(unsavedScene)
         return view.kind === 'scene'
           ? studioApi.webMcpSceneContext(view.sceneId, view.instanceId, view.referenceAssetId, view.directorMode ?? false, view.time, signal)
@@ -140,7 +145,8 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
       }, annotations: read,
       execute: run('observe_current_frame', (input, signal) => {
         const view = options.getDirectorView()
-        if (!view) return Promise.resolve(noShotOpen)
+        if (!view) return Promise.resolve(noSubjectOpen)
+        if (view.kind === 'asset') return view.comparing ? Promise.resolve(comparisonView) : studioApi.webMcpAssetObservation(view, String(input.stateToken), signal)
         if (view.kind !== 'shot') return Promise.resolve(wrongSurface)
         return studioApi.webMcpDirectorObservation(view, String(input.stateToken), signal)
       }),

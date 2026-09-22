@@ -718,6 +718,10 @@ app.MapGet("/api/scenes/{sceneId:guid}/blockout", async Task<IResult> (Guid scen
     => ToHttpResult(await blockouts.ForSceneAsync(sceneId, cancellationToken)));
 app.MapGet("/api/webmcp/director/context", async (Guid shotId, int? displayedVersion, bool? archivedPreview, bool? directorMode, string? tool, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.DirectorContextAsync(shotId, displayedVersion, archivedPreview ?? false, directorMode ?? false, tool, cancellationToken)));
+app.MapGet("/api/webmcp/director/assets/{assetId:guid}/context", async (Guid assetId, string? contentHash, bool? directorMode, WebMcpStoryboardService service, CancellationToken cancellationToken)
+    => Results.Ok(await service.AssetDirectorAsync(assetId, contentHash, directorMode ?? false, false, null, cancellationToken)));
+app.MapGet("/api/webmcp/director/assets/{assetId:guid}/observation", async (Guid assetId, string? contentHash, string? stateToken, WebMcpStoryboardService service, CancellationToken cancellationToken)
+    => Results.Ok(await service.AssetDirectorAsync(assetId, contentHash, false, true, stateToken, cancellationToken)));
 app.MapGet("/api/webmcp/director/observation", async (Guid shotId, int? displayedVersion, bool? archivedPreview, string? stateToken, WebMcpStoryboardService service, CancellationToken cancellationToken)
     => Results.Ok(await service.DirectorObservationAsync(shotId, displayedVersion, archivedPreview ?? false, stateToken, cancellationToken)));
 app.MapGet("/api/webmcp/shots", async (int? offset, int? limit, WebMcpStoryboardService service, CancellationToken cancellationToken)

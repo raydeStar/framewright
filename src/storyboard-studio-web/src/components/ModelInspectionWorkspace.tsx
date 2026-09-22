@@ -1,6 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Archive, ArrowLeft, Bone, Box, Check, Layers3, LoaderCircle, LockKeyhole, Ruler, TriangleAlert, Upload } from 'lucide-react'
 import { studioApi } from '../api'
+import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorMode'
+import { useAssetDirectorView } from './useAssetDirectorView'
 import type { AssetSummary, ModelProfileSummary, RigPoseSummary } from '../types'
 
 // three.js only loads when an artist actually opens a model, so the ordinary
@@ -15,7 +17,7 @@ const ModelPreparation = lazy(() => import('./ModelPreparation'))
  * geometry itself, the numbers measured from the stored bytes, and the library
  * organisation that can be edited without touching any of those facts.
  */
-export default function ModelInspectionWorkspace({ asset, onBack, onError, onChanged }: {
+export default function ModelInspectionWorkspace({ asset, onBack, onError, onChanged, ...director }: AssetDirectorControls & {
   asset: AssetSummary
   onBack: () => void
   onError: (message: string) => void
@@ -34,6 +36,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
 
   const active = revisions.find(item => item.id === activeId) ?? asset
   const current = revisions.find(item => item.isCurrentRevision) ?? revisions[0]
+  useAssetDirectorView(active, director)
 
   // The library hands down a fresh asset object on every refresh. Keying the
   // reset on its identity would throw the artist back to the revision they
@@ -144,11 +147,12 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
     return 'Test pose applied to the skeleton. Nothing was saved.'
   })
 
-  return <main className="workspace model-workspace" data-testid="model-workspace">
+  return <main className={`workspace model-workspace${director.directorMode ? ' director-mode' : ''}`} data-testid="model-workspace">
     <header className="model-header">
       <button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />Asset library</button>
       <div><p className="eyebrow">Model inspection</p><h1>{active.displayName}</h1></div>
       <span className="model-format"><Box size={15} />{profile?.container ?? 'GLB'}</span>
+      <DirectorModeButton active={director.directorMode} onClick={() => director.onDirectorMode(!director.directorMode)} />
     </header>
 
     {failure && <p className="asset-error" role="alert" data-testid="model-failure">{failure}</p>}
@@ -162,7 +166,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
                 contentUrl={profile.contentUrl}
                 label={profile.displayName}
                 dimensions={[profile.dimensions[0], profile.dimensions[1], profile.dimensions[2]]}
-                onError={onError}
+                onError={message => { setFailure(message); onError(message) }}
               />
             </Suspense>
           : !failure && <div className="asset-loading"><LoaderCircle className="spin" /><span>Measuring the model…</span></div>}

@@ -116,7 +116,9 @@ export interface ShotRevisionInstructions { proposal: ShotRevisionProposalSummar
 export interface DirectorShotView { kind: 'shot'; shotId: string; displayedVersion: number; archived: boolean; directorMode?: boolean; tool?: string }
 /** What the artist has open in the Scene workspace: which object is selected, which reference is being read, and whether the view has a saved service-side counterpart. */
 export interface DirectorSceneView { kind: 'scene'; sceneId: string; instanceId?: string; referenceAssetId?: string; directorMode?: boolean; dirty: boolean; time: number }
-export type DirectorViewQuery = DirectorShotView | DirectorSceneView
+/** The exact library revision on screen. Comparison views cannot yield a single-frame observation. */
+export interface DirectorAssetView { kind: 'asset'; assetId: string; contentHash: string; directorMode: boolean; comparing: boolean }
+export type DirectorViewQuery = DirectorShotView | DirectorSceneView | DirectorAssetView
 /** Where a scene's inspection camera sits. Orbit values, so a saved view reopens exactly. */
 export interface SceneCameraSummary { yaw: number; pitch: number; distance: number; target: number[]; fieldOfView: number }
 /** A scene's basic lighting: one key direction plus ambient fill. */

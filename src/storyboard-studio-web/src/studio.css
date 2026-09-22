@@ -1962,3 +1962,47 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .scene-blockout-items span{font-size:var(--text-2xs);font-weight:650}
 .scene-blockout-items small{color:var(--quiet);font-size:var(--text-2xs);line-height:1.35}
 .scene-proposal-list .primary.compact{border-color:var(--accent);background:var(--accent);color:var(--ink-inverse)}
+
+/* Asset full view changes layout only: the same canvas, playback and drafts stay alive. */
+.director-mode-toggle{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;white-space:nowrap}
+.asset-card-actions{display:flex;justify-content:flex-end;padding:0 10px 10px}
+.asset-card-actions .director-mode-toggle{width:100%;font-size:var(--text-xs)}
+.asset-items.list .asset-card-actions{padding:8px;flex-shrink:0}
+.asset-items.list .asset-card-open{flex:1;min-width:0}
+.model-header{min-width:0;flex-wrap:wrap;padding-block:10px}
+.model-header>div{min-width:0;flex:1}
+.model-header h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.model-workspace{grid-template-rows:auto minmax(0,1fr)}
+.model-workspace:has(>.asset-error),.image-revision-workspace:has(>.asset-error){grid-template-rows:auto auto minmax(0,1fr)}
+.model-workspace.director-mode .model-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+.model-workspace.director-mode .model-inspector{display:none}
+.model-workspace.director-mode .model-stage-shell{padding:10px}
+.image-revision-header-actions{flex-wrap:wrap}
+.image-revision-workspace.director-mode{overflow:hidden}
+.image-revision-workspace.director-mode .image-revision-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+.image-revision-workspace.director-mode .image-version-rail,.image-revision-workspace.director-mode .image-revision-inspector{display:none}
+.image-revision-workspace.director-mode .image-revision-stage{min-height:0}
+.image-revision-workspace.director-mode .image-revision-actions{flex-wrap:wrap}
+.asset-inspector>header{gap:8px;flex-wrap:wrap}
+.asset-inspector>header>span{min-width:0;flex:1 1 100px}
+.asset-inspector>header strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.asset-workspace.director-mode{padding:0;grid-template-rows:minmax(0,1fr);overflow:hidden}
+.asset-workspace.director-mode .asset-hero,.asset-workspace.director-mode .asset-sidebar,.asset-workspace.director-mode .asset-browser{display:none}
+.asset-workspace.director-mode .asset-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);padding:0;height:100%;min-height:0}
+.asset-workspace.director-mode .asset-inspector{position:static;width:auto;max-height:none;height:100%;min-height:0;grid-column:auto;grid-row:auto;border:0;box-shadow:none;display:grid;grid-template-rows:auto minmax(0,1fr)}
+.asset-workspace.director-mode .asset-inspector-scroll{display:grid;grid-template-rows:minmax(0,1fr);min-height:0;padding:12px}
+.asset-workspace.director-mode .asset-inspector-scroll>:not(.asset-preview):not(.form-error){display:none}
+.asset-workspace.director-mode .asset-preview{min-height:0;height:100%;display:grid;place-items:center;margin:0;overflow:hidden}
+.asset-workspace.director-mode .asset-preview video{width:100%;height:100%;max-height:100%;object-fit:contain}
+.asset-workspace.director-mode .asset-preview audio{width:min(640px,100%)}
+
+.asset-inspector>header .director-mode-toggle{width:auto;height:auto;min-height:44px;display:inline-flex;padding:8px 12px;border:1px solid var(--line);border-radius:7px}
+.asset-workspace.director-mode .asset-inspector-scroll{height:auto}
+
+.asset-quick-play{top:10px;right:10px;left:auto;transform:none;min-width:44px;min-height:44px}
+
+.asset-items.list .asset-card{display:flex;align-items:center}
+.asset-items.list .asset-quick-play{left:72px;right:auto}
+.asset-inspector{display:grid;grid-template-rows:auto minmax(0,1fr)}
+.asset-inspector>header{height:auto;min-height:58px;padding-block:8px}
+.asset-inspector-scroll{height:auto}
