@@ -8,6 +8,7 @@ import { AuthorityEditorDialog, ShotEditorDialog } from './components/ManageDial
 import AssetWorkspace from './components/AssetWorkspace'
 import AuthorityWorkspace from './components/AuthorityWorkspace'
 import ProjectSwitcher from './components/ProjectSwitcher'
+import { DELIVERY_PRESETS } from './projectFormats'
 import AuthorityLibraryDialog from './components/AuthorityLibraryDialog'
 import WorldWorkspace from './components/WorldWorkspace'
 const SceneWorkspace = lazy(() => import('./components/SceneWorkspace'))
@@ -481,11 +482,6 @@ function PairingGate({ onPaired }: { onPaired: () => void }) {
   return <main className="pairing-gate"><div className="studio-mark"><Film /><span>F</span></div><p className="eyebrow">Framewright tablet pairing</p><h1>Connect to this workstation</h1><p>Enter the eight-digit code shown in Framewright on the Windows workstation. Provider keys never leave that machine.</p><form onSubmit={event => { event.preventDefault(); void claim() }}><label>Pairing code<input autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={8} pattern="[0-9]{8}" value={code} onChange={event => setCode(event.target.value.replace(/\D/g, '').slice(0, 8))} /></label>{error && <span role="alert">{error}</span>}<button className="primary" disabled={busy || code.length !== 8}>{busy ? 'Pairing...' : 'Pair tablet'}</button></form></main>
 }
 
-const DELIVERY_PRESETS = [
-  { id: 'scope-uhd', label: 'Cinema scope', detail: '3840 × 1608 · 2.39:1 · 24fps', aspectRatio: '2.39:1', deliveryWidth: 3840, deliveryHeight: 1608, framesPerSecond: 24 },
-  { id: 'streaming-uhd', label: 'Streaming UHD', detail: '3840 × 2160 · 16:9 · 24fps', aspectRatio: '16:9', deliveryWidth: 3840, deliveryHeight: 2160, framesPerSecond: 24 },
-  { id: 'streaming-hd', label: 'Streaming HD', detail: '1920 × 1080 · 16:9 · 24fps', aspectRatio: '16:9', deliveryWidth: 1920, deliveryHeight: 1080, framesPerSecond: 24 },
-] as const
 
 function SetupDrawer({ project, integrations, pairing, busy, onProjectSaved, onRefresh, onRotatePairing, onRevokePairing, onClose, onAskCodex }: { project: ProjectSummary; integrations: IntegrationSummary[]; pairing?: PairingStatusSummary; busy: boolean; onProjectSaved: () => void; onRefresh: () => void; onRotatePairing: () => void; onRevokePairing: () => void; onClose: () => void; onAskCodex: () => void }) {
   const [draft, setDraft] = useState(project)

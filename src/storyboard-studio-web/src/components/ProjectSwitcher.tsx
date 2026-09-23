@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { BadgeCheck, Check, ChevronDown, CircleAlert, FolderPlus, LoaderCircle, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { ApiError, studioApi } from '../api'
 import Dialog from './Dialog'
+import { DELIVERY_PRESETS, matchPreset } from '../projectFormats'
 import type { ProjectInterviewProposal, ProjectListItem, ProjectSummary } from '../types'
 
 /**
@@ -135,99 +136,151 @@ export default function ProjectSwitcher({ project, onSwitched, onError }: {
  * A new project starts from the studio defaults for style and canon; those are
  * refined in World afterwards. Asking for four essays before the first shot
  * exists would be the wrong order of work.
+ *
+ * Only the name is required. Production and sequence labels fall back to plain
+ * defaults, and the delivery canvas is chosen as a named format rather than typed
+ * as pixels; the exact numbers stay reachable under Custom.
  */
 function CreateProjectDialog({ onClose, onCreated, onError }: { onClose: () => void; onCreated: (message: string) => void; onError: (message: string) => void }) {
   const [name, setName] = useState('')
   const [production, setProduction] = useState('')
-  const [sequenceCode, setSequenceCode] = useState('SQ-01')
+  const [sequenceCode, setSequenceCode] = useState('')
   const [sequenceName, setSequenceName] = useState('')
-  const [framesPerSecond, setFramesPerSecond] = useState(24)
-  const [aspectRatio, setAspectRatio] = useState('2.39:1')
-  const [deliveryWidth, setDeliveryWidth] = useState(2304)
-  const [deliveryHeight, setDeliveryHeight] = useState(960)
+  const [formatId, setFormatId] = useState<string>(DELIVERY_PRESETS[0].id)
+  const [custom, setCustom] = useState({ framesPerSecond: 24, aspectRatio: '16:9', deliveryWidth: 1920, deliveryHeight: 1080 })
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string>()
   const [interviewOpen, setInterviewOpen] = useState(false)
   const [proposal, setProposal] = useState<ProjectInterviewProposal>()
   const [world, setWorld] = useState<{ visualStyle: string; worldCanon: string; promptDirectives: string; negativeDirectives: string }>()
+  const nameInput = useRef<HTMLInputElement>(null)
 
-  const valid = name.trim() && production.trim() && sequenceCode.trim() && sequenceName.trim()
-    && framesPerSecond >= 1 && framesPerSecond <= 120
-    && deliveryWidth >= 320 && deliveryHeight >= 180 && deliveryWidth % 2 === 0 && deliveryHeight % 2 === 0
+  const preset = DELIVERY_PRESETS.find(item => item.id === formatId)
+  const format = preset ?? custom
+  const customProblem = preset ? undefined
+    : !(custom.framesPerSecond >= 1 && custom.framesPerSecond <= 120) ? 'Frame rate must be between 1 and 120.'
+    : !(custom.deliveryWidth >= 320 && custom.deliveryHeight >= 180 && custom.deliveryWidth % 2 === 0 && custom.deliveryHeight % 2 === 0) ? 'Width and height must be even numbers of at least 320 × 180.'
+    : undefined
 
   const create = async () => {
-    if (!valid || busy) return
+    if (busy) return
+    if (!name.trim()) { setFailure('Give the project a name to create it.'); nameInput.current?.focus(); return }
+    if (customProblem) { setFailure(customProblem); return }
     setBusy(true); setFailure(undefined)
     try {
-      const created = await studioApi.createProject({ name: name.trim(), production: production.trim(), sequenceCode: sequenceCode.trim(), sequenceName: sequenceName.trim(), framesPerSecond, aspectRatio: aspectRatio.trim(), deliveryWidth, deliveryHeight, ...world })
-      // Deliberately not activated: a new project is empty, and replacing the
-      // board the artist is working on is not what "create" asked for.
-      onCreated(`${created.name} created. Switch to it from the project menu when you are ready.`)
+      const created = await studioApi.createProject({
+        name: name.trim(),
+        production: production.trim() || name.trim(),
+        sequenceCode: sequenceCode.trim() || 'SQ-01',
+        sequenceName: sequenceName.trim() || 'Sequence 1',
+        framesPerSecond: format.framesPerSecond,
+        aspectRatio: format.aspectRatio.trim(),
+        deliveryWidth: format.deliveryWidth,
+        deliveryHeight: format.deliveryHeight,
+        ...world,
+      })
+      // The server creates projects inactive so that creation alone never swaps
+      // the board out from under anyone. The artist pressed Create to start
+      // working in it, so open it as a second, explicit step.
+      try {
+        await studioApi.activateProject(created.id)
+        onCreated(`${created.name} is ready. Add your first shot to begin.`)
+      } catch {
+        onCreated(`${created.name} was created, but could not be opened. Choose it from the project menu.`)
+      }
     } catch (reason) {
       if (reason instanceof ApiError) setFailure(reason.message)
       else onError(reason instanceof Error ? reason.message : 'Could not create the project.')
     } finally { setBusy(false) }
   }
 
+  const defaultProduction = name.trim() ? `Defaults to ${name.trim()}` : 'Defaults to the project name'
+
   return <Dialog className="modal-backdrop" onClose={onClose} labelledBy="create-project-title" initialFocus="input">
-    <form className="create-project" onSubmit={event => { event.preventDefault(); void create() }} data-testid="create-project">
+    <form className="create-project" onSubmit={event => { event.preventDefault(); void create() }} data-testid="create-project" noValidate>
       <header>
         <div><p className="eyebrow">New production</p><h2 id="create-project-title">Create a project</h2></div>
         <button type="button" onClick={onClose} aria-label="Close create project"><X /></button>
       </header>
-      {/* The interview is an optional way to fill this form, never a separate path
-          that writes on its own: whatever Codex proposes lands in these same
-          editable fields and is created by the same button. */}
-      {!interviewOpen && !proposal && <button type="button" className="interview-invite" onClick={() => setInterviewOpen(true)}>
-        <Sparkles size={16} />
-        <span><strong>Describe it instead</strong><small>Answer four questions and let Codex propose the format, style, and world canon.</small></span>
-      </button>}
-      {interviewOpen && <ProjectInterviewPanel
-        onCancel={() => setInterviewOpen(false)}
-        onError={onError}
-        onProposed={next => {
-          setProposal(next)
-          setInterviewOpen(false)
-          // Fill the form rather than saving. The artist edits from here.
-          setName(next.name); setProduction(next.production)
-          setSequenceCode(next.sequenceCode); setSequenceName(next.sequenceName)
-          setFramesPerSecond(next.framesPerSecond); setAspectRatio(next.aspectRatio)
-          setDeliveryWidth(next.deliveryWidth); setDeliveryHeight(next.deliveryHeight)
-          setWorld({ visualStyle: next.visualStyle, worldCanon: next.worldCanon, promptDirectives: next.promptDirectives, negativeDirectives: next.negativeDirectives })
-        }} />}
-      {proposal && <div className="interview-proposal" data-testid="interview-proposal">
-        <div className="interview-proposal-head">
-          <BadgeCheck size={15} />
-          <strong>{proposal.live ? 'Codex proposal — review before creating' : 'Editable defaults — review before creating'}</strong>
-          <button type="button" onClick={() => { setProposal(undefined); setWorld(undefined) }} aria-label="Discard proposal"><X size={14} /></button>
-        </div>
-        <p>{proposal.rationale}</p>
-        <small>{proposal.detail}</small>
-        {proposal.starterAuthorities.length > 0 && <ul className="interview-authorities">
-          {proposal.starterAuthorities.map(authority => <li key={authority.name}>
-            <span className="interview-authority-swatch" style={{ background: authority.accent }} />
-            <span><strong>{authority.name}</strong><small>{authority.category} · {authority.lockedConstraint}</small></span>
-          </li>)}
-          <li className="interview-authorities-note">Starter authorities are not created with the project. Add the ones you want from the board once it exists.</li>
-        </ul>}
-      </div>}
-      <div className="form-grid">
-        <label>Project name<input value={name} onChange={event => setName(event.target.value)} placeholder="The Aerie Sequence" /></label>
-        <label>Production<input value={production} onChange={event => setProduction(event.target.value)} placeholder="Skychasers - local production" /></label>
-        <label>Sequence code<input value={sequenceCode} onChange={event => setSequenceCode(event.target.value)} /></label>
-        <label>Sequence name<input value={sequenceName} onChange={event => setSequenceName(event.target.value)} placeholder="The Court Above" /></label>
-        <label>Frame rate<input type="number" min={1} max={120} value={framesPerSecond} onChange={event => setFramesPerSecond(Number(event.target.value))} /></label>
-        <label>Aspect ratio<input value={aspectRatio} onChange={event => setAspectRatio(event.target.value)} /></label>
-        {/* Finished delivery dimensions only need codec-safe even values. Model
-            proxy canvases are normalized independently by their workflows. */}
-        <label>Delivery width<input type="number" min={320} max={7680} step={2} value={deliveryWidth} onChange={event => setDeliveryWidth(Number(event.target.value))} /></label>
-        <label>Delivery height<input type="number" min={180} max={4320} step={2} value={deliveryHeight} onChange={event => setDeliveryHeight(Number(event.target.value))} /></label>
+      <div className="create-project-body">
+        <label className="create-project-name">Project name
+          <input ref={nameInput} value={name} onChange={event => { setName(event.target.value); setFailure(undefined) }} placeholder="e.g. The Lighthouse Keeper" aria-required="true" maxLength={160} />
+        </label>
+        {/* The interview is an optional way to fill this form, never a separate path
+            that writes on its own: whatever Codex proposes lands in these same
+            editable fields and is created by the same button. */}
+        {!interviewOpen && !proposal && <button type="button" className="interview-invite" onClick={() => setInterviewOpen(true)}>
+          <Sparkles size={16} />
+          <span><strong>Describe it instead</strong><small>Answer four questions and let Codex suggest the format, style, and world rules.</small></span>
+        </button>}
+        {interviewOpen && <ProjectInterviewPanel
+          onCancel={() => setInterviewOpen(false)}
+          onError={onError}
+          onProposed={next => {
+            setProposal(next)
+            setInterviewOpen(false)
+            // Fill the form rather than saving. The artist edits from here.
+            setName(next.name); setProduction(next.production)
+            setSequenceCode(next.sequenceCode); setSequenceName(next.sequenceName)
+            const matched = matchPreset(next)
+            if (matched) setFormatId(matched.id)
+            else { setFormatId('custom'); setCustom({ framesPerSecond: next.framesPerSecond, aspectRatio: next.aspectRatio, deliveryWidth: next.deliveryWidth, deliveryHeight: next.deliveryHeight }) }
+            setWorld({ visualStyle: next.visualStyle, worldCanon: next.worldCanon, promptDirectives: next.promptDirectives, negativeDirectives: next.negativeDirectives })
+          }} />}
+        {proposal && <div className="interview-proposal" data-testid="interview-proposal">
+          <div className="interview-proposal-head">
+            <BadgeCheck size={15} />
+            <strong>{proposal.live ? 'Codex proposal — review before creating' : 'Editable defaults — review before creating'}</strong>
+            <button type="button" onClick={() => { setProposal(undefined); setWorld(undefined) }} aria-label="Discard proposal"><X size={14} /></button>
+          </div>
+          <p>{proposal.rationale}</p>
+          <small>{proposal.detail}</small>
+          {proposal.starterAuthorities.length > 0 && <ul className="interview-authorities">
+            {proposal.starterAuthorities.map(authority => <li key={authority.name}>
+              <span className="interview-authority-swatch" style={{ background: authority.accent }} />
+              <span><strong>{authority.name}</strong><small>{authority.category} · {authority.lockedConstraint}</small></span>
+            </li>)}
+            <li className="interview-authorities-note">Suggested references are not created with the project. Add the ones you want from the board once it exists.</li>
+          </ul>}
+        </div>}
+        <fieldset className="create-project-formats">
+          <legend>Format</legend>
+          <div className="format-options">
+            {DELIVERY_PRESETS.map(item => <label key={item.id} className={`format-option ${formatId === item.id ? 'is-selected' : ''}`}>
+              <input type="radio" name="project-format" value={item.id} checked={formatId === item.id} onChange={() => setFormatId(item.id)} />
+              <span className="format-shape" style={item.deliveryWidth >= item.deliveryHeight ? { width: 28, aspectRatio: item.deliveryWidth / item.deliveryHeight } : { height: 28, aspectRatio: item.deliveryWidth / item.deliveryHeight }} aria-hidden="true" />
+              <span className="format-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
+            </label>)}
+            <label className={`format-option ${formatId === 'custom' ? 'is-selected' : ''}`}>
+              <input type="radio" name="project-format" value="custom" checked={formatId === 'custom'} onChange={() => setFormatId('custom')} />
+              <span className="format-shape is-custom" aria-hidden="true" />
+              <span className="format-copy"><strong>Custom</strong><small>Exact size and frame rate</small></span>
+            </label>
+          </div>
+          {formatId === 'custom' && <div className="form-grid two create-project-custom">
+            <label>Aspect ratio<input value={custom.aspectRatio} onChange={event => setCustom({ ...custom, aspectRatio: event.target.value })} placeholder="16:9" /></label>
+            <label>Frame rate<input type="number" min={1} max={120} value={custom.framesPerSecond} onChange={event => setCustom({ ...custom, framesPerSecond: Number(event.target.value) })} /></label>
+            {/* Finished delivery dimensions only need codec-safe even values. Model
+                proxy canvases are normalized independently by their workflows. */}
+            <label>Width in pixels<input type="number" min={320} max={7680} step={2} value={custom.deliveryWidth} onChange={event => setCustom({ ...custom, deliveryWidth: Number(event.target.value) })} /></label>
+            <label>Height in pixels<input type="number" min={180} max={4320} step={2} value={custom.deliveryHeight} onChange={event => setCustom({ ...custom, deliveryHeight: Number(event.target.value) })} /></label>
+          </div>}
+          {formatId === 'custom' && <p className="create-project-note">Width and height must be even numbers that match the aspect ratio.</p>}
+        </fieldset>
+        <details className="create-project-more">
+          <summary>More options</summary>
+          <div className="form-grid two">
+            <label>Production<input value={production} onChange={event => setProduction(event.target.value)} placeholder={defaultProduction} maxLength={160} /></label>
+            <label>Sequence name<input value={sequenceName} onChange={event => setSequenceName(event.target.value)} placeholder="Defaults to Sequence 1" maxLength={160} /></label>
+            <label>Sequence code<input value={sequenceCode} onChange={event => setSequenceCode(event.target.value)} placeholder="Defaults to SQ-01" maxLength={40} /></label>
+          </div>
+          <p className="create-project-note">Color, audio and every other setting can be changed later in Production setup.</p>
+        </details>
       </div>
-      <p className="create-project-note">Delivery dimensions must be even numbers and match the named aspect ratio within 1%. The project starts in Rec.709 with a 48 kHz audio master; adjust the delivery preset later in Production setup.</p>
       {failure && <p className="form-error" role="alert"><CircleAlert size={15} />{failure}</p>}
       <footer>
         <button type="button" className="secondary" onClick={onClose}>Cancel</button>
-        <button className="primary" disabled={!valid || busy}><FolderPlus size={16} />{busy ? 'Creating…' : 'Create project'}</button>
+        <button className="primary" disabled={busy}><FolderPlus size={16} />{busy ? 'Creating…' : 'Create project'}</button>
       </footer>
     </form>
   </Dialog>
