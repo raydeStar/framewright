@@ -28,6 +28,7 @@ public static class StudioDatabaseInitializer
     private const string SceneShotBindingMigration = "20260921-scene-shot-bindings-v17";
     private const string PortableProjectMigration = "20260922-portable-projects-v18";
     private const string SceneLightingMigration = "20260922-scene-local-lighting-v19";
+    private const string SampleProjectMigration = "20260923-sample-project-flag-v20";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -275,6 +276,16 @@ public static class StudioDatabaseInitializer
                 () => EnsureColumnAsync(db, "Scenes", "EnvironmentJson", "TEXT NULL", cancellationToken), cancellationToken);
         }
 
+        // Existing workstations upgrade with every project marked as the
+        // artist's own. Only a database this run created can hold the sample.
+        if (!await HasMigrationAsync(db, SampleProjectMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, SampleProjectMigration, cancellationToken);
+            await RunMigrationAsync(db, SampleProjectMigration,
+                () => EnsureColumnAsync(db, "Projects", "IsSample", "INTEGER NOT NULL DEFAULT 0", cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -307,6 +318,20 @@ public static class StudioDatabaseInitializer
         await BackfillAuthoritiesAsync(db, cancellationToken);
         await BackfillCandidatesAsync(db, cancellationToken);
         await SeedTimelineAsync(db, cancellationToken);
+
+        // The demo content just seeded is what makes the default project a
+        // sample, and only on a database file this run created. A workstation
+        // whose shots were all deleted re-seeds into a project that may be the
+        // artist's own renamed work, so it is never relabelled.
+        if (!existingDatabase)
+        {
+            var sample = await db.Projects.SingleOrDefaultAsync(x => x.Id == StoryboardStudio.Core.StudioDefaults.ProjectId, cancellationToken);
+            if (sample is not null)
+            {
+                sample.IsSample = true;
+                await db.SaveChangesAsync(cancellationToken);
+            }
+        }
     }
 
     /// <summary>
@@ -408,6 +433,7 @@ public static class StudioDatabaseInitializer
             SceneShotBindingMigration => "immutable-scene-snapshot-shot-camera-timing-delivery-and-reviewed-still-binding",
             PortableProjectMigration => "round-trippable-project-package-with-project-local-manifest-hash-identity",
             SceneLightingMigration => "scene-environment-json-with-local-lights-color-exposure-and-grid",
+            SampleProjectMigration => "project-sample-flag-set-only-when-a-new-database-seeds-the-demo",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
@@ -1500,6 +1526,7 @@ public static class StudioDatabaseInitializer
                 "PromptDirectives" TEXT NOT NULL,
                 "NegativeDirectives" TEXT NOT NULL,
                 "IsActive" INTEGER NOT NULL DEFAULT 0,
+                "IsSample" INTEGER NOT NULL DEFAULT 0,
                 "UpdatedAt" TEXT NOT NULL
             );
             """, cancellationToken);

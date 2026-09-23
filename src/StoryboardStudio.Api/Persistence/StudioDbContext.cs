@@ -251,6 +251,13 @@ public sealed class ProjectRecord
     /// </summary>
     public bool IsActive { get; set; }
 
+    /// <summary>
+    /// The demo production a new workstation starts with. Set only when a fresh
+    /// database seeds it; never inferred from a name or id, because an artist may
+    /// have renamed that first project and made it their own.
+    /// </summary>
+    public bool IsSample { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

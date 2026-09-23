@@ -571,7 +571,8 @@ public sealed record ProjectSummary(
     string NegativeDirectives,
     DateTimeOffset UpdatedAt = default,
     string ColorSpace = "Rec.709",
-    int AudioSampleRate = 48000);
+    int AudioSampleRate = 48000,
+    bool IsSample = false);
 
 public sealed record UpdateProjectRequest(
     DateTimeOffset ExpectedUpdatedAt,
@@ -603,7 +604,8 @@ public sealed record ProjectListItem(
     int ShotCount,
     int AuthorityCount,
     bool IsActive,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    bool IsSample = false);
 
 /// <summary>
 /// Creates a project. World settings are deliberately optional: a new production

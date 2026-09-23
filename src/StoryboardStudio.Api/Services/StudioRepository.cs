@@ -192,7 +192,7 @@ public sealed class StudioRepository(
             .Select(x => new ProjectListItem(
                 x.Id, x.Name, x.Production, x.SequenceCode, x.SequenceName,
                 shotCounts.GetValueOrDefault(x.Id), authorityCounts.GetValueOrDefault(x.Id),
-                x.Id == active, x.UpdatedAt))
+                x.Id == active, x.UpdatedAt, x.IsSample))
             .ToArray();
     }
 
@@ -2252,7 +2252,7 @@ public sealed class StudioRepository(
             x.LastFrameAssetId, x.LastFrameAssetHash, quality, seed, takeId, promotedFromJobId);
     }
 
-    private static ProjectSummary MapProject(ProjectRecord x) => new(x.Id, x.Name, x.Production, x.SequenceCode, x.SequenceName, x.FramesPerSecond, x.AspectRatio, x.DeliveryWidth, x.DeliveryHeight, x.VisualStyle, x.WorldCanon, x.PromptDirectives, x.NegativeDirectives, x.UpdatedAt, x.ColorSpace, x.AudioSampleRate);
+    private static ProjectSummary MapProject(ProjectRecord x) => new(x.Id, x.Name, x.Production, x.SequenceCode, x.SequenceName, x.FramesPerSecond, x.AspectRatio, x.DeliveryWidth, x.DeliveryHeight, x.VisualStyle, x.WorldCanon, x.PromptDirectives, x.NegativeDirectives, x.UpdatedAt, x.ColorSpace, x.AudioSampleRate, x.IsSample);
 
     private static ShotSummary MapShot(ShotRecord x, int openComments) => new(
         x.Id, x.Code, x.Title, x.Description,

@@ -155,6 +155,8 @@ public sealed class PortableProjectImportService(
         project.Id = projectId;
         project.Name = projectName;
         project.IsActive = false;
+        // An imported package is the artist's copy, even one taken from the sample.
+        project.IsSample = false;
         project.UpdatedAt = timeProvider.GetUtcNow();
 
         foreach (var row in package.AssetCollections) { row.Id = Required(collectionIds, row.Id, "collection"); row.ProjectId = projectId; }
