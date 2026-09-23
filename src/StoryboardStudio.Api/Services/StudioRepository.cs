@@ -2073,8 +2073,10 @@ public sealed class StudioRepository(
         if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 120) return "Shot title must contain 1 to 120 characters.";
         if (string.IsNullOrWhiteSpace(description) || description.Trim().Length > 4_000) return "Shot description must contain 1 to 4,000 characters.";
         if (durationFrames is < 1 or > 86_400) return "Shot duration must be between 1 and 86,400 frames.";
-        if (string.IsNullOrWhiteSpace(camera) || camera.Trim().Length > 500) return "Camera language must contain 1 to 500 characters.";
-        if (string.IsNullOrWhiteSpace(action) || action.Trim().Length > 2_000) return "Shot action must contain 1 to 2,000 characters.";
+        // A shot starts from one sentence; camera and action refine it later and
+        // are left out of prompts while they are empty.
+        if (camera is null || camera.Trim().Length > 500) return "Camera language must contain at most 500 characters.";
+        if (action is null || action.Trim().Length > 2_000) return "Shot action must contain at most 2,000 characters.";
         if (referenceIds is null || referenceIds.Count > 100) return "A shot can cite at most 100 authorities.";
         if (constraints is null || constraints.Count > 200 || constraints.Any(x => x is null || x.Trim().Length > 1_000)) return "A shot can contain at most 200 constraints of up to 1,000 characters each.";
         var existing = await db.References.AsNoTracking().Where(x => referenceIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(cancellationToken);

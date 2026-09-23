@@ -647,10 +647,11 @@ public sealed class OpenAiImageGenerationAdapter(IHttpClientFactory clients, ICo
     private static string Bound(string value) => value.Length <= 800 ? value : value[..800] + "…";
 }
 
-public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfiguration configuration) : IGenerationAdapter, IRecoverableGenerationAdapter
+public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfiguration configuration, GenerationSettingsStore? settings = null) : IGenerationAdapter, IRecoverableGenerationAdapter
 {
     public const string AdapterId = "comfyui-fast-draft";
-    private bool Enabled => configuration.GetValue("Integrations:ComfyUi:SubmissionEnabled", false);
+    // The artist's Production setup switch, unless the launcher pinned it.
+    private bool Enabled => settings?.ComfyUiImagesEnabled ?? configuration.GetValue("Integrations:ComfyUi:SubmissionEnabled", false);
     private string? SketchWorkflowPath => ComfyUi.ResolveWorkflowPath(configuration["Integrations:ComfyUi:ExternalWorkflowPath"]);
     // Fall back to the historical composition graph for custom installations
     // until they opt into the dedicated pixel-preserving edit workflow.
@@ -659,7 +660,7 @@ public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfig
         ?? configuration["Integrations:ComfyUi:ExternalWorkflowPath"]);
     private string? TextWorkflowPath => ComfyUi.ResolveWorkflowPath(configuration["Integrations:ComfyUi:ExternalTextWorkflowPath"]);
     private string? ReferenceWorkflowPath => ComfyUi.ResolveWorkflowPath(configuration["Integrations:ComfyUi:ExternalReferenceWorkflowPath"]);
-    private Uri? Endpoint => Uri.TryCreate(configuration["Integrations:ComfyUi:Endpoint"], UriKind.Absolute, out var uri) ? uri : null;
+    private Uri? Endpoint => Uri.TryCreate(settings?.ComfyUiEndpoint ?? configuration["Integrations:ComfyUi:Endpoint"], UriKind.Absolute, out var uri) ? uri : null;
 
     public GenerationAdapterSummary Describe()
     {
@@ -668,10 +669,10 @@ public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfig
         var workflowReady = SketchWorkflowPath is not null && CurrentFrameWorkflowPath is not null && TextWorkflowPath is not null;
         var ready = Enabled && local && workflowReady;
         var state = !Enabled ? "Protected" : ready ? "Ready" : "NeedsSetup";
-        var detail = !Enabled ? "Submission is off. Read-only discovery cannot alter the existing queue."
-            : !local ? "The endpoint is invalid or non-loopback; remote ComfyUI requires explicit AllowRemote approval."
-            : !workflowReady ? "The text, sketch-synthesis, and current-frame edit API workflows must all be available."
-            : "Text, multi-reference, sketch-synthesis, and delta-focused current-frame edit routes are ready. Framewright chooses from the supplied context; jobs join the shared queue and never interrupt existing work.";
+        var detail = !Enabled ? "ComfyUI image generation is turned off. Turn it on in Production setup once ComfyUI is running on this computer."
+            : !local ? "The ComfyUI address must be on this computer, such as http://127.0.0.1:8188. Change it in Production setup."
+            : !workflowReady ? "ComfyUI is on, but the image workflows Framewright uses are missing from this installation."
+            : "Ready. Framewright picks the right ComfyUI workflow for each shot; jobs wait their turn in ComfyUI's queue and never interrupt other work.";
         return new(AdapterId, "ComfyUI fast draft", "Local service", state, detail, ready,
             [GenerationRoute.FastDraft], [GenerationPurpose.Draft]);
     }
@@ -908,18 +909,18 @@ public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfig
     private static string Bound(string value) => value.Length <= 800 ? value : value[..800] + "…";
 }
 
-public sealed class ComfyUiVideoGenerationAdapter(IHttpClientFactory clients, IConfiguration configuration) : IGenerationAdapter, IRecoverableGenerationAdapter
+public sealed class ComfyUiVideoGenerationAdapter(IHttpClientFactory clients, IConfiguration configuration, GenerationSettingsStore? settings = null) : IGenerationAdapter, IRecoverableGenerationAdapter
 {
     public const string AdapterId = "comfyui-h3-video";
-    private bool Enabled => configuration.GetValue("Integrations:ComfyUi:VideoSubmissionEnabled", false);
+    private bool Enabled => settings?.ComfyUiVideoEnabled ?? configuration.GetValue("Integrations:ComfyUi:VideoSubmissionEnabled", false);
     private string? WorkflowPath => ComfyUi.ResolveWorkflowPath(configuration["Integrations:ComfyUi:ExternalVideoWorkflowPath"]);
-    private Uri? Endpoint => Uri.TryCreate(configuration["Integrations:ComfyUi:Endpoint"], UriKind.Absolute, out var uri) ? uri : null;
+    private Uri? Endpoint => Uri.TryCreate(settings?.ComfyUiEndpoint ?? configuration["Integrations:ComfyUi:Endpoint"], UriKind.Absolute, out var uri) ? uri : null;
 
     public GenerationAdapterSummary Describe()
     {
         var endpoint = Endpoint; var local = endpoint is not null && (endpoint.IsLoopback || configuration.GetValue("Integrations:ComfyUi:AllowRemote", false)); var workflowReady = WorkflowPath is not null; var ready = Enabled && local && workflowReady;
         var state = !Enabled ? "Protected" : ready ? "Ready" : "NeedsSetup";
-        var detail = !Enabled ? "H3 video submission is independently feature-gated and cannot touch the current ComfyUI queue."
+        var detail = !Enabled ? "ComfyUI video is turned off. Turn it on in Production setup once the video workflow and models are installed in ComfyUI."
             : !local ? "The endpoint is invalid or non-loopback; remote ComfyUI requires explicit AllowRemote approval."
             : !workflowReady ? "Choose an external API-format H3 video workflow with {{PROMPT}} and {{INPUT_IMAGE}} placeholders."
             : "External H3 workflow is ready. It joins the shared queue and never clears, interrupts, or edits ComfyUI.";

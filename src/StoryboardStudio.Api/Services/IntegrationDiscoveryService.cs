@@ -14,7 +14,8 @@ public sealed partial class IntegrationDiscoveryService(
     IProviderCredentialStore credentials,
     ICodexRuntime codexRuntime,
     TimeProvider timeProvider,
-    ILogger<IntegrationDiscoveryService> logger)
+    ILogger<IntegrationDiscoveryService> logger,
+    GenerationSettingsStore? settings = null)
 {
     private static readonly JsonSerializerOptions CaseInsensitiveJson = new() { PropertyNameCaseInsensitive = true };
 
@@ -44,8 +45,8 @@ public sealed partial class IntegrationDiscoveryService(
 
     private async Task<IntegrationSummary> InspectComfyAsync(CancellationToken cancellationToken)
     {
-        var endpoint = configuration["Integrations:ComfyUi:Endpoint"] ?? "http://127.0.0.1:8188";
-        var submissionEnabled = configuration.GetValue("Integrations:ComfyUi:SubmissionEnabled", false);
+        var endpoint = settings?.ComfyUiEndpoint ?? configuration["Integrations:ComfyUi:Endpoint"] ?? "http://127.0.0.1:8188";
+        var submissionEnabled = settings?.ComfyUiImagesEnabled ?? configuration.GetValue("Integrations:ComfyUi:SubmissionEnabled", false);
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
         {
             return new IntegrationSummary("comfyui", "ComfyUI", IntegrationState.NeedsSetup, "Endpoint is invalid",
@@ -71,15 +72,15 @@ public sealed partial class IntegrationDiscoveryService(
             return new IntegrationSummary("comfyui", "ComfyUI", idle ? IntegrationState.Ready : IntegrationState.Protected,
                 headline,
                 submissionEnabled
-                    ? "External adapter configured. Studio will recheck ownership and queue state before dispatch."
-                    : "Read-only discovery is active. Real submission is locked until an external workflow is configured.",
+                    ? "Framewright can add jobs to this ComfyUI. It checks the queue again before each one and never interrupts other work."
+                    : "ComfyUI is running. Turn on image or video generation below to let Framewright use it.",
                 endpoint, true, submissionEnabled && idle, timeProvider.GetUtcNow());
         }
         catch (Exception ex)
         {
             LogComfyUiUnavailable(logger, ex, endpoint);
             return new IntegrationSummary("comfyui", "ComfyUI", IntegrationState.Offline, "Not reachable",
-                "Set the external endpoint when the workstation service is available. No ComfyUI code is bundled.", endpoint, true, false, timeProvider.GetUtcNow());
+                "Nothing answered at this address. ComfyUI is installed and started separately; start it, then refresh or test the connection.", endpoint, true, false, timeProvider.GetUtcNow());
         }
     }
 
@@ -97,7 +98,7 @@ public sealed partial class IntegrationDiscoveryService(
         var loggedIn = result.ExitCode == 0 && output.Contains("Logged in", StringComparison.OrdinalIgnoreCase);
         return new IntegrationSummary("codex", "Codex", loggedIn ? IntegrationState.Connected : IntegrationState.NeedsSetup,
             loggedIn ? "Connected through ChatGPT" : "Sign-in required",
-            loggedIn ? "Ready for directing assistance, MCP collaboration, and explicit ImageGen jobs through the official Codex skill. No Framewright API key is used." : "Run the official Codex login flow on this workstation.",
+            loggedIn ? "Codex can help direct shots and, if you turn it on below, make images with your ChatGPT sign-in. No API key is needed." : "Sign in to Codex with ChatGPT on this computer (run codex login), then refresh.",
             null, true, loggedIn, timeProvider.GetUtcNow());
     }
 

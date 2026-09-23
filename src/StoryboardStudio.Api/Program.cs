@@ -103,6 +103,7 @@ builder.Services.AddScoped<MusicCompositionService>();
 builder.Services.AddScoped<AudioGenerationJobService>();
 builder.Services.AddScoped<AssetImageGenerationService>();
 builder.Services.AddSingleton(sp => new WorkflowLibrary(sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<IWebHostEnvironment>()));
+builder.Services.AddSingleton<GenerationSettingsStore>();
 builder.Services.AddSingleton<IGenerationAdapter, LocalProofGenerationAdapter>();
 builder.Services.AddSingleton<IGenerationAdapter, ComfyUiGenerationAdapter>();
 builder.Services.AddSingleton<IGenerationAdapter, ComfyUiVideoGenerationAdapter>();
@@ -268,6 +269,42 @@ app.MapDelete("/api/credentials/openai", (HttpContext context, IProviderCredenti
     if (!trustedLocal || context.Request.Headers["X-Storyboard-Studio"] != "1") return Results.StatusCode(StatusCodes.Status403Forbidden);
     credentials.DeleteOpenAiApiKey();
     return Results.Ok(credentials.GetOpenAiStatus());
+});
+// Production setup's generation switches. Reading is open to any paired
+// session so a tablet can show the state; changing it, or making the
+// workstation probe an address, is for the workstation itself.
+app.MapGet("/api/setup/generation", (HttpContext context, GenerationSettingsStore settings)
+    => Results.Ok(settings.Describe(IsTrustedLocalCaller(context.Connection.RemoteIpAddress, app.Configuration))));
+app.MapPut("/api/setup/generation", (GenerationSetupChange change, HttpContext context, GenerationSettingsStore settings) =>
+{
+    var trustedLocal = IsTrustedLocalCaller(context.Connection.RemoteIpAddress, app.Configuration);
+    if (!trustedLocal || context.Request.Headers["X-Storyboard-Studio"] != "1") return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var problem = settings.Save(change);
+    return problem is null ? Results.Ok(settings.Describe(true)) : Results.BadRequest(new { error = problem });
+});
+app.MapPost("/api/setup/comfyui/test", async (ComfyUiConnectionTestRequest request, HttpContext context, GenerationSettingsStore settings, IHttpClientFactory clients, CancellationToken cancellationToken) =>
+{
+    var trustedLocal = IsTrustedLocalCaller(context.Connection.RemoteIpAddress, app.Configuration);
+    if (!trustedLocal || context.Request.Headers["X-Storyboard-Studio"] != "1") return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var problem = settings.ValidateEndpoint(request.Endpoint);
+    if (problem is not null) return Results.Ok(new ComfyUiConnectionTest(false, problem));
+    // Read-only: the queue listing is the same probe discovery already makes.
+    try
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        using var response = await clients.CreateClient("integration-probe").GetAsync($"{request.Endpoint.Trim().TrimEnd('/')}/queue", timeout.Token);
+        if (!response.IsSuccessStatusCode)
+            return Results.Ok(new ComfyUiConnectionTest(false, $"Something answered, but not like ComfyUI (HTTP {(int)response.StatusCode}). Check the address and port."));
+        using var json = await System.Text.Json.JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
+        var running = json.RootElement.TryGetProperty("queue_running", out var r) && r.ValueKind == System.Text.Json.JsonValueKind.Array ? r.GetArrayLength() : 0;
+        var pending = json.RootElement.TryGetProperty("queue_pending", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.Array ? p.GetArrayLength() : 0;
+        return Results.Ok(new ComfyUiConnectionTest(true, running + pending == 0 ? "Connected. ComfyUI's queue is idle." : $"Connected. ComfyUI is busy with {running} running and {pending} waiting."));
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+    {
+        return Results.Ok(new ComfyUiConnectionTest(false, "Nothing answered at this address. Start ComfyUI, then test again."));
+    }
 });
 app.MapGet("/api/generation/adapters", (GenerationOrchestrator orchestrator) => Results.Ok(orchestrator.ListAdapters()));
 // A failure the artist has seen stays seen. Dismissal used to live in the page,
@@ -1264,7 +1301,11 @@ app.MapPost("/api/shots/{shotId:guid}/codex/improve-generation-direction", async
     return Results.Ok(await discovery.ImproveGenerationDirectionAsync(shotId, request, snapshot, cancellationToken));
 });
 
-app.MapFallbackToFile("index.html");
+// "/" and every client route reach index.html through this fallback, not the
+// static file middleware above, so it needs the same no-cache rule. Without it
+// a browser keeps an index.html that names the previous build's hashed assets
+// and an updated studio opens as a blank page.
+app.MapFallbackToFile("index.html", new StaticFileOptions { OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "no-cache" });
 
 await StudioDatabaseInitializer.InitializeAsync(app.Services);
 await app.RunAsync();

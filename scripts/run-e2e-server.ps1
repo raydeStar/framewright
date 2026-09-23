@@ -34,6 +34,10 @@ $env:Integrations__ComfyUi__SubmissionEnabled = 'false'
 $env:Integrations__ComfyUi__VideoSubmissionEnabled = 'false'
 $env:YuE2__Enabled = 'false'
 $env:Integrations__OpenAI__SubmissionEnabled = 'false'
+# Browser journeys mock every Codex request. Point the service at an absent
+# executable so no journey can reach a developer's signed-in Codex CLI, even
+# one that switches on one-click Codex images in Production setup.
+$env:Integrations__Codex__Executable = (Join-Path $resolvedTestData 'codex-disabled-for-e2e.exe')
 # Model generation is proved against a controlled worker rather than a GPU: the
 # real gateway, the real process boundary and the real import, with a known GLB.
 $compilerStub = if ($env:OS -eq 'Windows_NT') { 'e2e-compiler-stub.cmd' } else { 'e2e-compiler-stub.sh' }

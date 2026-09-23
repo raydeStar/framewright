@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace StoryboardStudio.Api.Services;
 
 /// <summary>ChatGPT-authenticated image generation in an isolated job directory.</summary>
-public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfiguration configuration) : IGenerationAdapter
+public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfiguration configuration, GenerationSettingsStore? settings = null) : IGenerationAdapter
 {
     public const string AdapterId = "codex-imagegen";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -13,12 +13,12 @@ public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfigur
     {
         var status = runtime.Inspect();
         var connected = status.Installed && status.Authenticated;
-        var unattended = configuration.GetValue("Integrations:Codex:NonInteractiveImageEnabled", false);
+        var unattended = settings?.CodexOneClickImages ?? configuration.GetValue("Integrations:Codex:NonInteractiveImageEnabled", false);
         return new(AdapterId, "Codex ImageGen", "ChatGPT login", connected ? "Connected" : "NeedsSetup",
             connected
                 ? unattended
-                    ? "Experimental unattended Codex ImageGen execution is enabled."
-                    : "ChatGPT login is connected. Prepare a handoff, then Codex uses Framewright MCP and built-in ImageGen; no API key is required."
+                    ? "Ready. Generate buttons send the shot to Codex ImageGen with your ChatGPT sign-in; no API key is needed."
+                    : "Signed in through ChatGPT, but one-click Codex images are turned off. Turn them on in Production setup."
                 : status.Detail,
             connected && unattended, [GenerationRoute.PrecisionDraft], [GenerationPurpose.Draft, GenerationPurpose.Final]);
     }
