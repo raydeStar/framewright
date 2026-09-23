@@ -32,6 +32,17 @@ async function imageDataTransfer(page: Page, fileName = 'dropped-frame.png') {
   }, { name: fileName })
 }
 
+// The one-click generate buttons are disabled while an engine reports it
+// cannot run, and the sandboxed e2e service keeps every real engine off. Tests
+// that exercise the button-to-request wiring (with the request itself mocked)
+// report both engines ready first.
+async function mockReadyOneClickEngines(page: Page) {
+  await page.route('**/api/generation/adapters', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+    { id: 'comfyui-fast-draft', name: 'ComfyUI fast draft', kind: 'Local service', state: 'Ready', detail: 'Test adapter', canDispatch: true, routes: ['FastDraft'], purposes: ['Draft'] },
+    { id: 'codex-imagegen', name: 'Codex ImageGen', kind: 'ChatGPT login', state: 'Connected', detail: 'Test adapter', canDispatch: true, routes: ['PrecisionDraft'], purposes: ['Draft', 'Final'] },
+  ]) }))
+}
+
 async function mockReadyPreflight(page: Page) {
   await page.route('**/api/manifests/*/preflight?*', route => {
     const url = new URL(route.request().url())
@@ -206,6 +217,7 @@ test('open notes regenerate a placeholder revision from its clean storyboard lay
 test('Codex ImageGen starts directly from the shot panel without a handoff modal', async ({ page }) => {
   const verifyConsole = failOnConsoleErrors(page)
   let request: Record<string, unknown> | undefined
+  await mockReadyOneClickEngines(page)
   await page.route('**/api/shots/*/generate-draft', async route => {
     request = await route.request().postDataJSON()
     await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id: crypto.randomUUID(), state: 'Queued' }) })
@@ -546,6 +558,9 @@ test('shot references and rules are editable and reference pins retain exact aut
   expect(frameBox).not.toBeNull()
   const pinHandle = referenceCard.getByRole('button', { name: `Place ${addedReference.name} on frame` })
   if (testInfo.project.name === 'desktop') {
+    // The inspector scrolls; bring the card into view as a person would before
+    // reading raw coordinates for the drag.
+    await pinHandle.scrollIntoViewIfNeeded()
     const pinHandleBox = await pinHandle.boundingBox()
     expect(pinHandleBox).not.toBeNull()
     await page.mouse.move(pinHandleBox!.x + pinHandleBox!.width / 2, pinHandleBox!.y + pinHandleBox!.height / 2)
@@ -728,6 +743,10 @@ test('connection surface reports safe workstation boundaries', async ({ page }) 
   await page.getByRole('button', { name: /Local studio/ }).click()
 
   await expect(page.getByTestId('setup-drawer')).toBeVisible()
+  // Generation comes first; workstation health is folded into Diagnostics.
+  await expect(page.getByRole('heading', { name: 'Image and video generation' })).toBeVisible()
+  await expect(page.getByText('Production guard is active')).toBeHidden()
+  await page.getByTestId('setup-drawer').getByText('Diagnostics', { exact: true }).click()
   await expect(page.getByText('Production guard is active')).toBeVisible()
   await expect(page.getByTestId('build-identity')).toContainText('development')
   await expect(page.getByTestId('build-identity')).toContainText('commit unknown')
@@ -936,7 +955,7 @@ test('inline candidate review keeps versions, feedback, and tablet controls in p
   await brief.fill(`${await brief.inputValue()} Review-loop proof.`)
   await expect(page.getByText(/Saved to studio/)).toBeVisible()
   await page.getByRole('button', { name: 'Generate draft in ComfyUI' }).click()
-  await expect(page.getByRole('alert')).toContainText('Submission is off')
+  await expect(page.getByRole('alert')).toContainText('ComfyUI image generation is turned off')
   const snapshot = await (await page.request.get('/api/studio')).json()
   const shot = snapshot.shots.find((item: { code: string }) => item.code === shotCode)
   const manifests = await (await page.request.get(`/api/shots/${shot.id}/manifests`)).json()
@@ -973,7 +992,7 @@ test('inline candidate review keeps versions, feedback, and tablet controls in p
   const changeBox = page.getByRole('textbox', { name: 'What should change?' })
   await changeBox.fill(change)
   await page.getByRole('button', { name: 'Apply & regenerate' }).click()
-  await expect(page.getByRole('alert')).toContainText('Submission is off')
+  await expect(page.getByRole('alert')).toContainText('ComfyUI image generation is turned off')
   await expect(changeBox).toHaveValue(change)
   await archived.click()
 
@@ -1258,7 +1277,9 @@ test('Codex directing advice can become a reviewable current-frame edit', async 
   const dialog = page.getByRole('dialog', { name: 'Regenerate from feedback' })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('textbox', { name: 'Feedback regeneration instructions' })).toContainText('Make the turn more deliberate')
-  await expect(dialog.getByText(/current frame—not the original sketch|No stored source image exists/i)).toBeVisible()
+  // Which source the dialog names depends on whether an earlier journey in the
+  // shared database already gave SH-030 an image; each branch must explain it.
+  await expect(dialog.getByText(/current frame—not the original sketch|clean storyboard layout|No source image or storyboard layout/i)).toBeVisible()
   await dialog.getByRole('radio', { name: /OpenAI GPT Image.*Direct (?:edit|draft)/ }).click()
   await expect(dialog.getByRole('radio', { name: /OpenAI GPT Image.*Direct (?:edit|draft)/ })).toHaveAttribute('aria-checked', 'true')
   await expect(dialog.getByRole('button', { name: /OpenAI GPT Image needs setup|Regenerate with OpenAI GPT Image/ })).toBeVisible()
@@ -1373,7 +1394,7 @@ test('guided setup launch opens the visible production setup drawer', async ({ p
 
   await expect(page.getByTestId('setup-drawer')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Production setup' })).toBeVisible()
-  await expect(page.getByText('Production guard is active')).toBeVisible()
+  await expect(page.getByTestId('generation-settings')).toBeVisible()
   verifyConsole()
 })
 
@@ -1479,17 +1500,20 @@ test('dropping an image on the board creates a real draft and Codex can structur
   await expect(page.getByText('Drop image to add a shot')).toBeVisible()
   await board.dispatchEvent('drop', { dataTransfer: transfer })
 
-  const dialog = page.getByRole('dialog', { name: 'Add shot card' })
+  const dialog = page.getByRole('dialog', { name: 'Add a shot' })
   await expect(dialog.getByAltText('New shot draft preview')).toBeVisible()
-  await expect(dialog.getByText('This becomes the first draft, not a sketch.')).toBeVisible()
-  await dialog.getByLabel('Shot code').fill(code)
-  await dialog.getByPlaceholder(/Example: Ennix enters/).fill('Ennix arrives under the bridge. Use the approved authority and keep the bridge visible.')
-  await dialog.getByRole('button', { name: 'Fill form with Codex' }).click()
+  await expect(dialog.getByText('This becomes the first draft of the shot.')).toBeVisible()
+  const artistWords = 'Ennix arrives under the bridge. Use the approved authority and keep the bridge visible.'
+  await dialog.getByLabel('Describe the shot').fill(artistWords)
+  await dialog.getByRole('button', { name: 'Suggest details with Codex' }).click()
   await expect(dialog.getByLabel('Title')).toHaveValue('Dropped frame arrival')
+  // Codex fills the folded-away fields and opens them; the sentence stays the artist's.
   await expect(dialog.getByLabel('Camera')).toHaveValue('35mm equivalent · medium wide · locked')
+  await expect(dialog.getByLabel('Describe the shot')).toHaveValue(artistWords)
   await expect(dialog.getByText(reference.name, { exact: true })).toBeVisible()
-  await expect(dialog.getByText(/Review anything below/)).toBeVisible()
-  await dialog.getByRole('button', { name: 'Create image draft' }).click()
+  await expect(dialog.getByText(/Review the details below/)).toBeVisible()
+  await dialog.getByLabel('Shot code').fill(code)
+  await dialog.getByRole('button', { name: 'Add shot with image' }).click()
 
   await expect(page.getByTestId('shot-workspace')).toBeVisible()
   await expect.poll(async () => {
@@ -1538,14 +1562,15 @@ test('shot and authority editors persist real production entities', async ({ pag
   await page.goto('/')
 
   await page.getByRole('button', { name: 'Add card' }).first().click()
-  const shotDialog = page.getByRole('dialog', { name: 'Add shot card' })
+  const shotDialog = page.getByRole('dialog', { name: 'Add a shot' })
+  await shotDialog.getByText('Camera, action and references').click()
   await shotDialog.getByLabel('Shot code').fill(code)
   await shotDialog.getByLabel('Title').fill('Lantern handoff')
-  await shotDialog.getByLabel('Description').fill('Ennix receives the signal lantern at the bridge threshold.')
+  await shotDialog.getByLabel('Describe the shot').fill('Ennix receives the signal lantern at the bridge threshold.')
   await shotDialog.getByLabel('Action').fill('The lantern crosses frame left to right and settles in Ennix’s hand.')
   await shotDialog.getByLabel('Camera').fill('Medium close · eye level · 50 mm')
-  await shotDialog.getByLabel(/Locked shot constraints/).fill('Lantern has three brass ribs\nScreen direction remains left to right')
-  await shotDialog.getByRole('button', { name: 'Add card' }).click()
+  await shotDialog.getByLabel(/Must stay true/).fill('Lantern has three brass ribs\nScreen direction remains left to right')
+  await shotDialog.getByRole('button', { name: 'Add shot', exact: true }).click()
   await expect(page.getByTestId('shot-workspace')).toBeVisible()
   await expect(page.locator('.canvas-caption').getByText(new RegExp(code))).toBeVisible()
 
@@ -1579,6 +1604,7 @@ test('a shot card can generate directly without visiting the sketchboard', async
   const code = testInfo.project.name === 'tablet' ? 'SH-891' : 'SH-881'
   let generationBody: { expectedShotVersion?: number; adapterId?: string } | undefined
   let sketchRequested = false
+  await mockReadyOneClickEngines(page)
   await page.route('**/api/shots/*/sketch', async route => {
     sketchRequested = true
     await route.continue()
@@ -1594,12 +1620,13 @@ test('a shot card can generate directly without visiting the sketchboard', async
   await page.goto('/')
 
   await page.getByRole('button', { name: 'Add card' }).first().click()
-  const dialog = page.getByRole('dialog', { name: 'Add shot card' })
+  const dialog = page.getByRole('dialog', { name: 'Add a shot' })
+  await dialog.getByText('Camera, action and references').click()
   await dialog.getByLabel('Shot code').fill(code)
   await dialog.getByLabel('Title').fill('Direct generation')
-  await dialog.getByLabel('Description').fill('Ennix waits alone under the Aerie bridge at blue hour.')
+  await dialog.getByLabel('Describe the shot').fill('Ennix waits alone under the Aerie bridge at blue hour.')
   await dialog.getByLabel('Action').fill('She turns toward an approaching light.')
-  await dialog.getByRole('button', { name: 'Add card' }).click()
+  await dialog.getByRole('button', { name: 'Add shot', exact: true }).click()
 
   const generate = page.getByRole('button', { name: 'Generate fast draft' })
   const generateWithCodex = page.getByRole('button', { name: 'Generate with Codex' })
@@ -1892,7 +1919,7 @@ test('director mode gives the frame the whole workstation without forking shot s
   await brief.fill(`${await brief.inputValue()} Director mode proof.`)
   await expect(page.getByText(/Saved to studio/)).toBeVisible()
   await page.getByRole('button', { name: 'Generate draft in ComfyUI' }).click()
-  await expect(page.getByRole('alert')).toContainText('Submission is off')
+  await expect(page.getByRole('alert')).toContainText('ComfyUI image generation is turned off')
   const snapshot = await (await page.request.get('/api/studio')).json()
   const shot = snapshot.shots.find((item: { code: string }) => item.code === code)
   const manifests = await (await page.request.get(`/api/shots/${shot.id}/manifests`)).json()

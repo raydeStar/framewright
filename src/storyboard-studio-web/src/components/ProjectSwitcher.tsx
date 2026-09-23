@@ -13,15 +13,18 @@ import type { ProjectInterviewProposal, ProjectListItem, ProjectSummary } from '
  * what it landed in. The counts come from the server because they are the only
  * read that legitimately crosses the project scope.
  */
-export default function ProjectSwitcher({ project, onSwitched, onError }: {
+export default function ProjectSwitcher({ project, creating, onCreatingChange, onSwitched, onError }: {
   project: ProjectSummary
+  /** Owned by the shell so other entry points (the sample welcome) can open it. */
+  creating: boolean
+  onCreatingChange: (open: boolean) => void
   onSwitched: (name: string) => void
   onError: (message: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [projects, setProjects] = useState<ProjectListItem[]>()
   const [busyId, setBusyId] = useState<string>()
-  const [creating, setCreating] = useState(false)
+  const setCreating = onCreatingChange
   const [confirmDelete, setConfirmDelete] = useState<ProjectListItem>()
   const trigger = useRef<HTMLButtonElement>(null)
   const packageInput = useRef<HTMLInputElement>(null)
@@ -34,6 +37,18 @@ export default function ProjectSwitcher({ project, onSwitched, onError }: {
   // shot or authority is added, and a switcher showing yesterday's numbers is
   // worse than one that takes a moment.
   useEffect(() => { if (open) void load() }, [load, open])
+  // A menu closes on Escape and hands focus back to the button that opened it;
+  // otherwise its scrim silently swallows the next click anywhere on the page.
+  useEffect(() => {
+    if (!open) return
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      trigger.current?.focus()
+    }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [open])
 
   const activate = async (target: ProjectListItem) => {
     if (target.isActive) { setOpen(false); return }
@@ -72,7 +87,7 @@ export default function ProjectSwitcher({ project, onSwitched, onError }: {
       data-testid="project-switcher">
       <div>
         <p>{project.production}</p>
-        <strong>{project.name}</strong>
+        <strong>{project.name}{project.isSample && <span className="sample-tag">Sample</span>}</strong>
       </div>
       <ChevronDown size={15} />
     </button>
@@ -91,7 +106,7 @@ export default function ProjectSwitcher({ project, onSwitched, onError }: {
             onClick={() => void activate(item)}>
             <span className="project-menu-check">{item.isActive ? <Check size={15} /> : busyId === item.id ? <LoaderCircle className="spin" size={15} /> : null}</span>
             <span className="project-menu-copy">
-              <strong>{item.name}</strong>
+              <strong>{item.name}{item.isSample && <span className="sample-tag">Sample</span>}</strong>
               <small>{item.production} · {item.sequenceCode}</small>
             </span>
             <span className="project-menu-counts">

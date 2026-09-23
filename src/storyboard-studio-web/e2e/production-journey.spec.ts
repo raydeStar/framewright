@@ -104,17 +104,18 @@ test('real ComfyUI canary renders and revises a draft, then places generated mus
   console.log('  2. authoring the shot')
   await page.getByRole('tab', { name: /Shots/ }).click()
   await page.getByRole('button', { name: 'Add card' }).first().click()
-  const shotDialog = page.getByRole('dialog', { name: 'Add shot card' })
+  const shotDialog = page.getByRole('dialog', { name: 'Add a shot' })
+  await shotDialog.getByText('Camera, action and references').click()
   await shotDialog.getByLabel('Shot code').fill(SHOT)
   await shotDialog.getByLabel('Title').fill('Lantern at the gate')
-  await shotDialog.getByLabel('Description').fill(
+  await shotDialog.getByLabel('Describe the shot').fill(
     'A lone figure stops at a tall stone gate at dusk, holding a lit signal lantern low at their side.')
   await shotDialog.getByLabel('Action').fill(
     'The figure halts, lifts the lantern just enough to read the gate, and holds.')
   await shotDialog.getByLabel('Camera').fill('Wide · eye level · 35 mm')
-  await shotDialog.getByLabel(/Locked shot constraints/).fill(
+  await shotDialog.getByLabel(/Must stay true/).fill(
     'Lantern stays in the right hand\nStrap remains on the left shoulder\nGate is stone, never timber')
-  await shotDialog.getByRole('button', { name: 'Add card' }).click()
+  await shotDialog.getByRole('button', { name: 'Add shot', exact: true }).click()
   await expect(page.getByTestId('shot-workspace')).toBeVisible()
   await expect(page.locator('.canvas-caption').getByText(new RegExp(SHOT))).toBeVisible()
 

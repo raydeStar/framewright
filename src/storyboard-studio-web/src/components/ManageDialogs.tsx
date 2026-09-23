@@ -6,25 +6,45 @@ import Dialog from './Dialog'
 
 const categories = ['Character', 'Role', 'Wardrobe', 'Pose', 'Location', 'Architecture', 'Prop', 'Style', 'World']
 
-export function ShotEditorDialog({ shot, initialImage, references, suggestedCode, onClose, onSaved }: {
+/** A title the artist did not write: the description's opening words, trimmed at a word boundary. */
+function titleFromDescription(description: string) {
+  const firstSentence = (description.trim().split(/(?<=[.!?;])\s/)[0] ?? '').replace(/[.!?;,:]+$/, '')
+  if (firstSentence.length <= 60) return firstSentence
+  let title = ''
+  for (const word of firstSentence.split(/\s+/)) {
+    if ((title + ' ' + word).trim().length > 48) break
+    title = (title + ' ' + word).trim()
+  }
+  return `${title || firstSentence.slice(0, 48)}…`
+}
+
+/**
+ * Creating a shot starts from one sentence. Everything a generator or reviewer
+ * can use beyond that (camera, action, references, locked details, the shot
+ * code) is kept, but folded away until the artist wants it. Duration is asked
+ * in seconds and stored in frames at the project's rate.
+ */
+export function ShotEditorDialog({ shot, initialImage, references, suggestedCode, framesPerSecond, onClose, onSaved }: {
   shot?: ShotSummary
   initialImage?: File
   references: ReferenceSummary[]
   suggestedCode?: string
+  framesPerSecond: number
   onClose: () => void
   onSaved: (shot: ShotSummary) => void
 }) {
+  const fps = framesPerSecond > 0 ? framesPerSecond : 24
   const [code, setCode] = useState(shot?.code ?? suggestedCode ?? '')
   const [title, setTitle] = useState(shot?.title ?? '')
   const [description, setDescription] = useState(shot?.description ?? '')
-  const [durationFrames, setDurationFrames] = useState(shot?.durationFrames ?? 72)
-  const [camera, setCamera] = useState(shot?.camera ?? 'Medium wide · eye level')
+  const [seconds, setSeconds] = useState(() => Math.round(((shot?.durationFrames ?? 3 * fps) / fps) * 10) / 10)
+  const [camera, setCamera] = useState(shot?.camera ?? '')
   const [action, setAction] = useState(shot?.action ?? '')
   const [referenceIds, setReferenceIds] = useState<string[]>(shot?.referenceIds ?? [])
   const [constraintsText, setConstraintsText] = useState((shot?.constraints ?? []).join('\n'))
+  const [detailsOpen, setDetailsOpen] = useState(Boolean(shot))
   const [image, setImage] = useState<File | undefined>(initialImage)
   const [preview, setPreview] = useState<string>()
-  const [plainDescription, setPlainDescription] = useState('')
   const [suggesting, setSuggesting] = useState(false)
   const [suggestionDetail, setSuggestionDetail] = useState<string>()
   const [imageDragging, setImageDragging] = useState(false)
@@ -46,35 +66,51 @@ export function ShotEditorDialog({ shot, initialImage, references, suggestedCode
   const dropImage = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault(); setImageDragging(false); chooseImage(event.dataTransfer.files[0])
   }
-  const fillWithCodex = async () => {
-    if (!plainDescription.trim()) { setError('Describe the shot in a sentence or two first.'); return }
+  // Codex structures the artist's sentence into the folded-away fields. The
+  // sentence itself stays exactly as the artist wrote it.
+  const suggestDetails = async () => {
+    if (!description.trim()) { setError('Describe the shot in a sentence or two first.'); return }
     setSuggesting(true); setError(undefined); setSuggestionDetail(undefined)
     try {
-      const suggestion = await studioApi.suggestShotIntent(plainDescription.trim())
-      setTitle(suggestion.title); setDescription(suggestion.description); setDurationFrames(suggestion.durationFrames)
+      const suggestion = await studioApi.suggestShotIntent(description.trim())
+      setTitle(suggestion.title); setSeconds(Math.round((suggestion.durationFrames / fps) * 10) / 10)
       setCamera(suggestion.camera); setAction(suggestion.action); setReferenceIds(suggestion.referenceIds)
       setConstraintsText(suggestion.constraints.join('\n')); setSuggestionDetail(suggestion.detail)
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Codex could not structure this shot.') }
+      setDetailsOpen(true)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Codex could not suggest details for this shot.') }
     finally { setSuggesting(false) }
   }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
+    if (!description.trim()) { setError('Describe the shot to add it.'); document.getElementById('shot-description')?.focus(); return }
+    if (!(seconds > 0)) { setError('Give the shot a length of more than zero seconds.'); return }
+    if (!code.trim()) { setDetailsOpen(true); setError('The shot needs a code, such as SH-010.'); return }
     setBusy(true); setError(undefined)
     try {
       const asset = !shot && image ? await studioApi.uploadImage(image, image.name) : undefined
-      const common = { title, description, durationFrames, camera, action, referenceIds, constraints: lines(constraintsText) }
+      const common = {
+        title: title.trim() || titleFromDescription(description),
+        description: description.trim(),
+        durationFrames: Math.max(1, Math.round(seconds * fps)),
+        camera: camera.trim(),
+        action: action.trim(),
+        referenceIds,
+        constraints: lines(constraintsText),
+      }
       const saved = shot
         ? await studioApi.updateShot(shot.id, { expectedUpdatedAt: shot.updatedAt, ...common })
-        : await studioApi.createShot({ code, ...common, initialImageAssetId: asset?.id })
+        : await studioApi.createShot({ code: code.trim(), ...common, initialImageAssetId: asset?.id })
       onSaved(saved)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'The shot could not be saved.') }
     finally { setBusy(false) }
   }
 
-  return <Dialog className="modal-backdrop entity-backdrop" onClose={onClose} labelledBy="shot-editor-title" initialFocus={initialImage ? '#plain-shot-description' : '#shot-title'}>
-    <form className="entity-dialog" onSubmit={submit}>
-      <header><div className="entity-icon"><Clapperboard /></div><div><p className="eyebrow">{shot ? `${shot.code} · working intent` : 'New named slot'}</p><h2 id="shot-editor-title">{shot ? 'Edit shot intent' : 'Add shot card'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close shot editor"><X /></button></header>
+  const frames = Math.max(1, Math.round((seconds > 0 ? seconds : 0) * fps))
+
+  return <Dialog className="modal-backdrop entity-backdrop" onClose={onClose} labelledBy="shot-editor-title" initialFocus="#shot-description">
+    <form className="entity-dialog" onSubmit={submit} noValidate>
+      <header><div className="entity-icon"><Clapperboard /></div><div><p className="eyebrow">{shot ? `${shot.code} · working intent` : 'New shot'}</p><h2 id="shot-editor-title">{shot ? 'Edit shot' : 'Add a shot'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close shot editor"><X /></button></header>
       <div className="entity-form">
         {!shot && <label className={`shot-intake-image ${imageDragging ? 'dragging' : ''}`}
           onDragEnter={event => { event.preventDefault(); setImageDragging(true) }}
@@ -83,29 +119,33 @@ export function ShotEditorDialog({ shot, initialImage, references, suggestedCode
           onDrop={dropImage}>
           <input type="file" accept="image/png,image/jpeg" onChange={event => chooseImage(event.target.files?.[0])} />
           <span className="shot-intake-preview">{preview ? <img src={preview} alt="New shot draft preview" /> : <ImagePlus size={28} />}</span>
-          <span><strong>{image ? image.name : 'Drop an image to start this shot'}</strong><small>{image ? 'This becomes the first draft, not a sketch.' : 'Or tap to choose a PNG or JPEG. Starting from text is fine too.'}</small></span>
+          <span><strong>{image ? image.name : 'Have an image already? Drop it here'}</strong><small>{image ? 'This becomes the first draft of the shot.' : 'Optional. Or tap to choose a PNG or JPEG.'}</small></span>
           <Upload size={18} />
         </label>}
-        {!shot && <section className="shot-intake-assistant" aria-labelledby="shot-intake-assistant-title">
-          <div><Sparkles size={17} /><span><strong id="shot-intake-assistant-title">Tell Codex what this shot is</strong><small>Plain language in; editable production fields out.</small></span></div>
-          <textarea id="plain-shot-description" value={plainDescription} onChange={event => setPlainDescription(event.target.value)} maxLength={5000} placeholder="Example: Ennix enters the chain court cautiously. Keep the three chains visible, use a tense medium-wide frame, and reference her approved flight coat." />
-          <button type="button" className="secondary" onClick={() => void fillWithCodex()} disabled={suggesting || !plainDescription.trim()}>{suggesting ? <LoaderCircle className="spin" /> : <Sparkles />}{suggesting ? 'Structuring shot…' : 'Fill form with Codex'}</button>
-          {suggestionDetail && <p role="status"><BadgeCheck size={14} />{suggestionDetail} Review anything below before adding the card.</p>}
-        </section>}
+        <label><span>Describe the shot</span><textarea id="shot-description" value={description} onChange={event => { setDescription(event.target.value); setError(undefined) }} aria-required="true" maxLength={4000} placeholder="What happens, and what do we see? e.g. An old lighthouse on a cliff in a storm; the lamp sweeps across the waves." /></label>
+        {!shot && <div className="shot-intake-suggest">
+          <button type="button" className="secondary compact" onClick={() => void suggestDetails()} disabled={suggesting || !description.trim()}>{suggesting ? <LoaderCircle className="spin" /> : <Sparkles />}{suggesting ? 'Suggesting details…' : 'Suggest details with Codex'}</button>
+          <small>Optional. Fills in the title, camera and action from your description for you to review.</small>
+        </div>}
+        {suggestionDetail && <p className="shot-intake-suggestion" role="status"><BadgeCheck size={14} />{suggestionDetail} Review the details below before adding the shot.</p>}
         <div className="form-grid two">
-          <label><span>Shot code</span><input value={code} onChange={event => setCode(event.target.value)} readOnly={Boolean(shot)} required placeholder="SH-070" /></label>
-          <label><span>Duration in frames</span><input type="number" min={1} max={2400} value={durationFrames} onChange={event => setDurationFrames(Number(event.target.value))} required /></label>
+          <label><span>Title <small>optional</small></span><input id="shot-title" value={title} onChange={event => setTitle(event.target.value)} maxLength={120} placeholder={description.trim() ? titleFromDescription(description) : 'Uses the start of the description'} /></label>
+          <label><span>Length in seconds <small>{frames} frames at {fps} fps</small></span><input type="number" min={0.1} max={600} step={0.5} value={Number.isFinite(seconds) ? seconds : ''} onChange={event => setSeconds(Number(event.target.value))} /></label>
         </div>
-        <label><span>Title</span><input id="shot-title" value={title} onChange={event => setTitle(event.target.value)} required maxLength={120} placeholder="A clear, scannable shot name" /></label>
-        <label><span>Description</span><textarea value={description} onChange={event => setDescription(event.target.value)} required maxLength={1200} placeholder="What is visible in this frame?" /></label>
-        <label><span>Action</span><textarea value={action} onChange={event => setAction(event.target.value)} required maxLength={1200} placeholder="Describe the beat, movement, and intended change through the shot." /></label>
-        <label><span>Camera</span><input value={camera} onChange={event => setCamera(event.target.value)} required maxLength={240} placeholder="Medium wide · low angle · 35 mm" /></label>
-        <fieldset><legend>Authority packet <small>{referenceIds.length} selected</small></legend><div className="authority-picker">{references.map(reference => <label key={reference.id} className={referenceIds.includes(reference.id) ? 'selected' : ''}><input type="checkbox" checked={referenceIds.includes(reference.id)} onChange={() => setReferenceIds(current => current.includes(reference.id) ? current.filter(id => id !== reference.id) : [...current, reference.id])} /><span><strong>{reference.name}</strong><small>{reference.category} · v{reference.version}</small></span><BadgeCheck size={16} /></label>)}</div></fieldset>
-        <label><span>Locked shot constraints <small>one per line</small></span><textarea value={constraintsText} onChange={event => setConstraintsText(event.target.value)} placeholder={'Ennix eyes remain amber\nKeep the sky bridge behind the Aerie'} /></label>
-        {shot?.approval === 'Ratified' && <div className="form-warning"><LockKeyhole size={16} /><span><strong>Approved authority stays immutable.</strong> Saving creates a new working sketch version; the ratified version remains in history.</span></div>}
+        <details className="entity-form-more" open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
+          <summary>Camera, action and references</summary>
+          <div className="entity-form-more-body">
+            <label><span>Camera <small>optional</small></span><input value={camera} onChange={event => setCamera(event.target.value)} maxLength={240} placeholder="Medium wide · low angle · 35 mm" /></label>
+            <label><span>Action <small>optional</small></span><textarea value={action} onChange={event => setAction(event.target.value)} maxLength={1200} placeholder="The beat, the movement, and what changes through the shot." /></label>
+            <fieldset><legend>References <small>{referenceIds.length} selected</small></legend>{references.length === 0 ? <p className="entity-form-empty">No references yet. Characters, places and props you add to the project appear here.</p> : <div className="authority-picker">{references.map(reference => <label key={reference.id} className={referenceIds.includes(reference.id) ? 'selected' : ''}><input type="checkbox" checked={referenceIds.includes(reference.id)} onChange={() => setReferenceIds(current => current.includes(reference.id) ? current.filter(id => id !== reference.id) : [...current, reference.id])} /><span><strong>{reference.name}</strong><small>{reference.category} · v{reference.version}</small></span><BadgeCheck size={16} /></label>)}</div>}</fieldset>
+            <label><span>Must stay true <small>one per line</small></span><textarea value={constraintsText} onChange={event => setConstraintsText(event.target.value)} placeholder={'The lamp is always lit\nWaves move left to right'} /></label>
+            <label><span>Shot code</span><input value={code} onChange={event => setCode(event.target.value)} readOnly={Boolean(shot)} maxLength={24} placeholder="SH-070" /></label>
+          </div>
+        </details>
+        {shot?.approval === 'Ratified' && <div className="form-warning"><LockKeyhole size={16} /><span><strong>The approved version stays as it is.</strong> Saving creates a new working version; the approved one remains in history.</span></div>}
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
-      <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? <LoaderCircle className="spin" /> : shot ? <BadgeCheck /> : <Plus />}{busy ? 'Saving…' : shot ? 'Save new intent' : image ? 'Create image draft' : 'Add card'}</button></footer>
+      <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? <LoaderCircle className="spin" /> : shot ? <BadgeCheck /> : <Plus />}{busy ? 'Saving…' : shot ? 'Save changes' : image ? 'Add shot with image' : 'Add shot'}</button></footer>
     </form>
   </Dialog>
 }

@@ -1,8 +1,21 @@
-import { useId } from 'react'
+import { useContext, useId } from 'react'
+import { ImageOff } from 'lucide-react'
+import { SampleArtContext } from '../sampleArt'
 
 interface ArtworkProps { variant: number; className?: string; muted?: boolean; label?: string }
 
-export default function Artwork({ variant, className = '', muted = false, label }: ArtworkProps) {
+export default function Artwork(props: ArtworkProps) {
+  return useContext(SampleArtContext) ? <Illustration {...props} /> : <EmptyFrame {...props} />
+}
+
+/** A frame with nothing in it yet, sized exactly like the art it stands in for. */
+function EmptyFrame({ className = '', muted = false, label }: ArtworkProps) {
+  return <div className={`artwork artwork-empty ${muted ? 'artwork-muted' : ''} ${className}`} aria-label={label ?? 'No image yet'} role="img" data-testid="empty-frame">
+    <span aria-hidden="true"><ImageOff /><small>No image yet</small></span>
+  </div>
+}
+
+function Illustration({ variant, className = '', muted = false, label }: ArtworkProps) {
   const id = useId().replaceAll(':', '')
   const scene = ((variant - 1) % 6) + 1
   return (

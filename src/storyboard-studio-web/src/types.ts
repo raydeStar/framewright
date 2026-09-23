@@ -5,9 +5,9 @@ export type GenerationRoute = 'FastDraft' | 'PrecisionDraft'
 export type GenerationPurpose = 'Draft' | 'Final' | 'Video'
 export type VideoQuality = 'Low' | 'Medium' | 'High' | 'Max'
 
-export interface ProjectSummary { id: string; name: string; production: string; sequenceCode: string; sequenceName: string; framesPerSecond: number; aspectRatio: string; deliveryWidth: number; deliveryHeight: number; visualStyle: string; worldCanon: string; promptDirectives: string; negativeDirectives: string; updatedAt: string; colorSpace: 'Rec.709' | 'Display P3 D65' | 'Rec.2020'; audioSampleRate: 44100 | 48000 | 96000 }
+export interface ProjectSummary { id: string; name: string; production: string; sequenceCode: string; sequenceName: string; framesPerSecond: number; aspectRatio: string; deliveryWidth: number; deliveryHeight: number; visualStyle: string; worldCanon: string; promptDirectives: string; negativeDirectives: string; updatedAt: string; colorSpace: 'Rec.709' | 'Display P3 D65' | 'Rec.2020'; audioSampleRate: 44100 | 48000 | 96000; isSample?: boolean }
 /** One row in the project switcher. Counts come from the server, which reads them across the scope. */
-export interface ProjectListItem { id: string; name: string; production: string; sequenceCode: string; sequenceName: string; shotCount: number; authorityCount: number; isActive: boolean; updatedAt: string }
+export interface ProjectListItem { id: string; name: string; production: string; sequenceCode: string; sequenceName: string; shotCount: number; authorityCount: number; isActive: boolean; updatedAt: string; isSample?: boolean }
 export interface ProjectDeletionSummary { name: string; shots: number; authorities: number; ratifiedVersions: number; assetRecords: number }
 export interface PortableProjectImportSummary { projectId: string; name: string; shotCount: number; assetCount: number; sceneCount: number; sceneShotBindingCount: number; idsRemapped: boolean; detail: string }
 export interface ProposedAuthority { name: string; category: string; description: string; lockedConstraint: string; accent: string }
@@ -83,6 +83,18 @@ export interface MusicRenderSummary { id: string; jobId: string; assetId: string
 export interface MusicCompositionRevisionSummary { id: string; revisionNumber: number; parentRevisionId?: string; editSummary: string; composition: MusicCompositionDocument; abcNotation: string; contentHash: string; planArtifactManifestJson: string; createdAt: string; renders: MusicRenderSummary[] }
 export interface MusicCompositionSummary { id: string; title: string; description: string; currentRevisionId: string; currentRevisionNumber: number; createdAt: string; updatedAt: string; revisions: MusicCompositionRevisionSummary[] }
 export interface CredentialStatus { isConfigured: boolean; source: string; canManageHere: boolean; detail: string }
+/**
+ * The generation switches an artist can set from Production setup. `locked`
+ * names each setting whose effective value comes from outside the app (an
+ * environment variable or command line), so the switch is shown but not live.
+ */
+export interface GenerationSetup {
+  canManageHere: boolean
+  comfyUi: { endpoint: string; imagesEnabled: boolean; videoEnabled: boolean; locked: string[] }
+  codex: { oneClickImages: boolean; locked: string[] }
+}
+export interface GenerationSetupChange { comfyUiEndpoint: string; comfyUiImagesEnabled: boolean; comfyUiVideoEnabled: boolean; codexOneClickImages: boolean }
+export interface ComfyUiConnectionTest { reachable: boolean; detail: string }
 export interface AudioMasteringStatus { toolAvailable: boolean; clipsWithMedia: number; guideClips: number; canMix: boolean; detail: string }
 export interface PairingStatusSummary { lanEnabled: boolean; isLoopback: boolean; isPaired: boolean; workstation: string; pairingCode?: string; codeExpiresAt?: string; securityNote: string }
 export interface BackupStatus { databaseIntegrity: string; assetCount: number; assetBytes: number; policy: string; scheduled: boolean; retainedBackups: number; latestBackupAt?: string; lastAttemptAt?: string; lastSuccessAt?: string; lastResult: string; lastError?: string; backupRootWritable: boolean; backupOverdue: boolean; backupHealth: 'Disabled' | 'Failed' | 'Overdue' | 'Running' | 'Healthy' }

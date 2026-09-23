@@ -495,6 +495,8 @@ export default function SketchWorkspace({ shot, references, purpose = 'Draft', l
   const saved = saveState.phase === 'saved'
   const referenceLimit = route === 'fast' ? 3 : 8
   const precisionAdapters = adapters.filter(item => item.id !== 'local-proof' && item.routes.includes('PrecisionDraft') && item.purposes.includes(purpose))
+  // The footer speaks for the engine this route would use, not for the form.
+  const selectedEngine = adapters.find(item => item.id === (route === 'fast' ? 'comfyui-fast-draft' : precisionAdapterId))
   const selectedPrecisionAdapter = precisionAdapters.find(item => item.id === precisionAdapterId)
   const addBlockingObject = (kind: SketchObjectKind, placement?: { x: number; y: number }) => {
     const kindCount = sketchDoc.objects.filter(item => item.kind === kind).length
@@ -615,7 +617,9 @@ export default function SketchWorkspace({ shot, references, purpose = 'Draft', l
         <section className="packet-preview"><div><LockKeyhole size={15} /><span><strong>Context ready</strong><small>{assetDraft ? `${selectedReferenceIds.length} visual references selected` : `${references.length} references + ${shot.constraints.length} locked rules included`}</small></span></div><p>{assetDraft?.destination === 'authority' ? 'The result is saved to Assets and added as the new top authority revision.' : assetDraft ? 'The result returns to the asset library. No shot or approval slot is changed.' : 'Your sketch, shot intent, camera, references, and rules travel automatically.'}</p></section>
       </div>
       <footer className="sketch-submit">
-        <p><FileCheck2 size={14} /><span><strong>Ready to generate</strong>{assetDraft?.destination === 'authority' ? 'The result is saved to Assets and added as a new protected authority revision.' : assetDraft ? 'The result is saved to Assets for future shots and references.' : 'Framewright includes the shot, references, rules, and selected image route automatically.'}</span></p>
+        {selectedEngine && !selectedEngine.canDispatch
+          ? <p className="sketch-submit-blocked"><CircleAlert size={14} /><span><strong>{selectedEngine.name} isn't set up yet</strong>{selectedEngine.detail} Your sketch and prompt are kept.</span></p>
+          : <p><FileCheck2 size={14} /><span><strong>Ready to generate</strong>{assetDraft?.destination === 'authority' ? 'The result is saved to Assets and added as a new protected authority revision.' : assetDraft ? 'The result is saved to Assets for future shots and references.' : 'Framewright includes the shot, references, rules, and selected image route automatically.'}</span></p>}
         {assetGenerating && <div className="music-generation-progress" role="status"><WandSparkles /><span><strong>Generating {assetName}</strong><small>{assetElapsed}s · This may take a few minutes; you can leave the node graph closed.</small></span></div>}
         {routeError && <p className="route-error" role="alert"><CircleAlert size={14} /><span><strong>Generation couldn't start</strong>{routeError}</span></p>}
         <button className="primary" onClick={() => void prepareRoute()} disabled={!saved || !prompt.trim() || (assetDraft ? !assetName.trim() : false) || preparing || dispatching}><WandSparkles size={17} />{preparing || dispatching ? 'Starting generation…' : !saved ? 'Waiting for sketch save…' : assetDraft?.destination === 'authority' ? route === 'fast' ? 'Generate revision in ComfyUI' : `Generate revision with ${selectedPrecisionAdapter?.name ?? 'precision image'}` : assetDraft ? route === 'fast' ? 'Generate asset in ComfyUI' : `Generate asset with ${selectedPrecisionAdapter?.name ?? 'precision image'}` : route === 'fast' ? 'Generate draft in ComfyUI' : `Generate draft with ${selectedPrecisionAdapter?.name ?? 'precision image'}`}</button>

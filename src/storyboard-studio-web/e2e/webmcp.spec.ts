@@ -155,7 +155,7 @@ test.describe('browser WebMCP collaboration', () => {
     await brief.fill(`${await brief.inputValue()} Agent preview proof.`)
     await expect(page.getByText(/Saved to studio/)).toBeVisible()
     await page.getByRole('button', { name: 'Generate draft in ComfyUI' }).click()
-    await expect(page.getByRole('alert')).toContainText('Submission is off')
+    await expect(page.getByRole('alert')).toContainText('ComfyUI image generation is turned off')
     const snapshot = await (await page.request.get('/api/studio')).json()
     const shot = snapshot.shots.find((item: { code: string }) => item.code === code)
     const manifests = await (await page.request.get(`/api/shots/${shot.id}/manifests`)).json()

@@ -1,5 +1,29 @@
 # Framewright implementation handoff
 
+## First-run creation and in-app generation setup (2026-09-23)
+
+The MVP release goal ([goals/mvp-release.md](goals/mvp-release.md)) made the
+first hour usable without a harness:
+
+- A fresh workstation labels its seeded demo as a **Sample** (migration v20,
+  `IsSample`, set only when a new database seeds it; never on upgrade or
+  import) and greets the artist with "Start your own project".
+- A new project needs only a name, is created from a named format, and opens
+  on creation.
+- A new shot needs only a description; length is in seconds. Camera and action
+  are optional server-side. Outside the sample, a shot with no image shows an
+  honest "No image yet" frame, not the demo illustration.
+- One-click generate buttons read engine readiness and explain what is missing.
+- Production setup leads with generation. The ComfyUI address, a read-only
+  connection test and switches for ComfyUI images, ComfyUI video and one-click
+  Codex images persist to `generation-settings.json` in the data root through
+  `GenerationSettingsStore`. Environment and command-line values still win
+  and show as locked, and workstation-only callers may change them. This
+  replaces `setup.ps1` for those four settings; workflow paths and
+  `AllowRemote` remain configuration.
+- The SPA fallback sends `Cache-Control: no-cache`, so an update no longer
+  opens on a stale `index.html`.
+
 ## Scene local lighting (2026-09-22)
 
 Saved scenes now support named local lights, lighting colors, exposure, filmic

@@ -9,7 +9,7 @@ import type { AssetPlacementSummary, AssetSummary, AudioMasteringStatus, Candida
 
 const SketchWorkspace = lazy(() => import('./SketchWorkspace'))
 
-export function BoardWorkspace({ studio, selectedId, initialView, onViewChange, onSelect, onOpen, onCreateShot, onCreateAuthority, onEditAuthority, onOpenLibrary, onChanged }: { studio: StudioSnapshot; selectedId: string; initialView?: 'shots' | 'authorities'; onViewChange?: (view: 'shots' | 'authorities') => void; onSelect: (id: string) => void; onOpen: (id: string) => void; onCreateShot: (image?: File) => void; onCreateAuthority: () => void; onEditAuthority: (reference: ReferenceSummary) => void; onOpenLibrary: () => void; onChanged: (message?: string) => void }) {
+export function BoardWorkspace({ studio, selectedId, initialView, banner, onViewChange, onSelect, onOpen, onCreateShot, onCreateAuthority, onEditAuthority, onOpenLibrary, onChanged }: { studio: StudioSnapshot; selectedId: string; banner?: React.ReactNode; initialView?: 'shots' | 'authorities'; onViewChange?: (view: 'shots' | 'authorities') => void; onSelect: (id: string) => void; onOpen: (id: string) => void; onCreateShot: (image?: File) => void; onCreateAuthority: () => void; onEditAuthority: (reference: ReferenceSummary) => void; onOpenLibrary: () => void; onChanged: (message?: string) => void }) {
   const [view, setView] = useState<'shots' | 'authorities'>(initialView ?? 'shots')
   const [fileDragging, setFileDragging] = useState(false)
   const fileDragDepth = useRef(0)
@@ -30,6 +30,7 @@ export function BoardWorkspace({ studio, selectedId, initialView, onViewChange, 
     onDragLeave={event => { if (!fileDragging) return; event.preventDefault(); fileDragDepth.current = Math.max(0, fileDragDepth.current - 1); if (fileDragDepth.current === 0) setFileDragging(false) }}
     onDrop={event => { if (!acceptsFiles(event)) return; event.preventDefault(); fileDragDepth.current = 0; setFileDragging(false); const image = Array.from(event.dataTransfer.files).find(file => ['image/png', 'image/jpeg'].includes(file.type)); if (image) onCreateShot(image) }}>
     {fileDragging && <div className="board-drop-overlay" role="status"><ImagePlus size={34} /><strong>Drop image to add a shot</strong><span>The new-card form opens with this image attached.</span></div>}
+    {banner}
     <section className="board-heading">
       <div><p className="eyebrow">{studio.project.sequenceCode} · {studio.project.sequenceName}</p><h1>{view === 'shots' ? 'Shot board' : 'Authority board'}</h1><p className="lede">{view === 'shots' ? 'The whole sequence at a glance. Select a frame to move from intent to approved production.' : 'Approved identity, world, wardrobe, prop, and style truth. Shots cite exact versions without changing canon.'}</p></div>
       <div className="board-heading-tools">
@@ -49,8 +50,9 @@ export function BoardWorkspace({ studio, selectedId, initialView, onViewChange, 
     {view === 'shots' && studio.shots.length === 0 ? <EmptyBoard
       icon={<Clapperboard />}
       title="No shots in this sequence yet"
-      body="A sequence is built from named shot slots. Each slot holds one review authority and its archived versions."
-      note="Use Add card to create the first named slot." />
+      body="Start with a sentence about what happens. You can sketch it, generate it, or drop in an image you already have."
+      action={<button type="button" className="primary" onClick={() => onCreateShot()}><Plus size={17} />Add your first shot</button>}
+      note="Tip: dropping an image anywhere on this board starts a shot from it." />
     : view === 'authorities' && studio.references.length === 0 ? <EmptyBoard
       icon={<LockKeyhole />}
       title="No approved authorities yet"
@@ -397,12 +399,13 @@ function DeleteShotDialog({ shot, busy, onCancel, onConfirm }: { shot: ShotSumma
 
 /** Empty states say what the surface is for and when it becomes usable, rather
  *  than leaving a blank grid that reads as a loading failure. */
-function EmptyBoard({ icon, title, body, note }: { icon: React.ReactNode; title: string; body: string; note: string }) {
+function EmptyBoard({ icon, title, body, note, action }: { icon: React.ReactNode; title: string; body: string; note?: string; action?: React.ReactNode }) {
   return <section className="empty-board" data-testid="empty-board">
     <div className="empty-board-icon">{icon}</div>
     <h2>{title}</h2>
     <p>{body}</p>
-    <p className="empty-board-note">{note}</p>
+    {action && <div className="empty-board-action">{action}</div>}
+    {note && <p className="empty-board-note">{note}</p>}
   </section>
 }
 
@@ -448,15 +451,28 @@ function CameraGuide({ value, disabled, onChange }: { value: string; disabled: b
   </div>
 }
 
-export function ShotWorkspace({ studio, shot, comments, references, tool, setTool, directorMode, onDirectorMode, onDisplayedRevision, onAddComment, onMoveComment, onResolveReferencePin, onRatify, onOpenReview, onOpenAssets, onEdit, onShotSaved, onShotContractSaved, onCandidatesChanged, onJobQueued, onAskCodex, codexBusy, generationBusy, activeJob, implementationRequest, onImplementationConsumed, sketchLaunch, onSketchLaunchConsumed }: {
+export function ShotWorkspace({ studio, shot, comments, references, tool, setTool, directorMode, onDirectorMode, onOpenSetup, setupRevision, onDisplayedRevision, onAddComment, onMoveComment, onResolveReferencePin, onRatify, onOpenReview, onOpenAssets, onEdit, onShotSaved, onShotContractSaved, onCandidatesChanged, onJobQueued, onAskCodex, codexBusy, generationBusy, activeJob, implementationRequest, onImplementationConsumed, sketchLaunch, onSketchLaunchConsumed }: {
   studio: StudioSnapshot; shot: ShotSummary; comments: CommentSummary[]; references: ReferenceSummary[];
   tool: 'select' | 'draw' | 'comment'; setTool: (tool: 'select' | 'draw' | 'comment') => void;
   directorMode: boolean; onDirectorMode: (directorMode: boolean) => void;
+  /** Opens Production setup; `setupRevision` changes whenever setup state may have. */
+  onOpenSetup: () => void; setupRevision: unknown;
   onDisplayedRevision: (revision: { shotId: string; version: number; archived: boolean }) => void;
   onAddComment: (x: number, y: number, reference?: ReferenceSummary) => void; onMoveComment: (id: string, x: number, y: number) => Promise<void>; onResolveReferencePin: (id: string) => void; onRatify: () => void; onOpenReview: (candidateId?: string) => void; onOpenAssets: () => void; onEdit: () => void; onShotSaved: (shot: ShotSummary) => void; onShotContractSaved: (shot: ShotSummary, message: string) => void; onCandidatesChanged: (message: string) => Promise<void>; onJobQueued: () => void; onAskCodex: () => void; codexBusy: boolean; generationBusy: boolean; activeJob?: JobSummary; implementationRequest?: { id: number; direction: string }; onImplementationConsumed: () => void; sketchLaunch?: { id: number; prompt?: string; route?: 'fast' | 'precision'; underlayAssetId?: string }; onSketchLaunchConsumed: () => void
 }) {
   const [tab, setTab] = useState<'intent' | 'refs' | 'rules' | 'media'>('intent')
   const [canvasMode, setCanvasMode] = useState<'frame' | 'sketch'>('frame')
+  // The one-click generate buttons dispatch straight to an engine, so they need
+  // to know up front whether that engine can run. Unknown (still loading or
+  // unreadable) stays clickable; the server refuses honestly either way.
+  const [engines, setEngines] = useState<GenerationAdapterSummary[]>()
+  useEffect(() => {
+    let live = true
+    studioApi.generationAdapters().then(found => { if (live) setEngines(found) }).catch(() => { if (live) setEngines(undefined) })
+    return () => { live = false }
+  }, [shot.id, setupRevision])
+  const engineBlocked = (id: 'comfyui-fast-draft' | 'codex-imagegen') => { const engine = engines?.find(item => item.id === id); return engine !== undefined && !engine.canDispatch }
+  const blockedEngines = (['comfyui-fast-draft', 'codex-imagegen'] as const).filter(engineBlocked)
   const [sketchPurpose, setSketchPurpose] = useState<'Draft' | 'Final'>('Draft')
   const [candidates, setCandidates] = useState<CandidateVersionSummary[]>([])
   const [videoOpen, setVideoOpen] = useState(false)
@@ -666,7 +682,7 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
           ? 'STORYBOARD COMPOSITION GUIDE: Use the attached clean storyboard frame as the binding layout. Replace simplified figures and shapes with finished artwork while preserving subject count, placement, camera, horizon, and negative space.'
           : 'FEEDBACK-GUIDED DRAFT: Generate from shot intent, approved authorities, locked constraints, and the pinned feedback.'
       const pinned = comments.map((comment, index) => { const reference = references.find(item => item.id === comment.referenceId); const label = reference ? `Reference ${reference.name} v${comment.referenceVersion ?? reference.version}` : `Pin ${index + 1}`; return `- ${label} at ${Math.round(comment.x * 100)}% across / ${Math.round(comment.y * 100)}% down: ${comment.body}` }).join('\n').slice(0, 2500)
-      let brief = `${shot.description.slice(0, 800)}\nCamera: ${shot.camera.slice(0, 300)}.\nAction: ${shot.action.slice(0, 800)}.\n\nREQUESTED CHANGE: Apply every pinned note to this revision while preserving all unmentioned content.\n\n${sourceContract}`
+      let brief = `${shot.description.slice(0, 800)}${shot.camera.trim() ? `\nCamera: ${shot.camera.slice(0, 300)}.` : ''}${shot.action.trim() ? `\nAction: ${shot.action.slice(0, 800)}.` : ''}\n\nREQUESTED CHANGE: Apply every pinned note to this revision while preserving all unmentioned content.\n\n${sourceContract}`
       if (pinned) brief += `\n\nPINNED FEEDBACK ON THIS REVISION:\n${pinned}`
       if (guidanceAssetId) brief += '\n\nFRAME EDIT GUIDE: The attached current frame contains temporary gold markup. Use it only to locate edits, then remove every trace of the markup.'
       await studioApi.generateDraft(shot.id, shot.version, adapterId, {
@@ -791,11 +807,11 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
           {activeJob?.adapterId === 'codex-imagegen' && <div className="workflow-badge running" title="High-fidelity image generation through your Codex ChatGPT login"><Sparkles size={15} /><span><small>Precision image engine</small><strong>Codex ImageGen</strong></span><em>ChatGPT login</em></div>}
           {activeJob && <div className="active-job-note" role="status"><LoaderCircle className="spin" size={14} />{activeJob.phase}</div>}
           {shot.stage === 'Sketch' && <p className="inspector-footnote">Generate from the description now, or add a sketch when composition needs tighter control.</p>}
-          {shot.stage === 'Sketch' ? <div className="generation-action-stack initial-draft-actions"><button className="primary" onClick={() => void generateInitialDraft('comfyui-fast-draft')} disabled={generationBusy || Boolean(quickGenerating)}><WandSparkles size={18} />{quickGenerating === 'comfyui-fast-draft' ? 'Starting ComfyUI…' : 'Generate fast draft'}</button><button className="secondary" onClick={() => void generateInitialDraft('codex-imagegen')} disabled={generationBusy || Boolean(quickGenerating)}><Sparkles size={17} />{quickGenerating === 'codex-imagegen' ? 'Starting Codex ImageGen…' : 'Generate with Codex'}</button></div>
+          {shot.stage === 'Sketch' ? <div className="generation-action-stack initial-draft-actions"><button className="primary" onClick={() => void generateInitialDraft('comfyui-fast-draft')} disabled={generationBusy || Boolean(quickGenerating) || engineBlocked('comfyui-fast-draft')}><WandSparkles size={18} />{quickGenerating === 'comfyui-fast-draft' ? 'Starting ComfyUI…' : 'Generate fast draft'}</button><button className="secondary" onClick={() => void generateInitialDraft('codex-imagegen')} disabled={generationBusy || Boolean(quickGenerating) || engineBlocked('codex-imagegen')}><Sparkles size={17} />{quickGenerating === 'codex-imagegen' ? 'Starting Codex ImageGen…' : 'Generate with Codex'}</button></div>
             : shot.stage === 'Video' && latestVideoTake ? <div className="video-take-actions"><div className="video-quality-status"><Film size={16} /><span><strong>{currentVideoQuality ?? 'Low'} quality take</strong><small>{currentVideoQuality === 'Max' ? shot.approval === 'Ratified' ? 'Immutable production video · approved' : 'Maximum production pass ready for approval' : 'Review motion, then promote this exact take or try another pass'}</small></span></div>{currentVideoQuality === 'Max' ? shot.approval === 'Ratified' ? <button className="primary" disabled><BadgeCheck size={18} />Max video ratified</button> : <button className="primary" onClick={onRatify} disabled={generationBusy}><BadgeCheck size={18} />Ratify max video</button> : <button className="primary" onClick={() => void promoteLatestVideo()} disabled={generationBusy || videoPromoting}><WandSparkles size={18} />{videoPromoting ? 'Promoting to max…' : `Promote ${currentVideoQuality ?? 'Low'} take to Max`}</button>}<button className="secondary" onClick={() => setVideoOpen(true)} disabled={generationBusy || videoPromoting}><Film size={17} />Generate another pass</button></div>
             : <div className="generation-action-stack">
               {comments.length > 0
-                ? <><button className="primary" onClick={() => void regenerateDirectly('codex-imagegen')} disabled={generationBusy || Boolean(directRegenerating)}><Sparkles size={18} />{directRegenerating === 'codex-imagegen' ? 'Starting Codex…' : `Regenerate with Codex · ${comments.length} note${comments.length === 1 ? '' : 's'}`}</button><div className="quick-revision-options"><button className="secondary" onClick={() => void regenerateDirectly('comfyui-fast-draft')} disabled={generationBusy || Boolean(directRegenerating)}><RotateCcw size={16} />{directRegenerating === 'comfyui-fast-draft' ? 'Starting fast pass…' : 'Fast local pass'}</button><button className="secondary" onClick={() => setFeedbackRequest('Apply every pinned note to this revision while preserving all unmentioned content.')} disabled={generationBusy || Boolean(directRegenerating)}>More options</button></div></>
+                ? <><button className="primary" onClick={() => void regenerateDirectly('codex-imagegen')} disabled={generationBusy || Boolean(directRegenerating) || engineBlocked('codex-imagegen')}><Sparkles size={18} />{directRegenerating === 'codex-imagegen' ? 'Starting Codex…' : `Regenerate with Codex · ${comments.length} note${comments.length === 1 ? '' : 's'}`}</button><div className="quick-revision-options"><button className="secondary" onClick={() => void regenerateDirectly('comfyui-fast-draft')} disabled={generationBusy || Boolean(directRegenerating) || engineBlocked('comfyui-fast-draft')}><RotateCcw size={16} />{directRegenerating === 'comfyui-fast-draft' ? 'Starting fast pass…' : 'Fast local pass'}</button><button className="secondary" onClick={() => setFeedbackRequest('Apply every pinned note to this revision while preserving all unmentioned content.')} disabled={generationBusy || Boolean(directRegenerating)}>More options</button></div></>
                 : shot.stage === 'Draft'
                   ? <button className="primary" onClick={() => setFinalOpen(true)} disabled={generationBusy}><WandSparkles size={18} />Create production final</button>
                   : <button className="primary" onClick={() => setVideoOpen(true)} disabled={generationBusy || !shot.currentAssetId}><Film size={18} />Generate video</button>}
@@ -806,6 +822,7 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
               {displayedComments.length > 0 && <button className="secondary clear-pins-action" onClick={() => void clearDisplayedPins()} disabled={generationBusy || clearingPins}><X size={17} />{clearingPins ? 'Clearing pins…' : displayedComments.length === 1 ? 'Clear pin' : `Clear all ${displayedComments.length} pins`}</button>}
             </div>}
           {comments.length > 0 && <p className="feedback-gate-copy"><MessageCircle size={14} /><span>Open notes are revision instructions. Regenerate first; mark them resolved only after the new frame passes review.</span></p>}
+          {!archivedPreview && (shot.stage === 'Sketch' || comments.length > 0) && <GenerationSetupNotice engines={engines ?? []} blocked={blockedEngines} onOpenSetup={onOpenSetup} />}
           {quickGenerationError && <p className="generation-quick-error" role="alert"><CircleAlert size={14} />{quickGenerationError}</p>}
         </>}
       </div>
@@ -981,6 +998,26 @@ function ShotReferenceCard({ reference, pins, busy, readOnly, onPin, onDropPin, 
 function ShotArtwork({ shot, label, muted = false }: { shot: ShotSummary; label?: string; muted?: boolean }) { return shot.currentAssetUrl ? <img className={`shot-asset ${muted ? 'muted' : ''}`} src={shot.currentAssetUrl} alt={label ?? `${shot.code} frame`} /> : <Artwork variant={shot.visualVariant} label={label} muted={muted} /> }
 function CandidateArtwork({ candidate, fallbackVariant, muted = false }: { candidate?: CandidateVersionSummary; fallbackVariant: number; muted?: boolean }) { return candidate?.assetUrl ? <img className={`shot-asset ${muted ? 'muted' : ''}`} src={candidate.assetUrl} alt={`Archived ${candidate.stage} version ${candidate.version}`} /> : <Artwork variant={fallbackVariant} muted={muted} label={candidate ? `Archived ${candidate.stage} version ${candidate.version}` : 'No earlier image candidate'} /> }
 
+/**
+ * Says, next to the buttons it affects, which image engines cannot run and
+ * where to fix that. Sketching and dropping in an image never need an engine,
+ * so the artist is told those remain open.
+ */
+function GenerationSetupNotice({ engines, blocked, onOpenSetup }: { engines: GenerationAdapterSummary[]; blocked: readonly string[]; onOpenSetup: () => void }) {
+  if (blocked.length === 0) return null
+  const names = blocked.map(id => id === 'codex-imagegen' ? 'Codex' : 'ComfyUI')
+  const all = blocked.length === 2
+  const reason = all ? undefined : engines.find(engine => engine.id === blocked[0])?.detail
+  return <div className={`generation-setup-notice ${all ? 'is-blocking' : ''}`} role="status" data-testid="generation-setup-notice">
+    <CircleAlert size={16} />
+    <span>
+      <strong>{all ? 'No image generator is set up yet' : `${names[0]} isn't set up yet`}</strong>
+      <small>{all ? 'You can still sketch this shot, or drop in an image you already have.' : reason}</small>
+    </span>
+    <button type="button" className="secondary compact" onClick={onOpenSetup}>Set up image generation</button>
+  </div>
+}
+
 function VideoEndpointStrip({ shot, candidates, busy, error, onChange, onView, onCreateLastFrame }: {
   shot: ShotSummary
   candidates: CandidateVersionSummary[]
@@ -991,6 +1028,9 @@ function VideoEndpointStrip({ shot, candidates, busy, error, onChange, onView, o
   onCreateLastFrame: () => void
 }) {
   const imageCandidates = candidates.filter(candidate => candidate.assetId && candidate.assetUrl && candidate.stage !== 'Video')
+  // Video starts from a picture. Until the shot has one, start and end frame
+  // pickers are only empty controls in the way of making that first image.
+  if (imageCandidates.length === 0) return null
   const defaultStart = imageCandidates.find(candidate => candidate.isCurrent) ?? imageCandidates.find(candidate => candidate.approval === 'Ratified')
   const start = imageCandidates.find(candidate => candidate.id === shot.videoFirstFrameCandidateId) ?? defaultStart
   const last = imageCandidates.find(candidate => candidate.id === shot.videoLastFrameCandidateId)
@@ -1234,7 +1274,7 @@ function FeedbackRegenerationDialog({ shot, comments, references, initialDirecti
         : storyboardGuideId
           ? 'STORYBOARD COMPOSITION GUIDE: Use the attached clean storyboard frame as the binding layout. Preserve its subject count, full-body scale, left-to-right placement, camera, horizon, and negative space. Replace every simplified figure and shape with finished artwork; do not crop into a portrait or preserve guide geometry.'
           : 'FEEDBACK-GUIDED DRAFT: This revision has no stored source image or storyboard layout. Generate a new frame from the shot intent, approved authorities, locked constraints, and feedback below.'
-      let brief = `${shot.description.slice(0, 800)}\nCamera: ${shot.camera.slice(0, 300)}.\nAction: ${shot.action.slice(0, 800)}.\n\nREQUESTED CHANGE: ${direction.trim().slice(0, 2500)}\n\n${sourceContract}`
+      let brief = `${shot.description.slice(0, 800)}${shot.camera.trim() ? `\nCamera: ${shot.camera.slice(0, 300)}.` : ''}${shot.action.trim() ? `\nAction: ${shot.action.slice(0, 800)}.` : ''}\n\nREQUESTED CHANGE: ${direction.trim().slice(0, 2500)}\n\n${sourceContract}`
       if (pinned) brief += `\n\nPINNED FEEDBACK ON THIS REVISION:\n${pinned}`
       if (guidanceAssetId) brief += '\n\nFRAME EDIT GUIDE: The attached current frame contains temporary gold markup. Use it only to locate edits, then remove every trace of the markup.'
       const prepared = await studioApi.prepareManifest(shot.id, { expectedShotVersion: shot.version, expectedSketchRevision: sketchRevision, route, purpose: outputPurpose, compositionAssetId: sourceAssetId, creativeBriefOverride: brief, markupRevision: guidanceAssetId ? markupGuide?.revision : undefined, allowSketchCompositionFallback: false })
