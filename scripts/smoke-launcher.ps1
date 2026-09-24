@@ -35,6 +35,21 @@ try {
     $env:FRAMEWRIGHT_LAUNCHER_NO_BROWSER = '1'
     $env:FRAMEWRIGHT_LAUNCHER_NO_DIALOG = '1'
 
+    # --stop must spare a process the state file names but this folder did not
+    # start: a reused process id, or anything that is not its Framewright.exe.
+    New-Item -ItemType Directory -Path (Join-Path $root 'voice\state') -Force | Out-Null
+    $bystander = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList '-NoProfile', '-Command', 'Start-Sleep 60' -PassThru -WindowStyle Hidden
+    try {
+        $forged = [ordered]@{ schemaVersion = 1; pid = $bystander.Id; processStartTimeUtc = $bystander.StartTime.ToUniversalTime().ToString('O'); executable = (Join-Path $artifact 'Framewright.exe'); url = $url }
+        [IO.File]::WriteAllText((Join-Path $root 'voice\state\framewright.pid'), ($forged | ConvertTo-Json))
+        $spare = Start-Process -FilePath $launcher -ArgumentList '--stop' -PassThru -WindowStyle Hidden
+        if (-not $spare.WaitForExit(30000) -or $spare.ExitCode -ne 0) { throw 'Stopping with a foreign state file should be a quiet no-op.' }
+        $bystander.Refresh()
+        if ($bystander.HasExited) { throw '--stop killed a process that was not the studio from this folder.' }
+    }
+    finally { if (-not $bystander.HasExited) { Stop-Process -Id $bystander.Id -Force } }
+    Remove-Item -LiteralPath (Join-Path $root 'voice\state\framewright.pid') -Force
+
     # Wait on the launcher alone: Start-Process -Wait also waits for the studio
     # the launcher leaves running, which is the whole point of the launcher.
     $first = Start-Process -FilePath $launcher -PassThru -WindowStyle Hidden
@@ -59,7 +74,7 @@ try {
     $stop = Start-Process -FilePath $launcher -ArgumentList '--stop' -PassThru -WindowStyle Hidden
     if (-not $stop.WaitForExit(30000) -or $stop.ExitCode -ne 0) { throw 'Stopping the studio through the launcher failed.' }
     if (-not $studio.WaitForExit(5000)) { throw 'The launcher reported a stop but the studio is still running.' }
-    if (Test-Path -LiteralPath (Join-Path $root 'voice\stateramewright.pid')) { throw 'A stopped studio left its state file behind.' }
+    if (Test-Path -LiteralPath (Join-Path $root 'voice\state\framewright.pid')) { throw 'A stopped studio left its state file behind.' }
     $again = Start-Process -FilePath $launcher -ArgumentList '--stop' -PassThru -WindowStyle Hidden
     if (-not $again.WaitForExit(30000) -or $again.ExitCode -ne 0) { throw 'Stopping an already stopped studio should be a quiet no-op.' }
     Write-Host "Launcher smoke passed: hidden start, health, state file, logging, a second launch reusing the running studio, and --stop ($url)."

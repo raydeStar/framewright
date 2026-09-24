@@ -125,6 +125,11 @@ try {
         Assert-NativeSuccess 'Windows package smoke'
         & (Join-Path $PSScriptRoot 'smoke-installer.ps1') -ArtifactPath $packagePath
         Assert-NativeSuccess 'Windows installer rollback smoke'
+        # The download itself: zipped, extracted elsewhere, launched and stopped.
+        & (Join-Path $PSScriptRoot 'package-zip.ps1') -ArtifactPath $packagePath
+        Assert-NativeSuccess 'Portable zip and launcher smoke'
+        $zipPath = Join-Path $repoRoot "artifactsramewright-$Version-win-x64.zip"
+        Copy-Item -LiteralPath $zipPath, "$zipPath.sha256" -Destination $artifactRoot
     }
 
     $env:FRAMEWRIGHT_VERSION = $Version
@@ -191,6 +196,7 @@ try {
             completeAutomatedGate = if ($SkipAutomatedVerification) { 'Skipped by operator' } else { 'Passed' }
             windowsPackageSmoke = if ($SkipWindowsPackage) { 'Skipped by operator' } else { 'Passed' }
             installerRollbackSmoke = if ($SkipWindowsPackage) { 'Skipped by operator' } else { 'Passed' }
+            portableZipLauncherSmoke = if ($SkipWindowsPackage) { 'Skipped by operator' } else { 'Passed' }
         }
         qaBlockers = $qaBlockers
         policy = [ordered]@{ providerJobsSubmitted = $false; comfyUiQueueVerifiedEmpty = $comfyQueueVerifiedEmpty; comfyUiQueueModified = $false; gitTagCreated = $false }
