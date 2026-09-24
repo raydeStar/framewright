@@ -393,7 +393,7 @@ public sealed class StudioRepository(
         if (request.ImageAssetId is not null)
         {
             asset = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ImageAssetId && x.Kind == AssetKind.Image.ToString(), cancellationToken);
-            if (asset is null) return RepositoryResult<ReferenceSummary>.Invalid("The authority image is not a valid project image asset.");
+            if (asset is null) return RepositoryResult<ReferenceSummary>.Invalid("The reference image is not a valid project image asset.");
         }
         var idBase = Slug(request.Name);
         var id = idBase;
@@ -401,7 +401,7 @@ public sealed class StudioRepository(
         while (await db.References.AnyAsync(x => x.Id == id, cancellationToken)) id = $"{idBase}-{suffix++}";
         if (await db.References.AnyAsync(x => x.Name == request.Name.Trim(), cancellationToken))
         {
-            return RepositoryResult<ReferenceSummary>.Conflict("An authority with this name already exists.");
+            return RepositoryResult<ReferenceSummary>.Conflict("A reference with this name already exists.");
         }
 
         var now = timeProvider.GetUtcNow();
@@ -442,14 +442,14 @@ public sealed class StudioRepository(
     {
         var reference = await db.References.SingleOrDefaultAsync(x => x.Id == referenceId, cancellationToken);
         if (reference is null) return RepositoryResult<ReferenceSummary>.NotFound();
-        if (reference.CurrentVersion != request.ExpectedVersion) return RepositoryResult<ReferenceSummary>.Conflict($"The authority changed from version {request.ExpectedVersion} to {reference.CurrentVersion}. Refresh before creating a version.");
+        if (reference.CurrentVersion != request.ExpectedVersion) return RepositoryResult<ReferenceSummary>.Conflict($"The reference changed from version {request.ExpectedVersion} to {reference.CurrentVersion}. Refresh before creating a version.");
         var validation = ValidateReference(reference.Name, reference.Category, request.Description, request.LockedConstraint, reference.Accent);
         if (validation is not null) return RepositoryResult<ReferenceSummary>.Invalid(validation);
         AssetRecord? asset = null;
         if (request.ImageAssetId is not null)
         {
             asset = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ImageAssetId && x.Kind == AssetKind.Image.ToString(), cancellationToken);
-            if (asset is null) return RepositoryResult<ReferenceSummary>.Invalid("The authority image is not a valid project image asset.");
+            if (asset is null) return RepositoryResult<ReferenceSummary>.Invalid("The reference image is not a valid project image asset.");
         }
         var now = timeProvider.GetUtcNow();
         var next = reference.LastIssuedVersion + 1;
@@ -528,7 +528,7 @@ public sealed class StudioRepository(
         var versions = await db.ReferenceVersions.Where(x => x.ReferenceId == referenceId).OrderBy(x => x.Version).ToListAsync(cancellationToken);
         var target = versions.SingleOrDefault(x => x.Version == version);
         if (target is null) return RepositoryResult<ReferenceSummary>.NotFound();
-        if (versions.Count == 1) return RepositoryResult<ReferenceSummary>.Conflict("An authority must keep at least one version. Delete the authority instead.");
+        if (versions.Count == 1) return RepositoryResult<ReferenceSummary>.Conflict("A reference must keep at least one version. Delete the reference instead.");
 
         var citedBy = await CitingManifestsAsync(referenceId, version, cancellationToken);
         if (citedBy.Length > 0)
@@ -566,7 +566,7 @@ public sealed class StudioRepository(
         var validation = ValidateReference(request.Name, request.Category, head.Description, head.LockedConstraint, request.Accent);
         if (validation is not null) return RepositoryResult<ReferenceSummary>.Invalid(validation);
         if (await db.References.AnyAsync(x => x.Id != referenceId && x.Name == request.Name.Trim(), cancellationToken))
-            return RepositoryResult<ReferenceSummary>.Conflict("Another authority already uses this name.");
+            return RepositoryResult<ReferenceSummary>.Conflict("Another reference already uses this name.");
 
         reference.Name = request.Name.Trim();
         reference.Category = NormalizeCategory(request.Category);
@@ -997,7 +997,7 @@ public sealed class StudioRepository(
                 .ToListAsync(cancellationToken);
             var missingReferenceIds = objectReferenceIds.Except(validReferenceIds, StringComparer.OrdinalIgnoreCase).ToArray();
             if (missingReferenceIds.Length > 0)
-                return RepositoryResult<SketchDocumentSummary>.Invalid($"Blocking objects reference unavailable authorities: {string.Join(", ", missingReferenceIds)}.");
+                return RepositoryResult<SketchDocumentSummary>.Invalid($"Blocking objects use unavailable references: {string.Join(", ", missingReferenceIds)}.");
         }
         if (request.UnderlayAssetId is not null && !await db.Assets.AsNoTracking().AnyAsync(x => x.Id == request.UnderlayAssetId && x.Kind == AssetKind.Image.ToString(), cancellationToken))
         {
@@ -1192,7 +1192,7 @@ public sealed class StudioRepository(
         if (candidate is null) return RepositoryResult<bool>.NotFound();
         if (candidate.IsCurrent) return RepositoryResult<bool>.Conflict("The live candidate cannot be deleted. Generate or select a different one first.");
         if (string.Equals(candidate.Approval, ApprovalState.Ratified.ToString(), StringComparison.Ordinal))
-            return RepositoryResult<bool>.Conflict("A ratified version is permanent evidence and cannot be deleted.");
+            return RepositoryResult<bool>.Conflict("An approved version is permanent evidence and cannot be deleted.");
         var endpointOwner = await db.Shots.AsNoTracking().SingleOrDefaultAsync(x => x.Id == shotId, cancellationToken);
         if (endpointOwner?.VideoFirstFrameCandidateId == candidate.Id || endpointOwner?.VideoLastFrameCandidateId == candidate.Id)
             return RepositoryResult<bool>.Conflict("This revision is a selected video endpoint. Choose a different Start or Last Frame before deleting it.");
@@ -1359,7 +1359,7 @@ public sealed class StudioRepository(
         var referenceById = referenceRecords.ToDictionary(reference => reference.Id, StringComparer.OrdinalIgnoreCase);
         var missingReferences = referenceIds.Where(id => !referenceById.ContainsKey(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (missingReferences.Length > 0)
-            return RepositoryResult<GenerationManifestSummary>.Conflict($"The authority packet is incomplete: {string.Join(", ", missingReferences)}.");
+            return RepositoryResult<GenerationManifestSummary>.Conflict($"The shot's references are incomplete: {string.Join(", ", missingReferences)}.");
         var sketchContent = sketch is null
             ? new SketchContent([], [], [])
             : NormalizeSketch(JsonSerializer.Deserialize<SketchContent>(sketch.ContentJson, CanonicalJson) ?? new SketchContent([], [], []));
@@ -1410,7 +1410,7 @@ public sealed class StudioRepository(
             .Where(asset => authorityImageIds.Contains(asset.Id) && asset.Kind == AssetKind.Image.ToString())
             .ToDictionaryAsync(asset => asset.Id, cancellationToken);
         if (authorityImageAssets.Count != authorityImageIds.Length)
-            return RepositoryResult<GenerationManifestSummary>.Conflict("The authority packet contains an unavailable image asset.");
+            return RepositoryResult<GenerationManifestSummary>.Conflict("The shot's references include an unavailable image asset.");
         var frozenAuthorityInputs = selectedAuthorityVersions.Select(item => new FrozenGenerationAuthorityInput(
             item.Authority.Id,
             item.Authority.Version,
@@ -1565,7 +1565,7 @@ public sealed class StudioRepository(
         var referenceIds = JsonSerializer.Deserialize<string[]>(shot.ReferenceIdsJson) ?? [];
         var referenceRecords = await db.References.AsNoTracking().Where(x => referenceIds.Contains(x.Id)).ToListAsync(cancellationToken);
         var authorities = referenceRecords.Select(reference => new AuthorityBinding(reference.Id, reference.Name, reference.Category, reference.CurrentVersion)).ToArray();
-        if (authorities.Length != referenceIds.Length) return RepositoryResult<GenerationManifestSummary>.Conflict("The authority packet is incomplete.");
+        if (authorities.Length != referenceIds.Length) return RepositoryResult<GenerationManifestSummary>.Conflict("The shot's references are incomplete.");
         var authorityVersions = await db.ReferenceVersions.AsNoTracking()
             .Where(version => referenceIds.Contains(version.ReferenceId))
             .ToListAsync(cancellationToken);
@@ -1583,7 +1583,7 @@ public sealed class StudioRepository(
             .Where(asset => authorityImageIds.Contains(asset.Id) && asset.Kind == AssetKind.Image.ToString())
             .ToDictionaryAsync(asset => asset.Id, cancellationToken);
         if (authorityImageAssets.Count != authorityImageIds.Length)
-            return RepositoryResult<GenerationManifestSummary>.Conflict("The authority packet contains an unavailable image asset.");
+            return RepositoryResult<GenerationManifestSummary>.Conflict("The shot's references include an unavailable image asset.");
         var frozenAuthorityInputs = selectedAuthorityVersions.Select(item => new FrozenGenerationAuthorityInput(
             item.Authority.Id,
             item.Authority.Version,
@@ -1658,7 +1658,7 @@ public sealed class StudioRepository(
                     binding.Version == reference.CurrentVersion &&
                     string.Equals(binding.Name, reference.Name, StringComparison.Ordinal) &&
                     string.Equals(binding.Category, reference.Category, StringComparison.Ordinal))))
-            return RepositoryResult<GenerationManifestSummary>.Conflict("The shot's approved authority set changed. Generate a fresh review take before promoting to Max.");
+            return RepositoryResult<GenerationManifestSummary>.Conflict("The shot's approved reference set changed. Generate a fresh review take before promoting to Max.");
         var currentConstraints = JsonSerializer.Deserialize<string[]>(shot.ConstraintsJson) ?? [];
         if (!frozenConstraints.SequenceEqual(currentConstraints, StringComparer.Ordinal))
             return RepositoryResult<GenerationManifestSummary>.Conflict("The shot constraints changed. Generate a fresh review take before promoting to Max.");

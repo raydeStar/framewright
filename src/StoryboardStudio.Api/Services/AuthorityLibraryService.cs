@@ -104,12 +104,12 @@ public sealed class AuthorityLibraryService(
         var authority = await db.LibraryAuthorities.AsNoTracking().SingleOrDefaultAsync(x => x.Id == libraryId, cancellationToken);
         if (authority is null) return RepositoryResult<ReferenceSummary>.NotFound();
         var head = await HeadVersionAsync(libraryId, cancellationToken);
-        if (head is null) return RepositoryResult<ReferenceSummary>.Conflict("This library authority has no versions to import.");
+        if (head is null) return RepositoryResult<ReferenceSummary>.Conflict("This library reference has no versions to import.");
 
         if (await db.References.AnyAsync(x => x.OriginLibraryId == libraryId, cancellationToken))
             return RepositoryResult<ReferenceSummary>.Conflict($"{authority.Name} is already imported into this project. Pull the latest version instead.");
         if (await db.References.AnyAsync(x => x.Name == authority.Name, cancellationToken))
-            return RepositoryResult<ReferenceSummary>.Conflict($"This project already has an unrelated authority named {authority.Name}. Rename it before importing.");
+            return RepositoryResult<ReferenceSummary>.Conflict($"This project already has an unrelated reference named {authority.Name}. Rename it before importing.");
 
         var now = timeProvider.GetUtcNow();
         var imageAssetId = await MaterialiseImageAsync(head, cancellationToken);
@@ -172,9 +172,9 @@ public sealed class AuthorityLibraryService(
             .Where(x => x.ReferenceId == referenceId)
             .OrderByDescending(x => x.Version)
             .FirstOrDefaultAsync(cancellationToken);
-        if (head is null) return RepositoryResult<LibraryAuthoritySummary>.Conflict("This authority has no versions to promote.");
+        if (head is null) return RepositoryResult<LibraryAuthoritySummary>.Conflict("This reference has no versions to promote.");
         if (!AllowedCategories.Contains(reference.Category) || !HexColor.IsMatch(reference.Accent))
-            return RepositoryResult<LibraryAuthoritySummary>.Invalid("Fix this authority's category and accent before promoting it.");
+            return RepositoryResult<LibraryAuthoritySummary>.Invalid("Fix this reference's category and accent before promoting it.");
 
         var now = timeProvider.GetUtcNow();
         var descriptor = head.ImageAssetId is null ? null : await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == head.ImageAssetId, cancellationToken);
@@ -185,7 +185,7 @@ public sealed class AuthorityLibraryService(
         if (authority is null)
         {
             if (await db.LibraryAuthorities.AnyAsync(x => x.Name == reference.Name, cancellationToken))
-                return RepositoryResult<LibraryAuthoritySummary>.Conflict($"The library already holds an authority named {reference.Name}. Import it instead, or rename this one.");
+                return RepositoryResult<LibraryAuthoritySummary>.Conflict($"The library already holds a reference named {reference.Name}. Import it instead, or rename this one.");
             authority = new LibraryAuthorityRecord
             {
                 Id = Guid.NewGuid(),
@@ -253,9 +253,9 @@ public sealed class AuthorityLibraryService(
         var reference = await db.References.SingleOrDefaultAsync(x => x.Id == referenceId, cancellationToken);
         if (reference is null) return RepositoryResult<ReferenceSummary>.NotFound();
         if (reference.OriginLibraryId is not Guid libraryId)
-            return RepositoryResult<ReferenceSummary>.Conflict("This authority was created in this project and has no library origin to pull from.");
+            return RepositoryResult<ReferenceSummary>.Conflict("This reference was created in this project and has no library origin to pull from.");
         var head = await HeadVersionAsync(libraryId, cancellationToken);
-        if (head is null) return RepositoryResult<ReferenceSummary>.Conflict("The library authority no longer has any versions.");
+        if (head is null) return RepositoryResult<ReferenceSummary>.Conflict("The library reference no longer has any versions.");
         if (reference.OriginVersion is int held && held >= head.Version)
             return RepositoryResult<ReferenceSummary>.Conflict($"This project already holds library version {head.Version}.");
 

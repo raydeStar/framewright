@@ -188,7 +188,7 @@ public sealed class AuthorityLibraryTests
         await CreateAuthorityAsync(client, "Hull Plate", "An unrelated authority that happens to share the name.");
         var refused = await client.PostAsync($"/api/library/{libraryId}/import", null);
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
-        Assert.Contains("unrelated authority named Hull Plate", await refused.Content.ReadAsStringAsync());
+        Assert.Contains("unrelated reference named Hull Plate", await refused.Content.ReadAsStringAsync());
     }
 
     [Fact]

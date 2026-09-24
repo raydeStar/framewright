@@ -49,9 +49,9 @@ public sealed class TimelineService(StudioDbContext db, TimeProvider timeProvide
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 120) return RepositoryResult<VoiceProfileSummary>.Invalid("Voice profile name must contain 1 to 120 characters.");
         if (string.IsNullOrWhiteSpace(request.Provider) || request.Provider.Trim().Length > 120 || string.IsNullOrWhiteSpace(request.ProviderVoiceId) || request.ProviderVoiceId.Trim().Length > 240) return RepositoryResult<VoiceProfileSummary>.Invalid("Provider and provider voice id are required.");
-        if (string.IsNullOrWhiteSpace(request.CharacterReferenceId)) return RepositoryResult<VoiceProfileSummary>.Invalid("Choose the approved character authority this voice belongs to.");
+        if (string.IsNullOrWhiteSpace(request.CharacterReferenceId)) return RepositoryResult<VoiceProfileSummary>.Invalid("Choose the approved character reference this voice belongs to.");
         var character = await db.References.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.CharacterReferenceId && x.Category == "Character", cancellationToken);
-        if (character is null) return RepositoryResult<VoiceProfileSummary>.Invalid("Voice profiles must cite an existing Character authority.");
+        if (character is null) return RepositoryResult<VoiceProfileSummary>.Invalid("Voice profiles must cite an existing Character reference.");
         if (request.SampleAssetId is null || !await db.Assets.AsNoTracking().AnyAsync(x => x.Id == request.SampleAssetId && x.Kind == AssetKind.Audio.ToString() && !x.IsArchived, cancellationToken))
             return RepositoryResult<VoiceProfileSummary>.Invalid("Voice profiles require a playable, non-archived audio sample.");
         if (request.Kind == VoiceProfileKind.ConsentedClone && (!request.ConsentConfirmed || string.IsNullOrWhiteSpace(request.ConsentAttestation) || request.ConsentAttestation.Trim().Length is < 20 or > 2_000))

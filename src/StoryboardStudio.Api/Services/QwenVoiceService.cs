@@ -116,7 +116,7 @@ public sealed partial class QwenVoiceService(
     {
         var status = Status();
         if (!status.Ready) return RepositoryResult<VoiceSynthesisResult>.Invalid(status.Detail);
-        if (profile.SampleAssetId is null) return RepositoryResult<VoiceSynthesisResult>.Invalid("The Qwen voice profile has no approved authority sample.");
+        if (profile.SampleAssetId is null) return RepositoryResult<VoiceSynthesisResult>.Invalid("The Qwen voice profile has no approved reference sample.");
         var sample = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == profile.SampleAssetId && x.Kind == AssetKind.Audio.ToString() && !x.IsArchived, cancellationToken);
         if (sample is null) return RepositoryResult<VoiceSynthesisResult>.Invalid("The approved Qwen voice sample is unavailable.");
         var referenceText = DecodeVoiceIdentity(profile.ProviderVoiceId) ?? LegacyCalibration(profile.CharacterName);
