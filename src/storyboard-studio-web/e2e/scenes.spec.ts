@@ -869,6 +869,66 @@ test('two characters share one clip with their own settings, and a door swings o
   verifyConsole()
 })
 
+test('a scene still waits for the clips it plays, so it never shows a rest pose', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  const characterName = `still-figure-${label}`
+  const clipName = `still-clip-${label}`
+
+  await page.goto('/')
+  const targetShot = (await (await page.request.get('/api/studio')).json()).shots[0]
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: `${characterName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(figure, `still-figure-${label}`) },
+    { name: `${clipName}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(clip, `still-clip-${label}`) },
+  ])
+  await expect(page.getByText('2 assets imported into the library.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  await page.getByTestId('scene-objects').getByLabel('Add model to scene').selectOption({ label: characterName })
+  const motion = page.getByTestId('scene-motion')
+  await motion.getByLabel('Clip source').selectOption({ label: clipName })
+  await motion.getByLabel('Clip', { exact: true }).selectOption('Arm raise')
+  await expect(page.getByTestId('scene-clip')).toContainText('Arm raise')
+  const saved = page.waitForResponse(response => response.request().method() === 'PUT' && /\/api\/scenes\/[^/]+$/.test(new URL(response.url()).pathname) && response.ok())
+  await page.getByTestId('scene-save').click()
+  const sceneId = (await (await saved).json()).id as string
+
+  // Reopen the studio with the clip's file held back, as a slow disk or a
+  // large clip would. A still taken now would show the rig in its rest pose.
+  const assets = await (await page.request.get('/api/assets')).json() as Array<{ id: string; displayName: string }>
+  const clipAsset = assets.find(asset => asset.displayName === clipName)!
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  let clipServed = false
+  await page.route(`**/api/assets/${clipAsset.id}/content`, async route => { await held; clipServed = true; await route.continue() })
+  const stills: string[] = []
+  page.on('request', request => {
+    if (request.method() === 'POST' && /\/api\/scenes\/[^/]+\/shot-stills$/.test(new URL(request.url()).pathname))
+      stills.push(clipServed ? 'after the clip' : 'before the clip')
+  })
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  const picker = page.getByLabel('Open scene')
+  if (await picker.count()) await picker.selectOption(sceneId)
+  await expect(page.getByTestId('scene-stage')).toHaveAttribute('data-objects', '1')
+
+  const shotSetup = page.getByTestId('scene-shot')
+  await shotSetup.getByLabel('Scene shot').selectOption(targetShot.id)
+  await shotSetup.getByLabel('Shot still time').fill('1')
+  await shotSetup.getByRole('button', { name: 'Render still for review' }).click()
+  await page.waitForTimeout(1500)
+  expect(stills).toEqual([])
+
+  release()
+  await expect(page.getByTestId('review-workspace')).toBeVisible()
+  expect(stills).toEqual(['after the clip'])
+  await page.unroute(`**/api/assets/${clipAsset.id}/content`)
+  verifyConsole()
+})
+
 test('a clip for another skeleton is refused before anything plays', async ({ page }, testInfo) => {
   const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/, /400 \(Bad Request\)/])
   const label = testInfo.project.name

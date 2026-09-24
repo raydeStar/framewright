@@ -89,6 +89,7 @@ export default function SceneViewport({ instances, camera, environment, selected
     // One load per clip file, and one mixer per object, so two objects playing
     // the same clip keep their own time, speed, and loop.
     const clipFiles = new Map<string, AnimationClip[]>()
+    const clipLoads = new Map<string, Promise<void>>()
     const players = new Map<string, { mixer: AnimationMixer; action: AnimationAction; key: string }>()
 
     renderer.outputColorSpace = SRGBColorSpace
@@ -458,6 +459,8 @@ export default function SceneViewport({ instances, camera, environment, selected
       const maxTexture = renderer.capabilities.maxTextureSize
       if (request.width > maxTexture || request.height > maxTexture)
         throw new Error(`This graphics device supports stills up to ${maxTexture} pixels on either side.`)
+      await clipsReady(currentInstances)
+      if (disposed) throw new Error('The scene closed before it could be rendered.')
 
       const originalView = { ...view.current, target: [...view.current.target] }
       const originalRatio = renderer.getPixelRatio()
@@ -496,13 +499,30 @@ export default function SceneViewport({ instances, camera, environment, selected
         const binding = instance.clip
         if (!binding || clipFiles.has(binding.clipAssetId)) continue
         clipFiles.set(binding.clipAssetId, [])
-        new GLTFLoader().load(`/api/assets/${binding.clipAssetId}/content`, gltf => {
-          if (disposed) return
+        const loading = new Promise<void>((resolve, reject) => new GLTFLoader().load(`/api/assets/${binding.clipAssetId}/content`, gltf => {
+          if (disposed) { resolve(); return }
           clipFiles.set(binding.clipAssetId, gltf.animations)
           release(gltf.scene)
           animate(currentInstances, latestPlayhead.current)
-        }, undefined, () => { if (!disposed) clipFiles.delete(binding.clipAssetId) })
+          resolve()
+        }, undefined, error => {
+          if (!disposed) { clipFiles.delete(binding.clipAssetId); clipLoads.delete(binding.clipAssetId) }
+          reject(error)
+        }))
+        loading.catch(() => undefined)
+        clipLoads.set(binding.clipAssetId, loading)
       }
+    }
+
+    // A still or a take frame is only true to the scene once every clip it
+    // plays has arrived; until then the rig would be drawn in its rest pose.
+    const clipsReady = async (next: SceneInstanceSummary[]) => {
+      loadClips(next)
+      const bound = next.filter(instance => instance.clip)
+      try { await Promise.all(bound.map(instance => clipLoads.get(instance.clip!.clipAssetId))) }
+      catch { throw new Error('A clip this scene plays could not be loaded, so the render would show the wrong pose. Render again.') }
+      const missing = bound.find(instance => !clipFiles.get(instance.clip!.clipAssetId)?.some(clip => clip.name === instance.clip!.clipName))
+      if (missing) throw new Error(`${missing.name}'s clip ${missing.clip!.clipName} is not in its file, so the render would show the wrong pose.`)
     }
 
     // Pull every placed object into view. Without this an object parked away
