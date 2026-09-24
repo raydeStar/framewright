@@ -1,5 +1,37 @@
 # Framewright implementation handoff
 
+## Portable package and double-click launcher (2026-09-24)
+
+- `src/Framewright.Launcher` publishes **Framewright Studio.exe**, a trimmed
+  single-file WinExe that sits beside `Framewright.exe`. If the studio is
+  already live it opens the browser. Otherwise it starts `Framewright.exe`
+  hidden through `CreateProcessW`, sends output to the usual logs under
+  `%LOCALAPPDATA%\FramewrightVoice\state`, and writes the same `framewright.pid`
+  state file `start-installed.ps1` writes. It then waits up to 90 s and opens
+  the browser, or shows a dialog with the error log's tail.
+  - Only the studio's three log handles are inherited (a
+    `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), so a script that reads the launcher's
+    output does not wait on the studio.
+  - `--stop` stops only the recorded process, and only while it is still the
+    `Framewright.exe` beside the launcher with the recorded start time.
+  - Settings: `FRAMEWRIGHT_PORT` or `--port`, `FRAMEWRIGHT_LAUNCHER_NO_BROWSER`
+    or `--no-browser`, and `FRAMEWRIGHT_LAUNCHER_NO_DIALOG`.
+- The installer's Start Menu **Framewright** shortcut now opens the launcher
+  directly, and **Stop Framewright** runs it with `--stop`. The PowerShell
+  launcher remains only as **Framewright (with local voice)**, because the
+  voice worker still needs it.
+- `publish-local.ps1` publishes both executables and writes `version.json`. It
+  refuses to package `appsettings.Local.json`, which the Web SDK used to copy
+  into every package.
+- `package-zip.ps1` wraps a published package into
+  `artifacts/framewright-<version>-win-x64.zip`: one `Framewright` folder with
+  `READ ME FIRST.txt` and `Stop Framewright.cmd`. It refuses data, settings and
+  key files, then extracts the zip elsewhere and runs `smoke-launcher.ps1`
+  against the copy. `prepare-release-candidate.ps1` runs it and keeps the zip
+  with the candidate evidence.
+- Portable data lives in `App_Data` beside the exe, which is the existing
+  default data root. Updating means extracting a newer zip over the folder.
+
 ## First-run creation and in-app generation setup (2026-09-23)
 
 The MVP release goal ([goals/mvp-release.md](goals/mvp-release.md)) made the

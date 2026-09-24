@@ -37,7 +37,7 @@ It is not another prompt box and it is not a ComfyUI graph editor. The artist de
 
 > **Current scope:** Framewright is pre-release software for a trusted local Windows workstation, working towards its first release ([MVP goal](docs/goals/mvp-release.md)). Its application, packaging, recovery and browser contracts are tested automatically. The mandatory live-provider and human acceptance checks for `v0.1.0` are not yet recorded; see [release evidence](docs/RELEASE_EVIDENCE.md) for the ledger.
 
-Docker is the canonical `v0.1.0` workstation runtime. The direct-key OpenAI lane, YuE2 composition/rendering, and paired-tablet review remain clearly marked preview capabilities; the mandatory release path is local ComfyUI and Codex image work through H3 video, two local voices, assembly, recovery, and production export.
+The `v0.1.0` release ships as a portable Windows zip (below); Docker remains the managed runtime for a source checkout. The release covers shots and review, ComfyUI and Codex image work through H3 video, the 3D path (a generated prop, a rigged humanoid, a scene, and an animated take), two local voices, assembly, recovery, and production export. The direct-key OpenAI lane, YuE2 composition/rendering, and paired-tablet review remain clearly marked preview capabilities.
 
 ## From sketch to video
 
@@ -107,6 +107,16 @@ ComfyUI integration is deliberately model-agnostic at the product boundary. Fram
 Provider credentials never persist in browser storage. Codex authentication and OpenAI API authentication are intentionally separate: a ChatGPT/Codex login is not an API bearer token, while the optional direct OpenAI lane requires its own project key.
 
 ## Quick start
+
+### Download and run
+
+1. Download `framewright-<version>-win-x64.zip` from the [releases page](https://github.com/raydeStar/framewright/releases) and extract it anywhere.
+2. Double-click **Framewright Studio.exe** in the extracted `Framewright` folder. The studio opens in your browser at [http://127.0.0.1:5179](http://127.0.0.1:5179), reachable only from this computer. This pre-release build is not code-signed, so Windows may ask you to confirm the first time ("More info", then "Run anyway").
+3. Explore the sample project, or create your own from the project menu. To generate images or video, open **Production setup → Image and video generation** and connect ComfyUI or Codex; nothing is sent anywhere until you turn it on there.
+
+Double-click **Stop Framewright.cmd** to stop the studio. Your work lives in the `App_Data` folder beside it; to update, stop the studio and extract a newer zip over the same folder. `READ ME FIRST.txt` in the zip says the same. Video export uses FFmpeg and FFprobe on your `PATH`; 3D generation and rigging use a separately installed [Reference Asset Compiler](docs/REFERENCE_ASSET_COMPILER.md); local voice and music need their own workers (below).
+
+From a source checkout, `.\scripts\install-local.ps1 -PublishPath <extracted folder>` installs the same package under `%LOCALAPPDATA%\Framewright` with Start Menu shortcuts (Framewright, Stop Framewright, and Framewright with local voice) and atomic updates that keep your work.
 
 ### Guided setup with Codex
 
@@ -230,6 +240,8 @@ For packaging and rollback proofs:
 .\scripts\publish-local.ps1
 .\scripts\smoke-package.ps1
 .\scripts\smoke-installer.ps1
+.\scripts\smoke-launcher.ps1
+.\scripts\package-zip.ps1     # the portable zip, smoke-tested from its extracted copy
 .\scripts\smoke-docker-persistence.ps1
 ```
 
