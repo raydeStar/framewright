@@ -169,6 +169,63 @@ public sealed class SceneMotionApiTests
         Assert.Empty(scene.RootElement.GetProperty("instances").EnumerateArray().ToArray());
     }
 
+    /// <summary>
+    /// Readiness is judged against the compiler's skeleton profiles when a clip
+    /// is bound. A studio without them (another workstation, an imported copy)
+    /// must still be able to save the scene, while a new binding stays refused.
+    /// </summary>
+    [Fact]
+    public async Task AScenePlayingAClipStillSavesWhereTheCompilerProfilesAreAbsent()
+    {
+        var dataRoot = Path.Combine(Path.GetTempPath(), "framewright-motion", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataRoot);
+        try
+        {
+            Guid sceneId, characterId, clipId, leadId = Guid.NewGuid(), benchId = Guid.NewGuid();
+            using (var factory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var client = factory.CreateClient())
+            {
+                characterId = await ImportAsync(client, ModelFixtures.RiggedFigure(), "rigged-figure.glb");
+                clipId = await ImportAsync(client, ModelFixtures.ClipArmRaise(), "clip-arm-raise.glb");
+                var benchAssetId = await ImportAsync(client, ModelFixtures.AsymmetricBlock(), "bench.glb");
+                sceneId = await CreateSceneAsync(client, "Bound here");
+                var bound = await SaveAsync(client, sceneId, 1, [
+                    Instance(leadId, characterId, "Lead", [0, 0, 0], Clip(clipId, "Arm raise", 0, 2, 1, 0, false)),
+                    Instance(benchId, benchAssetId, "Bench", [2, 0, 0], null),
+                ]);
+                Assert.Equal(HttpStatusCode.OK, bound.StatusCode);
+            }
+
+            using (var factory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            {
+                Directory.Delete(factory.SkeletonProfilePath, recursive: true);
+                using var client = factory.CreateClient();
+                using var profile = await client.GetFromJsonAsync<JsonDocument>($"/api/assets/{characterId}/model-profile") ?? throw new InvalidOperationException();
+                Assert.False(profile.RootElement.GetProperty("rig").GetProperty("animationReady").GetBoolean());
+                using var stored = await client.GetFromJsonAsync<JsonDocument>($"/api/scenes/{sceneId}") ?? throw new InvalidOperationException();
+                var benchAssetId = stored.RootElement.GetProperty("instances").EnumerateArray()
+                    .Single(instance => instance.GetProperty("name").GetString() == "Bench").GetProperty("assetId").GetGuid();
+
+                // Moving the bench keeps the clip it already had: the scene saves.
+                var moved = await SaveAsync(client, sceneId, 2, [
+                    Instance(leadId, characterId, "Lead", [0, 0, 0], Clip(clipId, "Arm raise", 0.5, 2, 1, 0.5, false)),
+                    Instance(benchId, benchAssetId, "Bench", [3, 0, 0], null),
+                ]);
+                Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
+
+                // A binding that is new here, or changed to another clip, still needs a ready rig.
+                await Refused(client, sceneId, Instance(Guid.NewGuid(), characterId, "Double", [1, 0, 0], Clip(clipId, "Arm raise", 0, 2, 1, 0, false)), 3);
+                await Refused(client, sceneId, Instance(leadId, characterId, "Lead", [0, 0, 0], Clip(clipId, "Step forward", 0, 2, 1, 0, false)), 3);
+                // Its trim is still checked against the clip's own file.
+                await Refused(client, sceneId, Instance(leadId, characterId, "Lead", [0, 0, 0], Clip(clipId, "Arm raise", 0, 5, 1, 0, false)), 3);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ARigidPartTurnsAboutItsDeclaredPivotAndAStaticPropDoesNotMove()
     {

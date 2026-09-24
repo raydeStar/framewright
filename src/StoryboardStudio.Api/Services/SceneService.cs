@@ -117,17 +117,25 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         if (models.Length != assetIds.Length)
             return RepositoryResult<SceneSummary>.Invalid("Every modelled scene instance must reference a model in this project.");
 
+        var existing = await db.SceneInstances.Where(x => x.SceneId == scene.Id).ToListAsync(cancellationToken);
+
         // A clip binding is checked against the clip's own file and against the
         // rig it would drive, before any of it is written. A mismatched skeleton
         // or an out-of-range trim is refused here rather than at playback.
         foreach (var instance in instances.Where(instance => instance.Clip is not null))
         {
-            if (await ValidateClipAsync(instance, cancellationToken) is { } clipError)
+            // Animation readiness is judged against the compiler's skeleton
+            // profiles when a clip is first bound to a model revision. Both are
+            // immutable, so a binding this scene already holds keeps that verdict:
+            // a studio without the compiler (another machine, an imported copy)
+            // can still save the scene rather than having it stranded.
+            var alreadyBound = existing.Any(record => record.Id == instance.Id && record.AssetId == instance.AssetId
+                && record.ClipAssetId == instance.Clip!.ClipAssetId && record.ClipName == instance.Clip.ClipName);
+            if (await ValidateClipAsync(instance, alreadyBound, cancellationToken) is { } clipError)
                 return RepositoryResult<SceneSummary>.Invalid(clipError);
         }
 
         var now = timeProvider.GetUtcNow();
-        var existing = await db.SceneInstances.Where(x => x.SceneId == scene.Id).ToListAsync(cancellationToken);
         var kept = new HashSet<Guid>();
         var order = 0;
         foreach (var instance in instances)
@@ -285,9 +293,10 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
     /// <summary>
     /// A clip may only be bound to an object whose rig it actually fits. The
     /// clip's own file is read for this, so a binding can never outlive the
-    /// skeleton it was checked against.
+    /// skeleton it was checked against. Readiness is asked only of a new
+    /// binding; the bone match and trim are checked on every save.
     /// </summary>
-    private async Task<string?> ValidateClipAsync(SaveSceneInstanceRequest instance, CancellationToken cancellationToken)
+    private async Task<string?> ValidateClipAsync(SaveSceneInstanceRequest instance, bool alreadyBound, CancellationToken cancellationToken)
     {
         var binding = instance.Clip!;
         if (instance.AssetId is not { } assetId)
@@ -305,7 +314,7 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         if (target is null) return "That object's model could not be read.";
         var rig = target.Value.Rig;
         if (!rig.HasSkeleton) return "That object has no skeleton, so it cannot play a clip.";
-        if (!rig.AnimationReady) return "That object's rig is not animation-ready, so it cannot play a clip.";
+        if (!rig.AnimationReady && !alreadyBound) return "That object's rig is not animation-ready, so it cannot play a clip.";
 
         // Every bone the clip moves has to exist on the rig it would drive.
         var bones = rig.Bones.Select(bone => bone.Name).ToHashSet(StringComparer.Ordinal);
