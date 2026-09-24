@@ -61,6 +61,9 @@ Assert-NativeSuccess 'launcher publish'
 if (Test-Path -LiteralPath (Join-Path $resolvedOutput 'App_Data')) {
     throw 'Publish unexpectedly included App_Data. Refusing to produce a package that could contain artist data.'
 }
+if (Test-Path -LiteralPath (Join-Path $resolvedOutput 'appsettings.Local.json')) {
+    throw 'Publish included this workstation''s appsettings.Local.json. Refusing to package local configuration.'
+}
 foreach ($required in @('Framewright.exe', 'Framewright Studio.exe')) {
     if (-not (Test-Path -LiteralPath (Join-Path $resolvedOutput $required))) {
         throw "Publish did not produce $required."

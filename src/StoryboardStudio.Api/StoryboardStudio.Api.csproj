@@ -31,6 +31,8 @@
   <ItemGroup>
     <Content Remove="App_Data\**" />
     <None Remove="App_Data\**" />
+    <!-- This workstation's ignored settings: read in place while developing, never packaged. -->
+    <Content Update="appsettings.Local.json" CopyToPublishDirectory="Never" />
     <Content Include="..\..\workflows\**" Link="workflows\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\tools\voice\qwen_voice_tool.py" Link="tools\voice\qwen_voice_tool.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\tools\voice\qwen_voice_worker.py" Link="tools\voice\qwen_voice_worker.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
