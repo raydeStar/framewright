@@ -214,7 +214,7 @@ export function AuthorityEditorDialog({ authority, onClose, onSaved }: {
         {authority && <section className="authority-history" aria-labelledby="authority-history-title"><div><h3 id="authority-history-title">Approved history</h3><small>Read-only reference versions · newest first</small></div>{historyLoading ? <p className="authority-history-loading"><LoaderCircle className="spin" size={15} />Loading immutable versions…</p> : versions.map(version => <article key={version.id} className={version.version === authority.version ? 'current' : ''}>{version.imageUrl ? <img src={version.imageUrl} alt={`${authority.name} version ${version.version}`} /> : <div className="authority-history-placeholder"><ImagePlus size={16} /></div>}<span><strong>v{version.version}{version.version === authority.version ? ' · Current' : ''}</strong><small>{new Date(version.ratifiedAt).toLocaleDateString()}</small><p>{version.description}</p><em><LockKeyhole size={11} />{version.lockedConstraint}</em></span></article>)}</section>}
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
-      <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? <LoaderCircle className="spin" /> : <BadgeCheck />}{busy ? 'Ratifying…' : authority ? 'Approve new version' : 'Create reference'}</button></footer>
+      <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? <LoaderCircle className="spin" /> : <BadgeCheck />}{busy ? 'Approving…' : authority ? 'Approve new version' : 'Create reference'}</button></footer>
     </form>
   </Dialog>
 }
