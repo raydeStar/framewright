@@ -570,8 +570,8 @@ Retained for provenance. Branch, environment, dependency, and next-action statem
 | M13 | VERIFIED | M13 acceptance record below |
 | M14 | VERIFIED | Live rig of the generated Ninja through `rac run-stage rig`; delegated acceptance 2026-09-23 (see the M14 acceptance record) |
 | M15 | VERIFIED | M15 acceptance record below |
-| M16 | CONTRACT_VERIFIED | Scene-to-shot/app persistence pass; human visual acceptance remains |
-| M17 | CONTRACT_VERIFIED | Exact-frame/restart/encode/promotion contract passes; M14 rig, actual rendered-frame/human, and packaged evidence remain |
+| M16 | VERIFIED | Live scene still of the rigged Ninja, approved by delegated pass 2026-09-23 (see the M16/M17 live record) |
+| M17 | CONTRACT_VERIFIED | Live take from the M14 rig encoded, decoded and approved 2026-09-23; only the packaged run (P) remains, carried by M18 |
 | M18 | NOT_STARTED | Portable import/export groundwork passes; full packaged/recovery scenario depends on all milestones |
 
 ### Delegated acceptance record - 2026-09-23
@@ -598,6 +598,39 @@ M11: human composition acceptance of the reviewed blockout is recorded as the
 M16 and M17: their human verdicts are also delegated, but both still need live
   evidence that has not been produced (a real-route scene still and an encoded
   take from the M14 rig). They advance only when that evidence exists.
+```
+
+### M16/M17 live record - 2026-09-23
+
+```text
+Milestones / status: M16 VERIFIED; M17 CONTRACT_VERIFIED, with its L and V evidence now recorded
+  and only P outstanding (the packaged run belongs to M18).
+Where: the artist's workstation, the real application (mvp-release at 0c07b00), in a new
+  disposable project "Workshop M17 acceptance 2026-09-24T02:53" (36758374). The artist's own
+  projects were not edited apart from reading two model files. Driven by a Playwright script:
+  the API for setup, the real page for both renders, because the still and the take are drawn
+  by the page's Three.js canvas.
+Scene: the M14-rigged Ninja (revision 4), the M09 sword derivative as a static prop with a
+  rigid pivot motion (pi radians over 2 s), and the innkeeper's held relaxed idle
+  (Innkeeper_Relaxed_Idle, ue5_manny) bound to the Ninja. The M15 binding check accepted it,
+  since every bone the clip moves exists on the rig. Shot SH-010, 48 frames at 24 fps, delivery
+  1280 x 720 Rec.709. The shot camera differs from the inspection camera (yaw 0.6), and the
+  still is at 1.0 s.
+M16 (L): Render still for review produced binding d84e6c09 (scene v2, snapshot 35fcfd4d...) and
+  shot version 2. Its delivery-sized PNG shows the textured Ninja in the held pose beside the sword.
+M16 (V): DELEGATED PASS, recorded by ratifying shot version 2 with the delegation in the reason.
+M17 (L): Render animated take ran job 395baece from the approved still. The page drew 48 exact
+  frames, and the service encoded them with FFmpeg (N-118380) and promoted the take to shot
+  version 3. ffprobe on the delivered file: h264 1280 x 720, 24/1, 48 decoded frames, 2.000 s,
+  bt709 matrix, transfer and primaries. Frames 0, 24 and 47 inspected: the arms are down in the
+  innkeeper's held pose, not the rig's A-pose, so the clip drives the new skeleton; the sword
+  turns on its pivot; the camera moves from the inspection view to the shot camera.
+M17 (V): DELEGATED PASS, recorded by ratifying shot version 3 (the production video).
+Not established here: the packaged run (M18). Duplicate/interrupted delivery reconciliation
+  rests on the existing contract tests. The framing is small and dark; that is an artistic note,
+  not a defect.
+Housekeeping: two earlier script attempts left two empty "Workshop M17 acceptance" projects
+  (02:52 and one before it). They were left for the artist to delete.
 ```
 
 ### M14 acceptance record
