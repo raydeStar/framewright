@@ -369,3 +369,69 @@ test('a rigged character reports its skeleton, poses deterministically, and refu
   await expect(page.getByTestId('model-rig-pose')).toHaveCount(0)
   verifyConsole()
 })
+
+/** The rigged fixture as an unrigged humanoid: the same triangles, no skin, no skeleton. */
+function withoutSkin(source: string, label: string) {
+  const bytes = ownFixture(source, label)
+  const jsonLength = bytes.readUInt32LE(12)
+  const document = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString('utf8'))
+  delete document.skins
+  delete document.animations
+  for (const node of document.nodes ?? []) delete node.skin
+  for (const mesh of document.meshes ?? []) for (const primitive of mesh.primitives ?? []) {
+    delete primitive.attributes.JOINTS_0
+    delete primitive.attributes.WEIGHTS_0
+  }
+  let json = Buffer.from(JSON.stringify(document), 'utf8')
+  if (json.length % 4 !== 0) json = Buffer.concat([json, Buffer.alloc(4 - (json.length % 4), 0x20)])
+  const binary = bytes.subarray(20 + jsonLength)
+  const header = Buffer.alloc(20)
+  header.writeUInt32LE(0x46546c67, 0)
+  header.writeUInt32LE(2, 4)
+  header.writeUInt32LE(12 + 8 + json.length + binary.length, 8)
+  header.writeUInt32LE(json.length, 12)
+  header.writeUInt32LE(0x4e4f534a, 16)
+  return Buffer.concat([header, json, binary])
+}
+
+test('an unrigged humanoid is rigged as a candidate, shown bending, and accepted by a person', async ({ page }, testInfo) => {
+  test.setTimeout(90_000)
+  const verifyConsole = failOnConsoleErrors(page)
+  const label = testInfo.project.name
+  await openAssets(page)
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: `plain-figure-${label}.glb`, mimeType: 'model/gltf-binary', buffer: withoutSkin(figure, label) },
+  ])
+  await expect(page.getByText(/imported into the library/)).toBeVisible()
+  await page.getByRole('button', { name: /^Models/ }).click()
+  await page.getByRole('button', { name: `Open plain-figure-${label}` }).click()
+  await expect(page.getByTestId('model-workspace')).toBeVisible()
+
+  // No skeleton yet, so the rig action is offered; nothing has been sent.
+  const create = page.getByTestId('model-rig-create')
+  await expect(page.getByTestId('model-rig-create-section')).toContainText('UE5 Manny skeleton')
+  await create.click()
+  await expect(page.getByText(/queued\. It keeps going if you leave this screen/)).toBeVisible()
+
+  // The candidate comes back with its pose suite as the thing to judge.
+  const suite = page.getByTestId('model-pose-suite')
+  await expect(suite).toBeVisible({ timeout: 45_000 })
+  await expect(suite.getByRole('img', { name: 'elbows bent front' })).toBeVisible()
+  await expect(suite.getByRole('img', { name: 'Landmarks front' })).toBeVisible()
+  const decodes = await suite.getByRole('img').first().evaluate(image => (image as HTMLImageElement).naturalWidth > 0)
+  expect(decodes).toBe(true)
+
+  // Unaccepted until a person says so; accepting makes the rig current.
+  const assets = await (await page.request.get('/api/assets')).json() as Array<{ id: string; displayName: string; revisionPrompt: string; isCurrentRevision: boolean; preparationAcceptedAt: string | null }>
+  const rigged = assets.find(asset => asset.revisionPrompt.startsWith(`Rigged from plain-figure-${label}`))
+  expect(rigged).toBeTruthy()
+  expect(rigged!.isCurrentRevision).toBe(false)
+  expect(rigged!.preparationAcceptedAt).toBeNull()
+  await page.getByTestId('model-preparation-accept').click()
+  await expect(page.getByText(/Accepted\. Revision \d+ is now the current model/)).toBeVisible()
+  const after = (await (await page.request.get('/api/assets')).json() as Array<{ id: string; isCurrentRevision: boolean; preparationAcceptedAt: string | null }>)
+    .find(asset => asset.id === rigged!.id)
+  expect(after?.isCurrentRevision).toBe(true)
+  expect(after?.preparationAcceptedAt).toBeTruthy()
+  verifyConsole()
+})

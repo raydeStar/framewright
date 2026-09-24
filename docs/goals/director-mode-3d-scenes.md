@@ -563,16 +563,87 @@ Retained for provenance. Branch, environment, dependency, and next-action statem
 | M06 | VERIFIED | M06 acceptance record below |
 | M07 | VERIFIED | M07 acceptance record below |
 | M08 | VERIFIED | M08 acceptance record below |
-| M09 | IN_PROGRESS | Route built and run live; awaiting the artist's recorded verdict |
+| M09 | VERIFIED | Delegated artist acceptance recorded 2026-09-23 (see the delegated acceptance record) |
 | M10 | VERIFIED | M10 acceptance and actual-host commissioning records below |
-| M11 | CONTRACT_VERIFIED | D/A/H pass; human composition acceptance remains |
+| M11 | VERIFIED | D/A/H pass; delegated human composition acceptance recorded 2026-09-23 |
 | M12 | CONTRACT_VERIFIED | Precise replacement/app persistence pass; declared live evidence remains |
 | M13 | VERIFIED | M13 acceptance record below |
-| M14 | NOT_STARTED | Compiler checked out; requires M09's recorded acceptance and M13 |
+| M14 | VERIFIED | Live rig of the generated Ninja through `rac run-stage rig`; delegated acceptance 2026-09-23 (see the M14 acceptance record) |
 | M15 | VERIFIED | M15 acceptance record below |
 | M16 | CONTRACT_VERIFIED | Scene-to-shot/app persistence pass; human visual acceptance remains |
 | M17 | CONTRACT_VERIFIED | Exact-frame/restart/encode/promotion contract passes; M14 rig, actual rendered-frame/human, and packaged evidence remain |
 | M18 | NOT_STARTED | Portable import/export groundwork passes; full packaged/recovery scenario depends on all milestones |
+
+### Delegated acceptance record - 2026-09-23
+
+```text
+Authority: the artist, in the MVP release session (docs/goals/mvp-release.md, R09):
+  "just give a pass to these, ill go back and fine tune later when i have time.
+  again, full permission there." This covers the outstanding human verdicts and
+  grants authorization for compiler-repository changes and GPU/worker runs for
+  the remaining 3D milestones.
+How it is recorded: as the artist's delegated pass, not as a visual review. No new
+  fixed views were inspected for these verdicts. Each is marked for revisiting
+  before production use.
+M09: the Ayric sword runtime derivative (revision 3, 18,000 -> 5,999 triangles,
+  asset 7a6d79a2) was accepted through the product's own preparation-acceptance
+  route at 2026-09-24T02:02Z UTC, with a note saying the pass was delegated and
+  the fixed-view comparison should be revisited. Acceptance made revision 3
+  current, which is the route's designed behaviour; the source remains in the
+  stack. The compiler ledger's own receipt chain stays a permitted deferral, as
+  the M09 record already states. V: DELEGATED PASS. Status -> VERIFIED.
+M11: human composition acceptance of the reviewed blockout is recorded as the
+  delegated pass. D/A/H evidence is unchanged. V: DELEGATED PASS. Status ->
+  VERIFIED.
+M16 and M17: their human verdicts are also delegated, but both still need live
+  evidence that has not been produced (a real-route scene still and an encoded
+  take from the M14 rig). They advance only when that evidence exists.
+```
+
+### M14 acceptance record
+
+```text
+Milestone / status / date: M14 / VERIFIED / 2026-09-23
+Tested revisions: Framewright mvp-release plus the M14 change (commit following this record);
+  Reference Asset Compiler feat/rig-stage at 056e26a (27ad515 plus the path fix), pushed to
+  raydeStar/reference-asset-compiler.
+Outcome: the compiler owns a new named stage, `rac run-stage rig` (scripts/run_rig_stage.ps1).
+  It composes the existing landmark route against ue5_manny_browser, exports a skinned browser
+  GLB, and returns the five-pose deformation renders plus landmark overlays as hashed evidence
+  in the review-views shape. The receipt is rig-candidate.v1: always production_grade false and
+  requires_deformation_review true; landmarks pending overlay review; unweighted bones listed.
+  Framewright adds a Rig work kind: [review-views(source), rig(source), review-views(result)].
+  It refuses a model that already has a skeleton, re-inspects the delivered file and refuses one
+  without a trustworthy skin or with changed triangles, stacks the rig beside its source as an
+  unaccepted revision, and shows "How it bends" (the pose suite) in the existing accept/refuse
+  gate. Evidence is served only when the receipt's evidence directory is inside the job
+  workspace, and only for files the manifest lists.
+Live run (L): the generated Ninja (revision 1, 18,000 triangles, 8af016cfebd0...) in the artist's
+  Lantern Trial project. The first attempt failed at binding: stored files are named by their
+  64-character hash and the rigged FBX passed MAX_PATH. The compiler now rigs a byte-identical
+  short-named copy; the regression test reproduces the live message with the old launcher.
+  The second attempt (job d1c27294) completed through all three steps. Framewright's own rig
+  inspector reads the delivered revision 4 as: UE5 Manny profile matched, 86 bones, 4 influences,
+  valid weights and bind pose, 18,000 triangles unchanged. Evidence: 8 source views, 8 bind-pose
+  views, 14 pose-suite and landmark images. Vertices differ after export, so it is flagged
+  topology-changed and inherits nothing.
+Human acceptance (V): DELEGATED PASS, recorded through preparation-acceptance at
+  2026-09-24T02:34Z UTC. The agent looked at the spine-twist, elbow and knee renders
+  (no collapse; swords follow the body). 17 finger bones are unweighted, and the crotch used
+  Manny proportion. Revision 4 is now the Ninja's current revision.
+Checks: compiler tests/test_rig_stage.py 7 passed with real Blender (cube refused; humanoid
+  rigged; hash-named deep path rigged), full compiler suite 612 passed / 9 skipped. Framewright
+  ModelRigApiTests 5 passed; the browser journey "an unrigged humanoid is rigged as a
+  candidate..." passes on desktop and iPad against the e2e stand-in, which now answers
+  review-views and rig in the real receipt shapes.
+Bug detection: compiler: dropping the mesh-type refusal; a receipt claiming production grade;
+  the old launcher on a hash-named file. Framewright: skipping the delivered-skeleton check;
+  dropping workspace containment for evidence; allowing an already-rigged source; suppressing
+  the rig evidence reader (the journey loses its pose suite). Each fails its test.
+Limits: the compiler's UE motion-proof route needs Unreal and was not run. Clip validation for
+  this rig happens in the browser path (M15 binding checks, then M17). Auto-Rig Pro, mascots and
+  quadrupeds are not behind the stage. bbox_volume_ratio is reported, not gated.
+```
 
 ### M00 acceptance record
 

@@ -260,6 +260,8 @@ export interface ModelDetailChoice { detail: string; description: string; cost: 
 export interface ModelPreparationEvidence {
   jobId: string; sourceAssetId: string | null; derivativeAssetId: string | null
   source: ModelPreparationViews | null; derivative: ModelPreparationViews | null
+  /** A rig's pose suite and landmark overlays, when the job rigged a humanoid. */
+  deformation?: ModelPreparationViews | null
 }
 export interface ModelPreparationViews { step: string; sourceSha256: string; views: ModelPreparationView[] }
 export interface ModelPreparationView { view: string; pass: string; url: string; sha256: string }

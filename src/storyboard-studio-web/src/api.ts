@@ -149,6 +149,9 @@ export const studioApi = {
   prepareModel: (sourceAssetId: string, name: string, triangleBudget: number) =>
     request<JobSummary>('/api/models/preparation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, triangleBudget }) }),
   modelCullReadiness: () => request<ModelGenerationReadiness>('/api/models/cull/readiness'),
+  modelRigReadiness: () => request<ModelGenerationReadiness>('/api/models/rig/readiness'),
+  rigModel: (sourceAssetId: string, name: string) =>
+    request<JobSummary>('/api/models/rig', { method: 'POST', body: JSON.stringify({ sourceAssetId, name }) }),
   cullModel: (sourceAssetId: string, name: string, ignoreTransparency: boolean) =>
     request<JobSummary>('/api/models/cull', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, ignoreTransparency }) }),
   preparationEvidence: (jobId: string) => request<ModelPreparationEvidence>(`/api/jobs/${jobId}/preparation-evidence`),

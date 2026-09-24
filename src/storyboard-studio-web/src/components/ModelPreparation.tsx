@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Eye, LoaderCircle, Scaling, TriangleAlert, X } from 'lucide-react'
+import { Bone, Check, Eye, LoaderCircle, Scaling, TriangleAlert, X } from 'lucide-react'
 import { studioApi } from '../api'
 import type {
   AssetSummary,
@@ -44,6 +44,7 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
 }) {
   const [readiness, setReadiness] = useState<ModelGenerationReadiness>()
   const [cullReadiness, setCullReadiness] = useState<ModelGenerationReadiness>()
+  const [rigReadiness, setRigReadiness] = useState<ModelGenerationReadiness>()
   // Only ever consulted when the compiler has already refused for this reason.
   // A ray cannot see through glass, so culling a lantern empties it through the
   // panes, and this is the artist saying nothing behind them is meant to show.
@@ -67,6 +68,9 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
     studioApi.modelCullReadiness()
       .then(answer => { if (live) setCullReadiness(answer) })
       .catch(() => { if (live) setCullReadiness(undefined) })
+    studioApi.modelRigReadiness()
+      .then(answer => { if (live) setRigReadiness(answer) })
+      .catch(() => { if (live) setRigReadiness(undefined) })
     return () => { live = false }
   }, [])
 
@@ -134,6 +138,20 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
       onQueued(`${queued.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That cull could not be queued.')
+    } finally { setBusy(false) }
+  }
+
+  // A skeleton for a humanoid, from the compiler's landmark route. It comes
+  // back the same way a derivative does: beside this model, unaccepted, with
+  // the poses it was bent through as the thing to look at.
+  const rig = async () => {
+    setBusy(true); setError(undefined); setEvidence(undefined)
+    try {
+      const queued = await studioApi.rigModel(asset.id, `${asset.displayName} (rigged)`)
+      setJob(queued)
+      onQueued(`${queued.shotCode} queued. It keeps going if you leave this screen.`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'That rig could not be queued.')
     } finally { setBusy(false) }
   }
 
@@ -216,6 +234,18 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
       </button>
     </div>}
 
+    {rigReadiness?.canRun && !profile.rig?.hasSkeleton && <div className="model-rig-create" data-testid="model-rig-create-section">
+      <p className="model-note">
+        Or give this figure a skeleton. The compiler finds its joints, builds the UE5 Manny
+        skeleton inside it, binds the skin and bends it through five poses. It suits one
+        standing humanoid in an A or T pose; anything else is refused with the reason.
+      </p>
+      <button type="button" className="secondary" data-testid="model-rig-create"
+        disabled={busy || running} onClick={() => void rig()}>
+        <Bone size={15} />{running ? 'Rigging…' : 'Rig as a humanoid'}
+      </button>
+    </div>}
+
     {job && <p className="model-note" data-testid="model-preparation-progress">
       {job.state === 'Failed'
         ? <span className="form-error" role="alert">{job.error}</span>
@@ -273,6 +303,19 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
         is the point; fewer maps, materials or textures is a loss, and the views above are where
         you can see what it cost.
       </p>}
+
+      {evidence.deformation && <figure className="model-comparison-row model-pose-suite" data-testid="model-pose-suite">
+        <figcaption>How it bends</figcaption>
+        <p className="model-note">
+          Five poses, front and side. Look at elbows, knees and the waist for collapsing or
+          tearing, and at the landmark overlays for joints that sit in the wrong place. These
+          are why the rig is accepted or refused; the numbers only say it passed its gates.
+        </p>
+        <div className="model-comparison-views">
+          {evidence.deformation.views.map(view => <img key={view.url} src={view.url}
+            alt={view.pass === 'landmarks' ? `Landmarks ${view.view}` : `${view.pass.replaceAll('_', ' ')} ${view.view}`} loading="lazy" />)}
+        </div>
+      </figure>}
 
       <label className="model-size">
         <span>What you saw</span>
