@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/raydeStar/framewright/actions/workflows/ci.yml"><img alt="Framewright continuous integration status" src="https://github.com/raydeStar/framewright/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <img alt="Pre-release" src="https://img.shields.io/badge/status-pre--release-6fb7d3">
+  <img alt="Release 0.1.0" src="https://img.shields.io/badge/release-v0.1.0-6fb7d3">
   <img alt="Local-first application" src="https://img.shields.io/badge/architecture-local--first-16373f">
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-20232a?logo=react">
@@ -35,7 +35,7 @@ Framewright is a local-first AI storyboard and film pre-production studio for di
 
 It is not another prompt box and it is not a ComfyUI graph editor. The artist defines the shot; Framewright freezes the exact intent, camera language, approved references, spatial notes, and locked rules into a reviewable generation packet. ComfyUI, Codex ImageGen, direct GPT Image, video, voice, and YuE2 music remain explicit adapters behind that contract.
 
-> **Current scope:** Framewright is pre-release software for a trusted local Windows workstation, working towards its first release ([MVP goal](docs/goals/mvp-release.md)). Its application, packaging, recovery and browser contracts are tested automatically. The mandatory live-provider and human acceptance checks for `v0.1.0` are not yet recorded; see [release evidence](docs/RELEASE_EVIDENCE.md) for the ledger.
+> **Current scope:** `v0.1.0` is Framewright's first release, for a trusted local Windows workstation ([MVP goal](docs/goals/mvp-release.md)). Its application, packaging, recovery and browser contracts are tested automatically, and the full 3D scenario was run on the packaged build. Live ComfyUI, H3 video and local voice runs are not yet recorded for it, and its human verdicts were delegated; see [release evidence](docs/RELEASE_EVIDENCE.md) for the ledger.
 
 The `v0.1.0` release ships as a portable Windows zip (below); Docker remains the managed runtime for a source checkout. The release covers shots and review, ComfyUI and Codex image work through H3 video, the 3D path (a generated prop, a rigged humanoid, a scene, and an animated take), two local voices, assembly, recovery, and production export. The direct-key OpenAI lane, YuE2 composition/rendering, and paired-tablet review remain clearly marked preview capabilities.
 

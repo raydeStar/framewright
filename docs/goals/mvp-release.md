@@ -331,7 +331,9 @@ Open:
     up on this workstation. Codex ImageGen is connected but turned off. These cannot be passed by
     delegation, because they are live-provider evidence rather than verdicts.
   - The 15-step QA runbook and the hallway test (human).
-  - Tag v0.1.0 and publish the release: confirmed with the artist immediately before.
+  - Released: the artist said "yes, tag it and publish the release" (2026-09-24). v0.1.0 is tagged
+    on main and published with the portable zip. The open rows above stay open after the release;
+    its notes say so.
 ```
 
 ## 5. What only the artist can do next

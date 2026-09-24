@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — first release (release candidate)
+## 0.1.0 — 2026-09-24, first release
 
 The first Framewright release: a local-first production workspace for a trusted
 Windows workstation, from a described shot through images, 3D scenes, animated
