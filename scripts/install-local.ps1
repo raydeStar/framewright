@@ -21,7 +21,7 @@ foreach ($candidate in @($resolvedInstall, $resolvedVoice)) {
         throw "Install and voice runtime roots must be dedicated folders inside LocalAppData: $candidate"
     }
 }
-foreach ($required in @('Framewright.exe', 'scripts\start-installed.ps1', 'scripts\start-voice-worker.ps1')) {
+foreach ($required in @('Framewright.exe', 'Framewright Studio.exe', 'scripts\start-installed.ps1', 'scripts\start-voice-worker.ps1')) {
     if (-not (Test-Path -LiteralPath (Join-Path $resolvedPublish $required) -PathType Leaf)) {
         throw "Publish Framewright first. Required package file not found: $required"
     }
@@ -151,13 +151,31 @@ try {
     New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
     $shortcutPath = Join-Path $startMenu 'Framewright.lnk'
     $shell = New-Object -ComObject WScript.Shell
+    # The everyday shortcut opens the studio directly: no PowerShell, no
+    # execution-policy bypass, no console window.
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $resolvedInstall 'scripts\start-installed.ps1')`""
+    $shortcut.TargetPath = Join-Path $resolvedInstall 'Framewright Studio.exe'
+    $shortcut.Arguments = ''
     $shortcut.WorkingDirectory = $resolvedInstall
     $shortcut.IconLocation = "$(Join-Path $resolvedInstall 'Framewright.exe'),0"
     $shortcut.Description = 'Framewright — build every shot with intention'
     $shortcut.Save()
+    # Optional local voice needs its Python worker started first, which only
+    # the PowerShell launcher does. Kept as a second, clearly named shortcut.
+    $voiceShortcut = $shell.CreateShortcut((Join-Path $startMenu 'Framewright (with local voice).lnk'))
+    $voiceShortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $voiceShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $resolvedInstall 'scripts\start-installed.ps1')`""
+    $voiceShortcut.WorkingDirectory = $resolvedInstall
+    $voiceShortcut.IconLocation = "$(Join-Path $resolvedInstall 'Framewright.exe'),0"
+    $voiceShortcut.Description = 'Framewright with the local voice worker'
+    $voiceShortcut.Save()
+    $stopShortcut = $shell.CreateShortcut((Join-Path $startMenu 'Stop Framewright.lnk'))
+    $stopShortcut.TargetPath = Join-Path $resolvedInstall 'Framewright Studio.exe'
+    $stopShortcut.Arguments = '--stop'
+    $stopShortcut.WorkingDirectory = $resolvedInstall
+    $stopShortcut.IconLocation = "$(Join-Path $resolvedInstall 'Framewright.exe'),0"
+    $stopShortcut.Description = 'Stop the Framewright studio started from this install'
+    $stopShortcut.Save()
     $success = $true
 
     Write-Host "Installed Framewright atomically at $resolvedInstall"

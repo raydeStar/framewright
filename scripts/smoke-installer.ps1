@@ -50,8 +50,19 @@ try {
     if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { throw 'Installer omitted the shortcut.' }
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    if ($shortcut.TargetPath -notmatch 'powershell\.exe$' -or $shortcut.Arguments -notmatch 'start-installed\.ps1') {
-        throw 'Installed shortcut does not use the managed voice/API/browser launcher.'
+    # The everyday shortcut opens the studio directly, with no PowerShell.
+    if ($shortcut.TargetPath -ne (Join-Path $installRoot 'Framewright Studio.exe') -or $shortcut.Arguments) {
+        throw 'The Framewright shortcut does not open the installed launcher directly.'
+    }
+    $voiceShortcutPath = Join-Path $fakeAppData 'Microsoft\Windows\Start Menu\Programs\Framewright (with local voice).lnk'
+    if (-not (Test-Path -LiteralPath $voiceShortcutPath -PathType Leaf)) { throw 'Installer omitted the local-voice shortcut.' }
+    $voiceShortcut = $shell.CreateShortcut($voiceShortcutPath)
+    if ($voiceShortcut.TargetPath -notmatch 'powershell\.exe$' -or $voiceShortcut.Arguments -notmatch 'start-installed\.ps1') {
+        throw 'The local-voice shortcut does not use the managed voice/API/browser launcher.'
+    }
+    $stopShortcut = $shell.CreateShortcut((Join-Path $fakeAppData 'Microsoft\Windows\Start Menu\Programs\Stop Framewright.lnk'))
+    if ($stopShortcut.TargetPath -ne (Join-Path $installRoot 'Framewright Studio.exe') -or $stopShortcut.Arguments -ne '--stop') {
+        throw 'The Stop Framewright shortcut does not stop the studio through the installed launcher.'
     }
 
     # Prove a failure after the staged package becomes active restores the exact

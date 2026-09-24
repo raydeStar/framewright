@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- A Windows GUI-subsystem executable: double-clicking it shows no console. -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Framewright Studio</AssemblyName>
+    <RootNamespace>Framewright.Launcher</RootNamespace>
+    <Product>Framewright</Product>
+    <Description>Opens Framewright: starts the local studio if needed, then the browser.</Description>
+    <ApplicationIcon Condition="Exists('..\StoryboardStudio.Api\framewright.ico')">..\StoryboardStudio.Api\framewright.ico</ApplicationIcon>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- One small file beside Framewright.exe; nothing here needs reflection. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>true</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

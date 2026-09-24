@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Framewright.Launcher/Framewright.Launcher.csproj" />
     <Project Path="src/StoryboardStudio.Api/StoryboardStudio.Api.csproj" />
     <Project Path="src/StoryboardStudio.Core/StoryboardStudio.Core.csproj" />
   </Folder>

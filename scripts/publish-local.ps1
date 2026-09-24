@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $webRoot = Join-Path $repoRoot 'src\storyboard-studio-web'
 $apiProject = Join-Path $repoRoot 'src\StoryboardStudio.Api\StoryboardStudio.Api.csproj'
+$launcherProject = Join-Path $repoRoot 'src\Framewright.Launcher\Framewright.Launcher.csproj'
 function Assert-NativeSuccess([string]$Step) {
     if ($LASTEXITCODE -ne 0) { throw "$Step failed with exit code $LASTEXITCODE." }
 }
@@ -49,12 +50,26 @@ dotnet publish $apiProject -c Release -r $Runtime --self-contained true -p:Publi
     -p:FramewrightVersion=$Version -p:FramewrightCommit=$Commit -p:FramewrightBuiltAtUtc=$BuiltAtUtc -p:FramewrightChannel=$Channel
 Assert-NativeSuccess 'dotnet publish'
 
+# The double-clickable launcher, beside Framewright.exe: a trimmed single file
+# that starts the studio hidden and opens the browser, with no PowerShell.
+dotnet restore $launcherProject --locked-mode
+Assert-NativeSuccess 'locked launcher restore'
+dotnet publish $launcherProject -c Release -r $Runtime --no-restore -o $resolvedOutput `
+    -p:FramewrightVersion=$Version -p:FramewrightCommit=$Commit -p:FramewrightBuiltAtUtc=$BuiltAtUtc -p:FramewrightChannel=$Channel
+Assert-NativeSuccess 'launcher publish'
+
 if (Test-Path -LiteralPath (Join-Path $resolvedOutput 'App_Data')) {
     throw 'Publish unexpectedly included App_Data. Refusing to produce a package that could contain artist data.'
 }
-if (-not (Test-Path -LiteralPath (Join-Path $resolvedOutput 'Framewright.exe'))) {
-    throw 'Publish did not produce Framewright.exe.'
+foreach ($required in @('Framewright.exe', 'Framewright Studio.exe')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $resolvedOutput $required))) {
+        throw "Publish did not produce $required."
+    }
 }
+
+# What this package is, for the portable zip and for anyone holding a copy.
+$versionInfo = [ordered]@{ product = 'Framewright'; version = $Version; commit = $Commit; builtAtUtc = $BuiltAtUtc; channel = $Channel; runtime = $Runtime }
+[IO.File]::WriteAllText((Join-Path $resolvedOutput 'version.json'), ($versionInfo | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 
 Write-Host "Published Framewright to $resolvedOutput"
 Write-Host 'No ComfyUI source, custom nodes, models, credentials, or production assets were included. Framewright-owned workflows and the pinned external voice-runtime bootstrap were packaged.'
