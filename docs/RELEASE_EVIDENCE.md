@@ -39,7 +39,7 @@ Fill this table against the exact candidate recorded in `candidate.json`. Any re
 | Audio/video assembly | Both voices remain separate editorial media and the final review file has expected sound and motion | Not run |
 | Concurrent work | Four mixed image/audio jobs complete serially or safely in parallel without collision or invisible results | Not run |
 | Restart/resume | Kill after queue and before provider submission; restart recovers once. Kill after provider acceptance; job requires explicit retry unless reconnectable | Not run |
-| Backup/restore | Restore a verified backup into a staged root; confirm exact asset snapshot and database integrity after restart | Not run |
+| Backup/restore | Restore a verified backup into a staged root; confirm exact asset snapshot and database integrity after restart | Passed 2026-09-24 on the packaged 0.1.0-rc.3 runtime at `b0a69f5`: exact backed-up studio after offline restore and restart, later change removed, SQLite `ok` (M18 packaged scenario record) |
 | Production package | All shots ratified with bound Max takes, all required voice cues rendered, hashes verified, package reopens from inventory | Not run |
 
 ## Optional preview acceptance

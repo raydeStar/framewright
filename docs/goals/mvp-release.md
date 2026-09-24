@@ -4,9 +4,9 @@
 **Created:** 2026-09-23  
 **Branch:** `mvp-release`  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** R09 (needs the artist; see Section 5)
+**Active milestone:** R10 (ship)
 
-**Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force. This goal does not authorize provider calls, GPU work, downloads, pushing, tagging, or publishing; each still needs the artist's explicit go-ahead.
+**Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force. On 2026-09-23 the artist authorized, for this goal: pushing `mvp-release`, changes to the compiler repository, and GPU/worker runs ("full permission there"). They delegated the human verdicts as passes to be fine-tuned later. They also chose a portable zip with a direct exe launcher for packaging. Delegated verdicts are recorded as such, never as the artist's own review. Tagging and publishing a GitHub release come last, once the gate passes, and are confirmed with the artist immediately before they happen.
 
 ## 1. Outcome
 
@@ -51,8 +51,8 @@ Evidence labels follow the 3D goal: **D** deterministic, **A** actual applicatio
 | R06 | One word for each concept across the UI | VERIFIED |
 | R07 | No silent loss or dead ends (the item 7 findings) | VERIFIED |
 | R08 | Hardening: an error boundary, polling that doesn't flicker, readable errors | VERIFIED |
-| R09 | 3D release path: M09, M14, M17 and M18 closed in their own goal | NOT_STARTED |
-| R10 | Ship: a downloadable build, version and changelog, accurate docs, `verify.ps1`, the mandatory acceptance rows, and the hallway test | NOT_STARTED |
+| R09 | 3D release path: M09, M14, M17 and M18 closed in their own goal | VERIFIED |
+| R10 | Ship: a downloadable build, version and changelog, accurate docs, `verify.ps1`, the mandatory acceptance rows, and the hallway test | IN_PROGRESS |
 
 ## 4. Acceptance records
 
@@ -294,21 +294,53 @@ Checkpoint suites (R06-R08): browser 166 passed, 6 skipped, 0 failed;
   backend 307 passed; frontend check passes.
 ```
 
+### R09 acceptance record
+
+```text
+Milestone / status / date: R09 / VERIFIED (delegated human verdicts) / 2026-09-24
+Outcome: every 3D milestone in director-mode-3d-scenes.md is VERIFIED. M09 and M14 have delegated
+  acceptance. M16 and M17 have live stills and takes from the M14 rig. M18 ran the whole bounded
+  scenario on the packaged 0.1.0-rc.3 runtime at b0a69f5: generate, rig, block out, direct, render,
+  restart, export/import to a clean studio without the compiler, and backup/restore. See the M18
+  packaged scenario record there.
+Found and fixed on the way (each with a failing-without-fix regression): a launcher handle leak
+  (99feb17), a packaged local settings file (c5988bf), scenes with clips that could not be saved
+  without the compiler (19e3f93), and stills drawn before their clips loaded (b0a69f5).
+Limits: native WebMCP host discovery was not re-established (this browser has none). Physical
+  tablet and stylus checks were not performed; they are recorded as delegated, not observed.
+```
+
+### R10 progress record
+
+```text
+Status: IN_PROGRESS, 2026-09-24.
+Done:
+  - Download: artifacts/framewright-0.1.0-rc.3-win-x64.zip from scripts/package-zip.ps1. One
+    Framewright folder, READ ME FIRST and Stop Framewright.cmd; smoke-tested from its extracted copy.
+  - Launcher: "Framewright Studio.exe" replaces the PowerShell -ExecutionPolicy Bypass shortcut.
+    smoke-launcher, smoke-installer and smoke-package pass.
+  - Version and changelog: 0.1.0-rc.3 is stamped by publish (version.json, /health); CHANGELOG.md.
+  - Docs: README quick start leads with the zip; release scope includes 3D; handoff updated.
+  - Gate: scripts/verify.ps1 passed in one run at b0a69f5 (plus these ledger edits). Results: npm audits
+    clean, frontend check and build, release audit, warning-free Release rebuild, and 313 backend
+    tests. Browser: 170 journeys on desktop Chromium and iPad WebKit, 6 intentional tablet
+    skips. Every backup, launcher, setup, voice, release-candidate and YuE2 script contract passed.
+Open:
+  - RELEASE_EVIDENCE mandatory rows: ComfyUI draft/revision, H3 video and local voice need
+    ComfyUI running and the voice worker installed (a ~9 GB model download), and neither is set
+    up on this workstation. Codex ImageGen is connected but turned off. These cannot be passed by
+    delegation, because they are live-provider evidence rather than verdicts.
+  - The 15-step QA runbook and the hallway test (human).
+  - Tag v0.1.0 and publish the release: confirmed with the artist immediately before.
+```
+
 ## 5. What only the artist can do next
 
-R09 (3D path) cannot be closed by automation:
+R09 is closed (delegated verdicts, recorded as such). R10 still needs:
 
-- M09 needs the artist's recorded verdict on the prepared sword derivative
-  (rev 3).
-- M14 (rig creation) is compiler work in `raydeStar/reference-asset-compiler`.
-  AGENTS.md requires explicit authorization for changes to another repository
-  and for GPU or live runs.
-- M16 and M11 need human visual acceptance. M17 needs M14, an actual encoded
-  take and sign-off. M18 is the packaged recovery scenario.
-
-R10 needs, besides engineering:
-
-- Authorization to push `mvp-release`, tag, and publish.
-- The 13 mandatory acceptance rows in RELEASE_EVIDENCE.md and the 15-step QA
-  runbook (human).
-- The hallway test.
+- ComfyUI running, and the local voice worker installed (it downloads about 9 GB of models), to
+  record the live ComfyUI, H3 video and voice rows in RELEASE_EVIDENCE.md. Codex ImageGen can be
+  switched on in Production setup for its row.
+- The 15-step QA runbook and the hallway test (someone new, from download to an approved frame).
+- A go-ahead to tag `v0.1.0` and publish the zip as a GitHub release.
+- Your own look at the delegated verdicts (M09, M11, M14, M16, M17, M18) when you have time.

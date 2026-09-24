@@ -4,8 +4,8 @@
 **Suggested repository path:** `docs/goals/director-mode-3d-scenes.md`  
 **Plan version:** 1.0  
 **Created:** 2026-09-19  
-**Overall status:** IN_PROGRESS  
-**Active milestone:** M09, awaiting the artist's verdict on the prepared sword derivative. M00, M01, M02, M03, M04, M05, M06, M07, M08, M10, M13 and M15 are VERIFIED; M11, M12, M16 and M17 are CONTRACT_VERIFIED. M11 now lacks only recorded human composition acceptance. M14 requires M09 acceptance as well as M13; a checked-out compiler alone does not satisfy that dependency. M17's application route is implemented, while its M14-rig, actual encoded-frame review, human acceptance, and packaged proof remain open. M18 remains open with portable-package recovery groundwork implemented.
+**Overall status:** VERIFIED (delegated human verdicts)  
+**Active milestone:** none. Every milestone M00 to M18 is VERIFIED as of 2026-09-24; human verdicts from M09 on were delegated by the artist and are recorded as such.
 
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force.
 
@@ -566,13 +566,13 @@ Retained for provenance. Branch, environment, dependency, and next-action statem
 | M09 | VERIFIED | Delegated artist acceptance recorded 2026-09-23 (see the delegated acceptance record) |
 | M10 | VERIFIED | M10 acceptance and actual-host commissioning records below |
 | M11 | VERIFIED | D/A/H pass; delegated human composition acceptance recorded 2026-09-23 |
-| M12 | CONTRACT_VERIFIED | Precise replacement/app persistence pass; declared live evidence remains |
+| M12 | VERIFIED | Precise replacement/app persistence pass; live replacement with a live-rigged revision in the M18 packaged record |
 | M13 | VERIFIED | M13 acceptance record below |
 | M14 | VERIFIED | Live rig of the generated Ninja through `rac run-stage rig`; delegated acceptance 2026-09-23 (see the M14 acceptance record) |
 | M15 | VERIFIED | M15 acceptance record below |
 | M16 | VERIFIED | Live scene still of the rigged Ninja, approved by delegated pass 2026-09-23 (see the M16/M17 live record) |
-| M17 | CONTRACT_VERIFIED | Live take from the M14 rig encoded, decoded and approved 2026-09-23; only the packaged run (P) remains, carried by M18 |
-| M18 | NOT_STARTED | Portable import/export groundwork passes; full packaged/recovery scenario depends on all milestones |
+| M17 | VERIFIED | Live take from the M14 rig encoded, decoded and approved 2026-09-23; packaged run in the M18 record |
+| M18 | VERIFIED | Full bounded scenario on the packaged 0.1.0-rc.3 runtime at b0a69f5, 2026-09-24 (see the M18 packaged scenario record); verdicts delegated |
 
 ### Delegated acceptance record - 2026-09-23
 
@@ -598,6 +598,68 @@ M11: human composition acceptance of the reviewed blockout is recorded as the
 M16 and M17: their human verdicts are also delegated, but both still need live
   evidence that has not been produced (a real-route scene still and an encoded
   take from the M14 rig). They advance only when that evidence exists.
+```
+
+### M18 packaged scenario record - 2026-09-24
+
+```text
+Milestone / status: M18 VERIFIED (delegated human verdicts). M17 VERIFIED: its packaged run
+  (P) is this record. M12 VERIFIED: its live evidence is the replacement below.
+Tested revision: mvp-release b0a69f5, published as 0.1.0-rc.3 (release-candidate) by
+  scripts/publish-local.ps1 and started and stopped only through "Framewright Studio.exe".
+  Environment: Windows 11 Pro, RTX 4090 (driver 596.21), FFmpeg N-118380, Reference Asset
+  Compiler feat/rig-stage at 056e26a, configured through environment variables only.
+Where: two disposable data roots under %TEMP%wm184. Studio A, port 5240, had the
+  compiler. Studio B, port 5241, had no compiler and no browser agent. The artist's studio was
+  read once for the source picture and the unrigged Ninja (8af016cf...); nothing else touched it.
+How: a Playwright driver acting as the artist on the real pages. The host was Claude Code
+  calling the page's registered Director tools through a registration shim; this browser has
+  no native WebMCP, so native host discovery rests on the M02/M03/M10 commissioning.
+Scenario, bounded full-goal list section 7, all on the packaged runtime:
+  1. A shot from one sentence (2 s at 24 fps). A ComfyUI draft was refused while ComfyUI was
+     off; the frozen manifest went to local-proof. The host read a pinned note and proposed a
+     revision naming it; accepting and applying opened the ordinary revision surface and
+     started no job. Approval was refused while the note was open, then went through once it
+     was resolved. Live image generation is not part of this record.
+  2. M08 live: the lantern reference became an 18,000-triangle textured prop through the
+     compiler in 261 s, and named its source revision.
+  3. The host proposed a blockout from that reference; proposing built nothing. Building gave
+     two instances of the one lantern revision, a figure stand-in, a bench and a floor.
+  4. M14 live: the unrigged Ninja was rigged in 30 s (86 bones, UE5 Manny). The pose suite was
+     shown, and acceptance made revision 2 current. The figure stand-in was replaced by that
+     exact revision, keeping its identity and placement, with the bench untouched. The idle
+     clip was bound, and the right lantern given a pivot swing; the left stayed static.
+  5. A note was placed by clicking the left lantern in the canvas and anchored on it, not its
+     twin. The host proposed a turn for that instance only. The artist applied and saved it
+     (scene v3); the twin was byte-for-byte unchanged.
+  6. Scene still at 1.0 s approved (v3). Take job 9c28e1ee: ffprobe h264 1280 x 720, 24/1,
+     48 decoded frames, 2.000 s, bt709. Frames 0, 24 and 47 inspected: held idle pose, swinging
+     lantern, moving camera. Approved as the production video (v4).
+  7. Stop and start through the launcher (a new process): shot, scene, notes, motion, camera,
+     asset hashes and take identical. The working package's text names no path on this
+     machine. Imported into B with fresh project, scene and instance identities: placements,
+     motion, clip binding, revisions (r2 over r1), camera, note anchor and all 8 assets
+     byte-identical; the take plays the same bytes. On B, generation and rigging report
+     unavailable, and the scene was edited by hand and saved. A backup on A, a later note,
+     then stop, packaged offline restore and start: exactly the backed-up studio, without the
+     later note, SQLite integrity ok, and no data in the package folder.
+Defects found while packaging and running this scenario, fixed before the recorded run, each
+  with a regression that fails without its fix:
+  - 99feb17: the launcher passed every inheritable handle to the studio, so a script reading
+    its output hung (smoke-launcher reads through a pipe).
+  - c5988bf: publish packaged the workstation's appsettings.Local.json; the zip's guard caught
+    it, and publish now refuses it.
+  - 19e3f93: a scene with a clip could not be saved where compiler profiles are absent, which
+    stranded imported copies (SceneMotionApiTests).
+  - b0a69f5: the still captured before the clip loaded, so it showed the rest pose (scenes
+    journey holding the clip file back).
+V: DELEGATED PASS for every verdict above (the still, the take, rig acceptance), per the
+  artist's instruction; not the artist's own review. Physical desktop, tablet and stylus checks
+  were not performed; they are recorded as a delegated pass, not as observed.
+Artistic notes, not defects: the floor and bench are coloured stand-ins, the lantern panes read
+  translucent against the floor, and a model's only revision is labelled "Earlier".
+Evidence: artifacts/m18-evidence-2026-09-24 (ignored; run.log, fingerprints, still, take,
+  ffprobe, frames, screenshots, the driver).
 ```
 
 ### M16/M17 live record - 2026-09-23
