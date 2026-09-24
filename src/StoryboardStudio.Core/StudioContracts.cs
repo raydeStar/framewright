@@ -334,6 +334,9 @@ public sealed record CreateModelCompressionRequest(
 /// through the panes. This says, in as many words, that nothing behind those
 /// surfaces is meant to be seen.
 /// </param>
+/// <summary>Rigs one prepared humanoid model to the UE5 Manny browser skeleton, as a candidate revision.</summary>
+public sealed record CreateModelRigRequest(Guid SourceAssetId, string? Name);
+
 public sealed record CreateModelCullRequest(
     Guid SourceAssetId, string? Name,
     int? Directions, double? Most, double? LargestPart, bool? IgnoreTransparency);
@@ -405,7 +408,9 @@ public sealed record SetPreparationAcceptanceRequest(bool Accepted, string? Note
 /// </summary>
 public sealed record ModelPreparationEvidence(
     Guid JobId, Guid? SourceAssetId, Guid? DerivativeAssetId,
-    ModelPreparationViews? Source, ModelPreparationViews? Derivative);
+    ModelPreparationViews? Source, ModelPreparationViews? Derivative,
+    /// <summary>A rig's pose suite and landmark overlays, when the route rigged a humanoid.</summary>
+    ModelPreparationViews? Deformation = null);
 
 public sealed record ModelPreparationViews(
     string Step, string SourceSha256, ModelPreparationView[] Views);

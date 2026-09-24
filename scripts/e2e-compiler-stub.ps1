@@ -199,6 +199,30 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
                     available = $true
                     missing   = @()
                 },
+                # Fixed views and the humanoid rig, so the rig journey runs
+                # the studio's real route with pictures a browser can show.
+                [ordered]@{
+                    stage     = 'review-views'
+                    runner    = 'powershell'
+                    summary   = 'Render the fixed views a person judges a model by.'
+                    produces  = 'reference-asset-compiler.review-views.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('resolution')
+                    # A directory, not a file: the compiler names no suffix.
+                    output_suffix = ''
+                    available = $true
+                    missing   = @()
+                },
+                [ordered]@{
+                    stage     = 'rig'
+                    runner    = 'powershell'
+                    summary   = 'Rig a prepared humanoid to the UE5 Manny browser skeleton, gate it, and render its pose suite.'
+                    produces  = 'reference-asset-compiler.rig-candidate.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @()
+                    available = $true
+                    missing   = @()
+                },
                 [ordered]@{
                     stage     = 'compress-textures'
                     runner    = 'python'
@@ -216,7 +240,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     $stage = $arguments[1]
-    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'glass', 'browser-payload', 'paint-head', 'compress-textures')) {
+    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'glass', 'browser-payload', 'paint-head', 'compress-textures', 'review-views', 'rig')) {
         Write-Error "RAC_ERROR unknown stage: $stage"
         exit 2
     }
@@ -226,6 +250,80 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     if (-not $source -or -not $output -or -not $receipt) {
         Write-Error 'RAC_ERROR run-stage needs --source, --output and --report'
         exit 2
+    }
+
+    # A 1x1 PNG, so evidence images are real pictures a browser can decode.
+    $pixel = [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=')
+    function Write-Views([string] $Directory, [string[]] $Names, [string] $Of, [string] $Schema) {
+        New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+        $views = @()
+        foreach ($name in $Names) {
+            [IO.File]::WriteAllBytes((Join-Path $Directory "$name.png"), $pixel)
+            $parts = $name -split '-', 2
+            $views += [ordered]@{ view = $parts[1]; pass = $parts[0]; file = "$name.png"
+                sha256 = (Get-FileHash -LiteralPath (Join-Path $Directory "$name.png") -Algorithm SHA256).Hash.ToLowerInvariant() }
+        }
+        $manifest = [ordered]@{ schema = $Schema; source_sha256 = $Of; views = $views }
+        Set-Content -LiteralPath (Join-Path $Directory 'views.json') -Value ($manifest | ConvertTo-Json -Depth 6) -Encoding utf8
+        return $manifest
+    }
+
+    if ($stage -eq 'review-views') {
+        $of = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+        $manifest = Write-Views $output @('beauty-front', 'beauty-side', 'matcap-front', 'matcap-side') $of 'reference-asset-compiler.review-views.v1'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $receipt) | Out-Null
+        Set-Content -LiteralPath $receipt -Value ($manifest | ConvertTo-Json -Depth 6) -Encoding utf8
+        Write-Output ([ordered]@{ ok = $true; schema = 'reference-asset-compiler.stage-run.v1'; stage = $stage; runner = 'powershell'
+            blender = 'e2e-stand-in'; exit_code = 0; seconds = 0.2; report = $receipt; receipt = $manifest } | ConvertTo-Json -Depth 8)
+        exit 0
+    }
+
+    if ($stage -eq 'rig') {
+        # The same humanoid, now carrying the fixture's skeleton: the journey
+        # uploads the rigged fixture with its skin stripped, so the triangles
+        # match and only the skeleton is new, exactly as the real stage does.
+        $rigged = Join-Path $repoRoot 'fixtures/glb/rigged-figure.glb'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
+        $of = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+        # A real rig of a different source is different bytes. Name the scene
+        # after the source, so two journeys never deliver one content-addressed
+        # file into two revision stacks.
+        $bytes = [IO.File]::ReadAllBytes($rigged)
+        $jsonLength = [int][BitConverter]::ToUInt32($bytes, 12)
+        $document = [Text.Encoding]::UTF8.GetString($bytes, 20, $jsonLength) | ConvertFrom-Json
+        $document.scenes[0].name = "$($document.scenes[0].name) rigged from $($of.Substring(0, 12))"
+        $json = [Text.Encoding]::UTF8.GetBytes(($document | ConvertTo-Json -Depth 100 -Compress))
+        $padding = (4 - ($json.Length % 4)) % 4
+        $remainderStart = 20 + $jsonLength
+        $result = New-Object byte[] (20 + $json.Length + $padding + $bytes.Length - $remainderStart)
+        [BitConverter]::GetBytes([uint32]0x46546c67).CopyTo($result, 0)
+        [BitConverter]::GetBytes([uint32]2).CopyTo($result, 4)
+        [BitConverter]::GetBytes([uint32]$result.Length).CopyTo($result, 8)
+        [BitConverter]::GetBytes([uint32]($json.Length + $padding)).CopyTo($result, 12)
+        [BitConverter]::GetBytes([uint32]0x4e4f534a).CopyTo($result, 16)
+        $json.CopyTo($result, 20)
+        for ($index = 0; $index -lt $padding; $index++) { $result[20 + $json.Length + $index] = 32 }
+        [Array]::Copy($bytes, $remainderStart, $result, 20 + $json.Length + $padding, $bytes.Length - $remainderStart)
+        [IO.File]::WriteAllBytes($output, $result)
+        $attempt = Join-Path (Split-Path -Parent $output) (([IO.Path]::GetFileNameWithoutExtension($output)) + '-rig-attempt001')
+        $evidence = Join-Path $attempt 'evidence'
+        $null = Write-Views $evidence @('elbows_bent-front', 'elbows_bent-side', 'knees_bent-front', 'landmarks-front') $of 'reference-asset-compiler.rig-evidence.v1'
+        $rigReceipt = [ordered]@{
+            schema = 'reference-asset-compiler.rig-candidate.v1'
+            source_sha256 = $of
+            payload_sha256 = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
+            skeleton_profile = 'ue5_manny_browser'
+            gate = [ordered]@{ passed = $true; warnings = @() }
+            deformation = [ordered]@{ passed = $true }
+            evidence_directory = $evidence
+            production_grade = $false
+            requires_deformation_review = $true
+        }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $receipt) | Out-Null
+        Set-Content -LiteralPath $receipt -Value ($rigReceipt | ConvertTo-Json -Depth 6) -Encoding utf8
+        Write-Output ([ordered]@{ ok = $true; schema = 'reference-asset-compiler.stage-run.v1'; stage = $stage; runner = 'powershell'
+            blender = 'e2e-stand-in'; exit_code = 0; seconds = 0.2; report = $receipt; receipt = $rigReceipt } | ConvertTo-Json -Depth 8)
+        exit 0
     }
 
     # A real rigged model, so the studio's import validates a real GLB and the

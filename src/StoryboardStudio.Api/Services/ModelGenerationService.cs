@@ -45,6 +45,7 @@ public sealed class ModelGenerationService(
     public const string CompressTexturesStage = "compress-textures";
     public const string CullUnseenStage = "cull-unseen";
     public const string PaintHeadStage = "paint-head";
+    public const string RigStage = "rig";
 
     /// <summary>Which of the two things a frozen packet is asking for.</summary>
     public const string GenerateWork = "generate";
@@ -52,6 +53,11 @@ public sealed class ModelGenerationService(
     public const string SurfaceWork = "surface";
     public const string CompressWork = "compress";
     public const string CullWork = "cull";
+    public const string RigWork = "rig";
+
+    /// <summary>Every work kind that starts from a model and delivers a revision beside it.</summary>
+    private static bool IsDerivativeWork(string? work) =>
+        work is PrepareWork or SurfaceWork or CompressWork or CullWork or RigWork;
 
     /// <summary>
     /// How close the camera will get. Everything that follows from it is a
@@ -202,6 +208,26 @@ public sealed class ModelGenerationService(
         new(ReviewViewsStage),
     ];
 
+    /// <summary>
+    /// What a humanoid goes through to be given a skeleton.
+    ///
+    /// The fixed views are rendered from the source and from the result in
+    /// its bind pose, because a rig must not move the model it binds, and
+    /// the two sets side by side are how a person sees that it did not. The
+    /// judgement that matters more, whether it bends well, is the pose suite
+    /// the rig stage renders itself and hands back as its own evidence.
+    /// </summary>
+    private static readonly RouteStepPlan[] RigPlan =
+    [
+        new(ReviewViewsStage, ReadsOriginal: true),
+        new(RigStage, ReadsOriginal: true),
+        new(ReviewViewsStage),
+    ];
+
+    /// <summary>Every stage rigging needs, for the capability check.</summary>
+    public static readonly string[] RigRoute =
+        [.. RigPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
+
     /// <summary>Every stage the cull needs, for the capability check.</summary>
     public static readonly string[] CullRoute =
         [.. CullPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
@@ -263,6 +289,7 @@ public sealed class ModelGenerationService(
         [CompressTexturesStage] = "Re-encoding its textures",
         [CullUnseenStage] = "Looking from every side, and dropping what nothing sees",
         [PaintHeadStage] = "Painting the head again, on its own, up close",
+        [RigStage] = "Building a skeleton, binding it, and bending it through five poses",
     };
 
     /// <summary>
@@ -381,6 +408,9 @@ public sealed class ModelGenerationService(
         PreflightAsync(PreparationRoute, "Preparing a derivative", cancellationToken);
 
     /// <summary>The same question again, for the route that drops unseen faces.</summary>
+    public Task<ModelGenerationReadiness> RigPreflightAsync(CancellationToken cancellationToken) =>
+        PreflightAsync(RigRoute, "Rigging a humanoid", cancellationToken);
+
     public Task<ModelGenerationReadiness> CullPreflightAsync(CancellationToken cancellationToken) =>
         PreflightAsync(CullRoute, "Dropping unseen faces", cancellationToken);
 
@@ -759,6 +789,83 @@ public sealed class ModelGenerationService(
             ? [.. found.EnumerateArray().Select(value => value.GetString() ?? "")] : [];
 
     /// <summary>
+    /// Queues a rig for one prepared humanoid.
+    ///
+    /// The compiler's landmark route against the UE5 Manny browser skeleton:
+    /// derive joints from the mesh, bind with heat weights, gate the rig, and
+    /// bend it through five poses. What comes back is a candidate revision,
+    /// never an animation-ready badge; the pose suite is the evidence, and a
+    /// person accepts or refuses it the way a preparation is judged.
+    /// A model that already has a skeleton is refused: rigging it again would
+    /// quietly replace a rig somebody may have approved.
+    /// </summary>
+    public async Task<RepositoryResult<JobSummary>> EnqueueRigAsync(
+        CreateModelRigRequest request, CancellationToken cancellationToken)
+    {
+        var source = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(asset => asset.Id == request.SourceAssetId, cancellationToken);
+        if (source is null) return RepositoryResult<JobSummary>.NotFound();
+        if (source.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<JobSummary>.Invalid("Only a model can be rigged.");
+        if (source.IsArchived)
+            return RepositoryResult<JobSummary>.Invalid("That model is archived. Restore it before rigging it.");
+
+        var name = (request.Name ?? "").Trim();
+        if (name.Length is 0 or > 120)
+            return RepositoryResult<JobSummary>.Invalid("This needs a name of 1 to 120 characters.");
+
+        var sourcePath = assets.ResolveContentPath(source);
+        if (!File.Exists(sourcePath))
+            return RepositoryResult<JobSummary>.Unavailable("The model file is missing from the asset root.");
+        var inspected = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(sourcePath, cancellationToken));
+        if (inspected.Profile is null)
+            return RepositoryResult<JobSummary>.Invalid(inspected.Error ?? "That model could not be read.");
+        if (inspected.Profile.Rig.HasSkeleton)
+            return RepositoryResult<JobSummary>.Invalid(
+                "This model already has a skeleton. Rig the unrigged revision it came from instead.");
+
+        var readiness = await RigPreflightAsync(cancellationToken);
+        if (!readiness.CanRun)
+            return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+
+        var now = timeProvider.GetUtcNow();
+        var packet = new FrozenModelRequest(
+            FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
+            source.RevisionNumber ?? 1,
+            [.. RigPlan.Select(step => new RouteStep(
+                step.Stage,
+                readiness.Suffixes?.GetValueOrDefault(step.Stage) ?? ".glb",
+                step.ReadsOriginal))],
+            readiness.CompilerVersion, now,
+            Size: "", SizeAdjust: 1.0, GlassColour: null,
+            Work: RigWork, TriangleBudget: 0);
+        var requestJson = JsonSerializer.Serialize(packet, Json);
+
+        var jobId = Guid.NewGuid();
+        var job = new JobRecord
+        {
+            Id = jobId,
+            ShotId = Guid.Empty,
+            ShotCode = name,
+            Kind = "Rig",
+            WorkType = ModelWorkType,
+            State = JobState.Queued.ToString(),
+            Progress = 0,
+            Phase = "Frozen model queued",
+            Backend = "Reference Asset Compiler",
+            AdapterId = string.Join(" then ", RigPlan.Select(step => step.Stage)),
+            RequestJson = requestJson,
+            IdempotencyKey = IdempotencyKey(requestJson, jobId),
+            CreatedAt = now,
+            LastHeartbeatAt = now,
+            Attempt = 1,
+        };
+        db.Jobs.Add(job);
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<JobSummary>.Ok(Map(job));
+    }
+
+    /// <summary>
     /// Queues a cull of the faces nothing outside a model can see.
     ///
     /// How much this finds is a fact about the subject, not about how it was
@@ -1090,10 +1197,7 @@ public sealed class ModelGenerationService(
         // A preparation and a surfacing both start from a model and both
         // deliver a revision beside it. What differs is the route, not what
         // happens to the answer.
-        var derivative = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, CullWork, StringComparison.Ordinal);
+        var derivative = IsDerivativeWork(packet.Work);
         var preparing = derivative;
         var sourceWord = derivative ? "model" : "reference";
         var source = await db.Assets.AsNoTracking()
@@ -1199,7 +1303,7 @@ public sealed class ModelGenerationService(
         // Whichever step last wrote a model. A re-encode writes one directly,
         // because it rewrites the file rather than reopening it.
         var payloadStep = completed.LastOrDefault(
-            step => step.Stage is BrowserPayloadStage or CompressTexturesStage or CullUnseenStage);
+            step => step.Stage is BrowserPayloadStage or CompressTexturesStage or CullUnseenStage or RigStage);
         if (payloadStep is null)
             return await FailAsync(job, "This job's route never exported a model.", cancellationToken);
         var payloadPath = payloadStep.OutputPath;
@@ -1425,6 +1529,22 @@ public sealed class ModelGenerationService(
         var changed = before.Profile is null || after.Profile is null
             || before.Profile.TriangleCount != after.Profile.TriangleCount
             || before.Profile.VertexCount != after.Profile.VertexCount;
+        if (string.Equals(packet.Work, RigWork, StringComparison.Ordinal))
+        {
+            // The compiler's gate passed, and it is checked again here from the
+            // file itself: a rig that arrives without a usable skin is refused
+            // before it joins the library, not discovered in a scene later.
+            var rig = after.Profile?.Rig;
+            if (rig is null || !rig.HasSkeleton)
+                return RepositoryResult<bool>.Invalid("The rig came back without a skeleton.");
+            if (!rig.SkinWeightsValid || !rig.BindPoseValid || !rig.TransformsFinite)
+                return RepositoryResult<bool>.Invalid(
+                    "The rig came back with a skin this studio cannot trust: " + string.Join(" ", rig.Findings));
+            if (before.Profile is not null && after.Profile is not null
+                && before.Profile.TriangleCount != after.Profile.TriangleCount)
+                return RepositoryResult<bool>.Invalid(
+                    "Rigging changed the mesh: a skeleton is bound to a model, it does not reshape it.");
+        }
 
         var note = new StringBuilder()
             .Append(packet.Work switch
@@ -1432,6 +1552,7 @@ public sealed class ModelGenerationService(
                 SurfaceWork => "Resurfaced from ",
                 CompressWork => "Textures re-encoded from ",
                 CullWork => "Unseen faces dropped from ",
+                RigWork => "Rigged from ",
                 _ => "Runtime derivative of ",
             })
             .Append(packet.SourceName)
@@ -1445,6 +1566,13 @@ public sealed class ModelGenerationService(
                 .Append(" triangles down to ")
                 .Append(after.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture))
                 .Append(", nothing moved");
+        else if (string.Equals(packet.Work, RigWork, StringComparison.Ordinal) && after.Profile is not null)
+            // What a person needs before they look: which skeleton, and that
+            // the mesh under it is the same one. The bending is in the views.
+            note.Append(": ").Append(after.Profile.Rig.BoneCount.ToString(CultureInfo.InvariantCulture))
+                .Append(" bones on the UE5 Manny browser skeleton, ")
+                .Append(after.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture))
+                .Append(" triangles unchanged; a candidate until its pose suite is reviewed");
         else if (string.Equals(packet.Work, CompressWork, StringComparison.Ordinal))
             note.Append(": ").Append((source.Bytes / 1024d / 1024d).ToString("0.0", CultureInfo.InvariantCulture))
                 .Append(" MB down to ")
@@ -1497,16 +1625,14 @@ public sealed class ModelGenerationService(
     {
         var asset = await db.Assets.SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
         if (asset is null) return;
-        var preparing = string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, CullWork, StringComparison.Ordinal);
+        var preparing = IsDerivativeWork(packet.Work);
         var opening = packet.Work switch
         {
             PrepareWork => "Prepared for runtime from ",
             SurfaceWork => "Resurfaced from ",
             CompressWork => "Textures re-encoded from ",
             CullWork => "Unseen faces dropped from ",
+            RigWork => "Rigged from ",
             _ => "Generated from ",
         };
         var lineage = new StringBuilder()
@@ -1619,8 +1745,14 @@ public sealed class ModelGenerationService(
         var workspace = Workspace(job.Id);
         ModelPreparationViews? source = null;
         ModelPreparationViews? derivative = null;
+        ModelPreparationViews? deformation = null;
         for (var index = 0; index < comparisonPacket.Route.Length; index++)
         {
+            if (comparisonPacket.Route[index].Stage == RigStage)
+            {
+                deformation ??= ReadRigViews(job.Id, workspace, index + 1);
+                continue;
+            }
             if (comparisonPacket.Route[index].Stage != ReviewViewsStage) continue;
             var read = ReadViews(job.Id, workspace, index + 1);
             if (read is null) continue;
@@ -1631,7 +1763,7 @@ public sealed class ModelGenerationService(
             else derivative ??= read;
         }
         return RepositoryResult<ModelPreparationEvidence>.Ok(new ModelPreparationEvidence(
-            job.Id, comparisonPacket.SourceAssetId, job.OutputAssetId, source, derivative));
+            job.Id, comparisonPacket.SourceAssetId, job.OutputAssetId, source, derivative, deformation));
     }
 
     /// <summary>
@@ -1685,11 +1817,55 @@ public sealed class ModelGenerationService(
     }
 
     private static bool ProducesComparisonEvidence(FrozenModelRequest? packet) =>
-        packet is not null
-        && (string.Equals(packet.Work, PrepareWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, CompressWork, StringComparison.Ordinal)
-            || string.Equals(packet.Work, CullWork, StringComparison.Ordinal));
+        packet is not null && IsDerivativeWork(packet.Work);
+
+    /// <summary>
+    /// The pose suite a rig step rendered, found through the step's own
+    /// receipt. The receipt names where the evidence is; that place has to be
+    /// inside this job's workspace, or it is not this job's evidence.
+    /// </summary>
+    private static ModelPreparationViews? ReadRigViews(Guid jobId, string workspace, int step)
+    {
+        var directory = RigEvidenceDirectory(workspace, step);
+        if (directory is null) return null;
+        var manifest = Path.Combine(directory, "views.json");
+        if (!File.Exists(manifest)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(manifest));
+            var root = document.RootElement;
+            var views = root.TryGetProperty("views", out var listed) && listed.ValueKind == JsonValueKind.Array
+                ? listed.EnumerateArray()
+                    .Select(view => new ModelPreparationView(
+                        view.GetProperty("view").GetString() ?? "",
+                        view.GetProperty("pass").GetString() ?? "",
+                        $"/api/jobs/{jobId}/preparation-views/{step}/{view.GetProperty("file").GetString()}",
+                        view.TryGetProperty("sha256", out var hash) ? hash.GetString() ?? "" : ""))
+                    .ToArray()
+                : [];
+            return new ModelPreparationViews(
+                $"step-{step}-{RigStage}",
+                root.TryGetProperty("source_sha256", out var of) ? of.GetString() ?? "" : "",
+                views);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static string? RigEvidenceDirectory(string workspace, int step)
+    {
+        var receipt = Path.Combine(workspace, $"step-{step}-{RigStage}.json");
+        if (!File.Exists(receipt)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(receipt));
+            if (!document.RootElement.TryGetProperty("evidence_directory", out var named)
+                || named.GetString() is not { Length: > 0 } directory) return null;
+            var full = Path.GetFullPath(directory);
+            var root = Path.GetFullPath(workspace).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return full.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? full : null;
+        }
+        catch (JsonException) { return null; }
+    }
 
     private static ModelPreparationViews? ReadViews(Guid jobId, string workspace, int step)
     {
@@ -1732,10 +1908,16 @@ public sealed class ModelGenerationService(
         var wanted = $"/api/jobs/{jobId}/preparation-views/{step}/{file}";
         var listed = (evidence.Value.Source?.Views ?? [])
             .Concat(evidence.Value.Derivative?.Views ?? [])
+            .Concat(evidence.Value.Deformation?.Views ?? [])
             .Any(view => string.Equals(view.Url, wanted, StringComparison.Ordinal));
         if (!listed) return RepositoryResult<(string, string)>.NotFound();
 
-        var path = Path.Combine(Workspace(jobId), $"step-{step}-{ReviewViewsStage}", file);
+        var fromRig = evidence.Value.Deformation?.Step == $"step-{step}-{RigStage}";
+        var directory = fromRig
+            ? RigEvidenceDirectory(Workspace(jobId), step)
+            : Path.Combine(Workspace(jobId), $"step-{step}-{ReviewViewsStage}");
+        if (directory is null) return RepositoryResult<(string, string)>.NotFound();
+        var path = Path.Combine(directory, file);
         return File.Exists(path)
             ? RepositoryResult<(string, string)>.Ok((path, "image/png"))
             : RepositoryResult<(string, string)>.Unavailable("That view is no longer on disk.");

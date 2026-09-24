@@ -687,6 +687,17 @@ app.MapGet("/api/jobs/{jobId:guid}/preparation-evidence", async Task<IResult> (
 app.MapGet("/api/assets/{assetId:guid}/surface-survey", async Task<IResult> (
     Guid assetId, ModelGenerationService models, CancellationToken cancellationToken)
     => ToHttpResult(await models.SurveyAsync(assetId, cancellationToken)));
+app.MapGet("/api/models/rig/readiness", async (ModelGenerationService models, CancellationToken cancellationToken)
+    => Results.Ok(await models.RigPreflightAsync(cancellationToken)));
+app.MapPost("/api/models/rig", async Task<IResult> (
+    CreateModelRigRequest request, ModelGenerationService models, GenerationJobSignal queue,
+    CancellationToken cancellationToken) =>
+{
+    var queued = await models.EnqueueRigAsync(request, cancellationToken);
+    if (queued.Kind == RepositoryResultKind.Ok && queued.Value is not null)
+        await queue.QueueAsync(queued.Value.Id, cancellationToken);
+    return ToHttpResult(queued);
+});
 app.MapGet("/api/models/cull/readiness", async (ModelGenerationService models, CancellationToken cancellationToken)
     => Results.Ok(await models.CullPreflightAsync(cancellationToken)));
 app.MapPost("/api/models/cull", async Task<IResult> (
