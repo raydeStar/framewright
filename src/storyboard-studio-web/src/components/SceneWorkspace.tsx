@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { Box, Check, Copy, Image, LoaderCircle, Maximize2, MessageCirclePlus, Minimize2, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { studioApi } from '../api'
 import SceneLightingControls from './SceneLightingControls'
+import ConfirmDialog from './ConfirmDialog'
 import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
 // three.js loads only when a scene is actually opened.
@@ -53,6 +54,10 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   const [models, setModels] = useState<AssetSummary[]>([])
   const [selectedId, setSelectedId] = useState<string>()
   const [dirty, setDirty] = useState(false)
+  // Opening another scene or starting a new one replaces the one on screen.
+  // With unsaved edits that used to discard them without a word.
+  const [pendingLeave, setPendingLeave] = useState<{ label: string; go: () => void }>()
+  const guardLeave = (label: string, go: () => void) => { if (dirty) setPendingLeave({ label, go }); else go() }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
@@ -546,6 +551,9 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   if (loading) return <main className="workspace workspace-loading" role="status"><LoaderCircle className="spin" /><p>Opening scenes</p></main>
 
   return <main className={`workspace scene-workspace${directorMode ? ' director-mode' : ''}`} data-testid="scene-workspace">
+    {pendingLeave && <ConfirmDialog title="Discard unsaved scene changes?" confirmLabel="Discard changes" cancelLabel="Keep editing" onCancel={() => setPendingLeave(undefined)} onConfirm={() => { const { go } = pendingLeave; setPendingLeave(undefined); go() }}>
+      <p>{scene?.name ?? 'This scene'} has changes that are not saved. If you {pendingLeave.label} now, they are lost. Keep editing to save them first.</p>
+    </ConfirmDialog>}
     <header className="scene-header">
       <div>
         <p className="eyebrow">Scene</p>
@@ -559,10 +567,10 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
           aria-pressed={directorMode} onClick={() => onDirectorMode(!directorMode)}>
           {directorMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}{directorMode ? 'Exit Director' : 'Director Mode'}
         </button>}
-        {list.length > 1 && <select aria-label="Open scene" value={scene?.id ?? ''} disabled={busy} onChange={event => void open(event.target.value)}>
+        {list.length > 1 && <select aria-label="Open scene" value={scene?.id ?? ''} disabled={busy} onChange={event => { const target = event.target.value; guardLeave('open another scene', () => void open(target)) }}>
           {list.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>}
-        <button className="secondary" disabled={busy} onClick={() => void create()}><Plus size={16} />New scene</button>
+        <button className="secondary" disabled={busy} onClick={() => guardLeave('start a new scene', () => void create())}><Plus size={16} />New scene</button>
         {scene && <button className="primary" data-testid="scene-save" disabled={busy || !dirty} onClick={() => void save()}>
           <Save size={16} />{busy ? 'Saving…' : dirty ? 'Save scene' : `Saved · v${scene.version}`}
         </button>}
@@ -762,7 +770,7 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
             <section data-testid="scene-shot">
               <h2>Shot setup</h2>
               {studio.shots.length === 0
-                ? <p className="model-note">Create a shot slot before rendering a scene frame for review.</p>
+                ? <p className="model-note">Create a shot before rendering a scene frame for review.</p>
                 : <>
                     <label>Send still to<select aria-label="Scene shot" value={shotId} disabled={busy}
                       onChange={event => setShotId(event.target.value)}>
@@ -799,7 +807,8 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                     </div>}
                     <button type="button" className="primary scene-render-still" disabled={busy || dirty || !shotCamera || !captureStill}
                       onClick={() => void renderStill()}>{busy ? 'Rendering…' : 'Render still for review'}</button>
-                    <p className="model-note">This explicit action freezes the saved scene, this separate shot camera, timing, and the {studio.project.deliveryWidth} × {studio.project.deliveryHeight} {studio.project.colorSpace} delivery canvas. It creates a working candidate; approval still happens in Review.</p>
+                    {dirty && <p className="model-note scene-render-blocked" role="status">Save the scene first. A render always comes from a saved version, so it can be traced back exactly.</p>}
+                    <p className="model-note">This explicit action freezes the saved scene, this separate shot camera, timing, and the {studio.project.deliveryWidth} × {studio.project.deliveryHeight} {studio.project.colorSpace} delivery canvas. It creates a working version; approval still happens in Review.</p>
                     {approvedBinding && <>
                       <button type="button" className="primary scene-render-still" data-testid="scene-render-take"
                         disabled={busy || dirty || !captureStill}

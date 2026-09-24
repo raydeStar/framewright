@@ -112,7 +112,7 @@ export default function ProjectSwitcher({ project, creating, onCreatingChange, o
             <span className="project-menu-counts">
               <em>{item.shotCount}</em> shots
               <i />
-              <em>{item.authorityCount}</em> authorities
+              <em>{item.authorityCount}</em> references
             </span>
           </button>
           {/* Deleting the active project is refused by the server; hiding the
@@ -358,7 +358,7 @@ function DeleteProjectDialog({ project, onClose, onDeleted, onError }: { project
     setBusy(true); setFailure(undefined)
     try {
       const summary = await studioApi.deleteProject(project.id, acceptRatifiedLoss)
-      onDeleted(`${summary.name} deleted: ${summary.shots} shot${summary.shots === 1 ? '' : 's'}, ${summary.authorities} authorit${summary.authorities === 1 ? 'y' : 'ies'}, and ${summary.ratifiedVersions} ratified version${summary.ratifiedVersions === 1 ? '' : 's'}.`)
+      onDeleted(`${summary.name} deleted: ${summary.shots} shot${summary.shots === 1 ? '' : 's'}, ${summary.authorities} reference${summary.authorities === 1 ? '' : 's'}, and ${summary.ratifiedVersions} approved version${summary.ratifiedVersions === 1 ? '' : 's'}.`)
     } catch (reason) {
       if (reason instanceof ApiError) setFailure(reason.message)
       else onError(reason instanceof Error ? reason.message : 'Could not delete the project.')
@@ -372,7 +372,7 @@ function DeleteProjectDialog({ project, onClose, onDeleted, onError }: { project
         <button type="button" onClick={onClose} aria-label="Close delete project"><X /></button>
       </header>
       <p className="delete-project-scope">
-        This removes <strong>{project.shotCount} shot{project.shotCount === 1 ? '' : 's'}</strong> and <strong>{project.authorityCount} authorit{project.authorityCount === 1 ? 'y' : 'ies'}</strong> with every candidate, comment, manifest, and ratified version scoped to this project.
+        This removes <strong>{project.shotCount} shot{project.shotCount === 1 ? '' : 's'}</strong> and <strong>{project.authorityCount} authorit{project.authorityCount === 1 ? 'y' : 'ies'}</strong> with every version, comment, manifest, and approved version scoped to this project.
       </p>
       <p className="delete-project-note">Stored asset files are kept: the asset store is content-addressed and shared, so another project may hold the same bytes. The audit trail is also kept, as the record that this project existed.</p>
       <label className="delete-project-confirm">Type <strong>{project.name}</strong> to confirm
@@ -380,7 +380,7 @@ function DeleteProjectDialog({ project, onClose, onDeleted, onError }: { project
       </label>
       <label className="delete-project-accept">
         <input type="checkbox" checked={acceptRatifiedLoss} onChange={event => setAcceptRatifiedLoss(event.target.checked)} />
-        <span>I accept the loss of ratified approval evidence in this project.</span>
+        <span>I accept the loss of approval evidence in this project.</span>
       </label>
       {failure && <p className="form-error" role="alert"><CircleAlert size={15} />{failure}</p>}
       <footer>

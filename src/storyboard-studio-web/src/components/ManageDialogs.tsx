@@ -173,7 +173,7 @@ export function AuthorityEditorDialog({ authority, onClose, onSaved }: {
     setHistoryLoading(true)
     void studioApi.referenceVersions(authority.id)
       .then(items => { if (active) setVersions(items) })
-      .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : 'Could not load authority history.') })
+      .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : 'Could not load reference history.') })
       .finally(() => { if (active) setHistoryLoading(false) })
     return () => { active = false }
   }, [authority])
@@ -191,16 +191,16 @@ export function AuthorityEditorDialog({ authority, onClose, onSaved }: {
         ? await studioApi.createReferenceVersion(authority.id, { expectedVersion: authority.version, description, lockedConstraint, imageAssetId: asset?.id ?? authority.imageAssetId })
         : await studioApi.createReference({ name, category, description, lockedConstraint, accent, imageAssetId: asset?.id })
       onSaved(saved)
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'The authority could not be saved.') }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'The reference could not be saved.') }
     finally { setBusy(false) }
   }
 
   return <Dialog className="modal-backdrop entity-backdrop" onClose={onClose} labelledBy="authority-editor-title" initialFocus="#authority-name">
     <form className="entity-dialog authority-editor" onSubmit={submit}>
-      <header><div className="entity-icon authority"><LockKeyhole /></div><div><p className="eyebrow">{authority ? `${authority.name} · v${authority.version}` : 'Approved production reference'}</p><h2 id="authority-editor-title">{authority ? 'Create authority version' : 'Add authority'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close authority editor"><X /></button></header>
+      <header><div className="entity-icon authority"><LockKeyhole /></div><div><p className="eyebrow">{authority ? `${authority.name} · v${authority.version}` : 'Approved production reference'}</p><h2 id="authority-editor-title">{authority ? 'Create reference version' : 'Add reference'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close reference editor"><X /></button></header>
       <div className="entity-form">
         <div className="authority-import">
-          <div className="authority-import-preview">{preview || authority?.imageUrl ? <img src={preview ?? authority?.imageUrl} alt="Authority preview" /> : <ImagePlus />}</div>
+          <div className="authority-import-preview">{preview || authority?.imageUrl ? <img src={preview ?? authority?.imageUrl} alt="Reference preview" /> : <ImagePlus />}</div>
           <label className="file-action"><ImagePlus size={17} /><span><strong>{imageLabel}</strong><small>Structural validation · stored by content hash</small></span><input type="file" accept="image/png,image/jpeg" onChange={event => chooseImage(event.target.files?.[0])} /></label>
         </div>
         <div className="form-grid two">
@@ -211,10 +211,10 @@ export function AuthorityEditorDialog({ authority, onClose, onSaved }: {
         <label><span>Locked constraint</span><textarea value={lockedConstraint} onChange={event => setLockedConstraint(event.target.value)} required maxLength={800} placeholder="State the detail that must never drift." /></label>
         {!authority && <label><span>Board accent</span><div className="color-field"><input type="color" value={accent} onChange={event => setAccent(event.target.value)} /><code>{accent}</code></div></label>}
         <div className="form-authority-note"><BadgeCheck size={17} /><span><strong>{authority ? `Version ${authority.version + 1} will become the approved reference.` : 'Version 1 becomes the approved reference.'}</strong> Earlier versions stay protected and available.</span></div>
-        {authority && <section className="authority-history" aria-labelledby="authority-history-title"><div><h3 id="authority-history-title">Approved history</h3><small>Read-only authority versions · newest first</small></div>{historyLoading ? <p className="authority-history-loading"><LoaderCircle className="spin" size={15} />Loading immutable versions…</p> : versions.map(version => <article key={version.id} className={version.version === authority.version ? 'current' : ''}>{version.imageUrl ? <img src={version.imageUrl} alt={`${authority.name} version ${version.version}`} /> : <div className="authority-history-placeholder"><ImagePlus size={16} /></div>}<span><strong>v{version.version}{version.version === authority.version ? ' · Current' : ''}</strong><small>{new Date(version.ratifiedAt).toLocaleDateString()}</small><p>{version.description}</p><em><LockKeyhole size={11} />{version.lockedConstraint}</em></span></article>)}</section>}
+        {authority && <section className="authority-history" aria-labelledby="authority-history-title"><div><h3 id="authority-history-title">Approved history</h3><small>Read-only reference versions · newest first</small></div>{historyLoading ? <p className="authority-history-loading"><LoaderCircle className="spin" size={15} />Loading immutable versions…</p> : versions.map(version => <article key={version.id} className={version.version === authority.version ? 'current' : ''}>{version.imageUrl ? <img src={version.imageUrl} alt={`${authority.name} version ${version.version}`} /> : <div className="authority-history-placeholder"><ImagePlus size={16} /></div>}<span><strong>v{version.version}{version.version === authority.version ? ' · Current' : ''}</strong><small>{new Date(version.ratifiedAt).toLocaleDateString()}</small><p>{version.description}</p><em><LockKeyhole size={11} />{version.lockedConstraint}</em></span></article>)}</section>}
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
-      <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? <LoaderCircle className="spin" /> : <BadgeCheck />}{busy ? 'Ratifying…' : authority ? 'Ratify new version' : 'Create authority'}</button></footer>
+      <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? <LoaderCircle className="spin" /> : <BadgeCheck />}{busy ? 'Ratifying…' : authority ? 'Approve new version' : 'Create reference'}</button></footer>
     </form>
   </Dialog>
 }

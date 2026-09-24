@@ -28,7 +28,7 @@ export default function WorldWorkspace({ project, onSaved }: { project: ProjectS
   // height, min-width/height and overflow instead of redeclaring them.
   return <main className="workspace world-workspace">
     <header className="world-hero">
-      <div><p className="eyebrow"><Globe2 size={14} />Project-wide authority</p><h1>World settings</h1><p>Define the visual language and universal laws once. Every new image, revision, Codex brief, and video manifest inherits them automatically.</p></div>
+      <div><p className="eyebrow"><Globe2 size={14} />Project-wide reference</p><h1>World settings</h1><p>Define the visual language and universal laws once. Every new image, revision, Codex brief, and video manifest inherits them automatically.</p></div>
       <div className="world-inheritance"><ShieldCheck /><span><strong>Used everywhere</strong><small>Included automatically in every new generation</small></span></div>
     </header>
 

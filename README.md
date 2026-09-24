@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/raydeStar/framewright/actions/workflows/ci.yml"><img alt="Framewright continuous integration status" src="https://github.com/raydeStar/framewright/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <img alt="Release candidate" src="https://img.shields.io/badge/status-release%20candidate-6fb7d3">
+  <img alt="Pre-release" src="https://img.shields.io/badge/status-pre--release-6fb7d3">
   <img alt="Local-first application" src="https://img.shields.io/badge/architecture-local--first-16373f">
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-20232a?logo=react">
@@ -35,27 +35,27 @@ Framewright is a local-first AI storyboard and film pre-production studio for di
 
 It is not another prompt box and it is not a ComfyUI graph editor. The artist defines the shot; Framewright freezes the exact intent, camera language, approved references, spatial notes, and locked rules into a reviewable generation packet. ComfyUI, Codex ImageGen, direct GPT Image, video, voice, and YuE2 music remain explicit adapters behind that contract.
 
-> **Current scope:** Framewright is production-hardened release-candidate software for a trusted local Windows workstation. Its deterministic application, packaging, recovery, and browser contracts are automated; live provider acceptance remains workstation- and configuration-dependent. See [release evidence](docs/RELEASE_EVIDENCE.md) for the unvarnished ledger.
+> **Current scope:** Framewright is pre-release software for a trusted local Windows workstation, working towards its first release ([MVP goal](docs/goals/mvp-release.md)). Its application, packaging, recovery and browser contracts are tested automatically. The mandatory live-provider and human acceptance checks for `v0.1.0` are not yet recorded; see [release evidence](docs/RELEASE_EVIDENCE.md) for the ledger.
 
 Docker is the canonical `v0.1.0` workstation runtime. The direct-key OpenAI lane, YuE2 composition/rendering, and paired-tablet review remain clearly marked preview capabilities; the mandatory release path is local ComfyUI and Codex image work through H3 video, two local voices, assembly, recovery, and production export.
 
 ## From sketch to video
 
-1. **Plan the shot** — Name the card, write the dramatic intention and action, choose a lens starting point, and lock the project delivery format.
+1. **Plan the shot** — Describe what happens in a sentence; add camera, action and timing when you want them, choose a lens starting point, and lock the project delivery format.
 2. **Block the composition** — Draw loose shapes or stage poseable people, props, doorways, movement arrows, and reusable joint poses in the tablet-friendly sketch lab.
-3. **Attach visual canon** — Assign approved character identity, wardrobe, location, prop, and style authorities. World laws stay separate from shot-specific framing.
-4. **Generate and iterate** — Run a fast ComfyUI draft or a precision image route, place feedback directly on the frame, compare immutable candidates, and ratify only what passes review.
+3. **Attach visual canon** — Assign approved character identity, wardrobe, location, prop, and style references. World laws stay separate from shot-specific framing.
+4. **Generate and iterate** — Run a fast ComfyUI draft or a precision image route, place feedback directly on the frame, compare immutable versions, and approve only what passes review.
 5. **Animate and assemble** — Choose a shot revision as the start frame, optionally derive a compatible last frame, render review-quality motion, and promote the reviewed take's seed and endpoints into a Max render while picture and sound remain independently editable.
 
 <table>
   <tr>
     <td width="50%">
       <img alt="AI storyboard shot board for planning reviewing and approving a cinematic sequence" src="docs/screenshots/framewright-shot-board.jpg">
-      <br><strong>See the sequence.</strong> Named cards expose stage, runtime, review state, and the next decision at a glance.
+      <br><strong>See the sequence.</strong> Shots expose stage, runtime, review state, and the next decision at a glance.
     </td>
     <td width="50%">
       <img alt="Framewright storyboard sketch lab with composition blocking and reference guided image generation" src="docs/screenshots/framewright-sketch-to-image.jpg">
-      <br><strong>Direct the frame.</strong> A sketch is optional; shot intent, camera, authorities, and constraints travel automatically.
+      <br><strong>Direct the frame.</strong> A sketch is optional; shot intent, camera, references, and constraints travel automatically.
     </td>
   </tr>
   <tr>
@@ -144,7 +144,7 @@ cd framewright
 .\scripts\start.ps1
 ```
 
-The launcher opens [http://127.0.0.1:5179](http://127.0.0.1:5179). It prefers the managed Docker runtime and falls back to the native Windows path when Docker Desktop is unavailable. Codex ImageGen, local voice, and all ComfyUI submission lanes remain off until `scripts/setup.ps1` enables the ones you selected; requested ComfyUI lanes are validated first.
+The launcher opens [http://127.0.0.1:5179](http://127.0.0.1:5179). It prefers the managed Docker runtime and falls back to the native Windows path when Docker Desktop is unavailable. Codex ImageGen, local voice, and all ComfyUI submission lanes start off. Turn on ComfyUI images, ComfyUI video, or one-click Codex images in **Production setup → Image and video generation**, which also tests the ComfyUI address; `scripts/setup.ps1` remains available for voice, music, and scripted setup.
 
 ```powershell
 .\scripts\start.ps1 -Rebuild  # rebuild after container or application changes

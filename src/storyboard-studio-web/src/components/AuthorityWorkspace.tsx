@@ -104,7 +104,7 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
     setLoading(true); setError(undefined)
     Promise.all([studioApi.referenceVersions(authority.id), studioApi.assets(), studioApi.voiceProfiles()])
       .then(([history, media, voices]) => { if (current && epoch === loadEpoch.current) { setVersions(history); setAssets(media); setVoiceProfiles(voices); setSelectedVersion(initialVersion) } })
-      .catch(reason => { if (current && epoch === loadEpoch.current) setError(reason instanceof Error ? reason.message : 'Could not open this authority.') })
+      .catch(reason => { if (current && epoch === loadEpoch.current) setError(reason instanceof Error ? reason.message : 'Could not open this reference.') })
       .finally(() => { if (current && epoch === loadEpoch.current) setLoading(false) })
     return () => { current = false }
   }, [authority.id])
@@ -145,7 +145,7 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true); setError(undefined)
-    try { await action() } catch (reason) { setError(reason instanceof Error ? reason.message : 'That authority change could not be completed.') }
+    try { await action() } catch (reason) { setError(reason instanceof Error ? reason.message : 'That reference change could not be completed.') }
     finally { setBusy(false) }
   }
 
@@ -162,7 +162,7 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
       imageAssetId: imageAssetId ?? selected?.imageAssetId,
     })
     await refreshVersions(saved.version)
-    onChanged(saved, `${saved.name} v${saved.version} added to the top of the authority stack.`)
+    onChanged(saved, `${saved.name} v${saved.version} added to the top of the reference stack.`)
   })
 
   const importImage = async (picked?: File) => {
@@ -192,7 +192,7 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
   // the other, which is what keeps a delivered frame explainable.
   const promoteToLibrary = () => run(async () => {
     const entry = await studioApi.promoteToLibrary(authority.id)
-    onChanged(authority, `${entry.name} is in the authority library at v${entry.version}. Other projects can import it as a copy.`)
+    onChanged(authority, `${entry.name} is in the reference library at v${entry.version}. Other projects can import it as a copy.`)
   })
 
   const removeVersion = () => selected && run(async () => {
@@ -203,14 +203,14 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
   })
 
   const removeAuthority = () => run(async () => {
-    if (!window.confirm(`Delete the entire ${authority.name} authority and all of its revisions? This cannot be undone.`)) return
+    if (!window.confirm(`Delete the entire ${authority.name} reference and all of its revisions? This cannot be undone.`)) return
     await studioApi.deleteReference(authority.id)
     onDeleted(`${authority.name} was deleted.`)
   })
 
   const generationReferences = useMemo<AssetGenerationReference[]>(() => {
     const candidates: AssetGenerationReference[] = [
-      ...studio.references.filter(item => item.imageAssetId && item.imageUrl).map(item => ({ id: `authority:${item.id}`, assetId: item.imageAssetId!, label: item.name, detail: `${item.category} · authority v${item.version}`, imageUrl: item.imageUrl!, source: 'Authority' as const })),
+      ...studio.references.filter(item => item.imageAssetId && item.imageUrl).map(item => ({ id: `authority:${item.id}`, assetId: item.imageAssetId!, label: item.name, detail: `${item.category} · reference v${item.version}`, imageUrl: item.imageUrl!, source: 'Authority' as const })),
       ...studio.shots.filter(shot => shot.currentAssetId && shot.currentAssetUrl).map(shot => ({ id: `shot:${shot.id}`, assetId: shot.currentAssetId!, label: `${shot.code} · ${shot.title}`, detail: `${shot.stage} v${shot.version}`, imageUrl: shot.currentAssetUrl!, source: 'Shot' as const })),
       ...assets.filter(asset => asset.kind === 'Image' && !asset.isArchived).map(asset => ({ id: `asset:${asset.id}`, assetId: asset.id, label: asset.displayName, detail: asset.source, imageUrl: asset.contentUrl, source: 'Asset' as const })),
     ]
@@ -221,7 +221,7 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
   const generate = () => {
     const pinnedDirections = openReviewNotes.length === 0 ? '' : `\n\nPINNED IMAGE REVISION NOTES (apply every note while preserving unmentioned content):\n${openReviewNotes.map((note, index) => `- Note ${index + 1} at ${Math.round(note.x * 100)}% across / ${Math.round(note.y * 100)}% down: ${note.body}`).join('\n')}`
     onOpenGeneration({
-    id: crypto.randomUUID(), name: `${authority.name} authority revision`,
+    id: crypto.randomUUID(), name: `${authority.name} reference revision`,
     initialPrompt: `Revise the selected ${authority.category.toLowerCase()} authority for ${authority.name}. Preserve everything that is not explicitly changed.\n\nSELECTED AUTHORITY: ${authority.name} v${selected?.version ?? authority.version}\n\nIdentity and context: ${description.trim()}\n\nLocked constraint: ${lockedConstraint.trim()}${pinnedDirections}\n\nMake this a clear reusable authority image rather than a one-off dramatic shot.`,
     route: 'fast', underlayAssetId: selected?.imageAssetId, destination: 'authority',
     references: generationReferences,
@@ -258,27 +258,27 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
         consentConfirmed: false, consentAttestation: '',
       })
       setVoiceProfiles(await studioApi.voiceProfiles()); setAuditions([]); setCastingOpen(false)
-      onChanged(authority, `${profile.name} approved as ${authority.name}'s voice authority.`)
+      onChanged(authority, `${profile.name} approved as ${authority.name}'s voice reference.`)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not approve that voice audition.') }
     finally { setVoiceBusy(false) }
   }
 
   return <main className="workspace authority-workspace">
     <aside className="authority-version-rail">
-      <button className="authority-back" onClick={onBack}><ArrowLeft size={16} />Authorities</button>
+      <button className="authority-back" onClick={onBack}><ArrowLeft size={16} />References</button>
       <div className="authority-rail-heading"><small>Version stack</small><strong>{authority.name}</strong><span>The top revision is what new work uses.</span></div>
       <div className="authority-version-list" role="listbox" aria-label={`${authority.name} versions`}>
         {versions.map(version => <button key={version.id} role="option" aria-selected={selectedVersion === version.version} className={`${selectedVersion === version.version ? 'active' : ''} ${version.version === authority.version ? 'live' : ''}`} onClick={() => selectVersion(version)}>
           <span className="authority-version-thumb">{version.imageUrl ? <img src={version.imageUrl} alt="" /> : <Artwork variant={authority.visualVariant} muted />}</span>
-          <span><strong>v{version.version}</strong><small>{version.version === authority.version ? 'Live authority' : new Date(version.ratifiedAt).toLocaleDateString()}</small></span>
+          <span><strong>v{version.version}</strong><small>{version.version === authority.version ? 'Live reference' : new Date(version.ratifiedAt).toLocaleDateString()}</small></span>
           {version.version === authority.version && <BadgeCheck size={15} />}
         </button>)}
       </div>
-      <button className="authority-delete-all" onClick={() => void removeAuthority()} disabled={busy}><Trash2 size={15} />Delete authority</button>
+      <button className="authority-delete-all" onClick={() => void removeAuthority()} disabled={busy}><Trash2 size={15} />Delete reference</button>
     </aside>
 
     <section className="authority-stage">
-      <header><div><p className="eyebrow">{authority.category} authority · v{selectedVersion}</p><h1>{authority.name}</h1></div><div className={`authority-live-badge ${isLive ? 'live' : ''}`}>{isLive ? <BadgeCheck size={15} /> : <CopyCheck size={15} />}{isLive ? 'Live authority' : 'Historical revision'}</div></header>
+      <header><div><p className="eyebrow">{authority.category} reference · v{selectedVersion}</p><h1>{authority.name}</h1></div><div className={`authority-live-badge ${isLive ? 'live' : ''}`}>{isLive ? <BadgeCheck size={15} /> : <CopyCheck size={15} />}{isLive ? 'Live reference' : 'Historical revision'}</div></header>
       <div className={`authority-canvas ${fileDragging ? 'file-drop-active' : ''}`} onDragEnter={dragEnter} onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDragLeave={dragLeave} onDrop={dropImage}>
         {loading ? <LoaderCircle className="spin" /> : selected?.imageUrl ? <img src={selected.imageUrl} alt={`${authority.name} version ${selected.version}`} /> : <div className="authority-artwork"><Artwork variant={authority.visualVariant} label={`${authority.name} v${selectedVersion}`} /></div>}
         <AssetReviewPins assetId={selected?.imageAssetId} assetLabel={`${authority.name} v${selectedVersion}`} onNotesChanged={setReviewNotes} onError={setError} />
@@ -286,14 +286,14 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
         <div className="authority-canvas-label"><span>{authority.name.toUpperCase()} · AUTHORITY v{selectedVersion}</span><span>{selected?.contentHash.slice(0, 12)}</span></div>
       </div>
       <div className="authority-stage-actions">
-        <input ref={file} className="sr-only" type="file" accept="image/png,image/jpeg" aria-label="Choose authority image" onChange={event => void importImage(event.target.files?.[0])} />
+        <input ref={file} className="sr-only" type="file" accept="image/png,image/jpeg" aria-label="Choose reference image" onChange={event => void importImage(event.target.files?.[0])} />
         <button className="secondary" onClick={() => file.current?.click()} disabled={busy}><Upload size={17} />Import new image</button>
         <button className="primary" onClick={generate} disabled={busy || !description.trim() || !lockedConstraint.trim()}><Sparkles size={17} />{openReviewNotes.length > 0 ? `Regenerate from ${openReviewNotes.length} note${openReviewNotes.length === 1 ? '' : 's'}` : 'Generate new revision'}</button>
-        {!isLive && <button className="primary promote" onClick={() => void promote()} disabled={busy}><CopyCheck size={17} />Make this the live authority</button>}
+        {!isLive && <button className="primary promote" onClick={() => void promote()} disabled={busy}><CopyCheck size={17} />Make this the live reference</button>}
         {/* Promote-up. Always available, because reusability is usually discovered
             after the fact — an authority that already came from the library adds a
             version to it rather than creating a duplicate. */}
-        <button className="secondary" onClick={() => void promoteToLibrary()} disabled={busy} title="Make this authority reusable in other projects">
+        <button className="secondary" onClick={() => void promoteToLibrary()} disabled={busy} title="Make this reference reusable in other projects">
           <ArrowUpToLine size={17} />Promote to library
         </button>
         {versions.length > 1 && <button className="danger" onClick={() => void removeVersion()} disabled={busy}><Trash2 size={16} />Delete v{selectedVersion}</button>}
@@ -302,12 +302,12 @@ export default function AuthorityWorkspace({ studio, authority, onBack, onOpenGe
     </section>
 
     <aside className="authority-inspector">
-      <header><Palette size={17} /><span><small>Authority inspector</small><strong>Identity and constraints</strong></span></header>
+      <header><Palette size={17} /><span><small>Reference inspector</small><strong>Identity and constraints</strong></span></header>
       <div className="authority-inspector-scroll">
         <section><h3>Library identity</h3><label>Name<input value={name} maxLength={120} onChange={event => setName(event.target.value)} /></label><label>What this reference controls<select value={category} onChange={event => setCategory(event.target.value)}>{categories.map(value => <option key={value}>{value}</option>)}</select><small className="authority-category-guidance">{categoryGuidance[category]}</small></label><label>Board accent<span className="authority-color"><input type="color" value={accent} onChange={event => setAccent(event.target.value)} /><code>{accent}</code></span></label><button className="secondary" onClick={() => void saveIdentity()} disabled={busy || !identityDirty || !name.trim()}><Save size={15} />Save identity</button></section>
         <section><h3>Revision content</h3><p className="authority-inspector-note">Edits create a new top revision. Existing versions are never overwritten.</p><label>Identity and context<textarea value={description} maxLength={1600} onChange={event => setDescription(event.target.value)} /></label><label>Locked constraint<textarea value={lockedConstraint} maxLength={800} onChange={event => setLockedConstraint(event.target.value)} /></label><p className="authority-inspector-note">For asymmetric details, name the subject's anatomical side: for example, "small cut through anatomical left eyebrow" or "right forearm wristguard only."</p><div className="authority-lock-note"><LockKeyhole size={15} /><span>This exact text and image travel together in frozen generation manifests.</span></div><button className="primary" onClick={() => void saveRevision()} disabled={busy || !contentDirty || !description.trim() || !lockedConstraint.trim()}><BadgeCheck size={16} />Save as new revision</button></section>
         {authority.category === 'Character' && <section className="character-voice-authority voice-casting-authority">
-          <div className="voice-section-title"><h3>Voice authority</h3><button className="text-button" onClick={() => setCastingOpen(value => !value)}>{castingOpen ? 'Close casting' : voiceProfile ? 'Recast' : 'Design voice'}</button></div>
+          <div className="voice-section-title"><h3>Voice reference</h3><button className="text-button" onClick={() => setCastingOpen(value => !value)}>{castingOpen ? 'Close casting' : voiceProfile ? 'Recast' : 'Design voice'}</button></div>
           {voiceProfile ? <><div className="voice-authority-heading"><Volume2 size={17} /><span><strong>{voiceProfile.name}</strong><small>{voiceProfile.provider} · approved sample</small></span><BadgeCheck size={16} /></div>{voiceProfile.sampleAssetUrl && <audio controls preload="metadata" src={voiceProfile.sampleAssetUrl}>Approved voice sample for {authority.name}</audio>}<p className="authority-inspector-note">New dialogue uses this exact sample and calibration text. Recasting creates another version; it never overwrites this proof.</p></> : <div className="voice-authority-empty"><Volume2 size={17} /><span><strong>No voice cast yet</strong><small>Generate three local auditions here, then approve the one that belongs to this character.</small></span></div>}
           {castingOpen && <div className="voice-casting-panel">
             <div className="voice-local-badge"><WandSparkles size={15} /><span><strong>Qwen3-TTS · local</strong><small>Synthetic voice design · no API key</small></span></div>

@@ -27,7 +27,7 @@ export default function AuthorityLibraryDialog({ onClose, onChanged, onError }: 
 
   const load = useCallback(async () => {
     try { setEntries(await studioApi.library()); setFailure(undefined) }
-    catch (reason) { onError(reason instanceof Error ? reason.message : 'Could not read the authority library.') }
+    catch (reason) { onError(reason instanceof Error ? reason.message : 'Could not read the reference library.') }
   }, [onError])
   useEffect(() => { void load() }, [load])
 
@@ -47,7 +47,7 @@ export default function AuthorityLibraryDialog({ onClose, onChanged, onError }: 
     try {
       if (action === 'import') {
         const imported = await studioApi.importLibraryAuthority(entry.id)
-        onChanged(`${imported.name} imported from the library as a project authority at v${imported.version}.`)
+        onChanged(`${imported.name} imported from the library as a project reference at v${imported.version}.`)
       } else if (action === 'pull') {
         const pulled = await studioApi.pullLibraryUpdate(entry.importedAsReferenceId!)
         onChanged(`${pulled.name} updated to v${pulled.version} from library v${entry.version}. Earlier versions are unchanged.`)
@@ -64,25 +64,25 @@ export default function AuthorityLibraryDialog({ onClose, onChanged, onError }: 
       <header>
         <div>
           <p className="eyebrow">Global library → current project</p>
-          <h2 id="library-title">Import authorities</h2>
-          <p>Choose only what this production needs. Imported authorities become project-local copies with exact version provenance; the wider library stays out of shot controls.</p>
+          <h2 id="library-title">Import references</h2>
+          <p>Choose only what this production needs. Imported references become project-local copies with exact version provenance; the wider library stays out of shot controls.</p>
         </div>
-        <button type="button" onClick={onClose} aria-label="Close authority library" data-dialog-focus><X /></button>
+        <button type="button" onClick={onClose} aria-label="Close reference library" data-dialog-focus><X /></button>
       </header>
 
       <div className="library-scroll">
         {!entries && <div className="library-loading"><LoaderCircle className="spin" size={16} />Reading the library…</div>}
-        {entries && entries.length > 0 && <div className="library-filters" aria-label="Filter authority library">
-          <label className="library-search"><Search size={15} /><input aria-label="Search global authorities" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search people, wardrobe, places, props…" /></label>
-          <select aria-label="Authority category" value={category} onChange={event => setCategory(event.target.value)}>{categories.map(value => <option key={value}>{value}</option>)}</select>
-          <div className="library-scope" role="group" aria-label="Authority availability"><button type="button" aria-pressed={show === 'available'} className={show === 'available' ? 'active' : ''} onClick={() => setShow('available')}>Available</button><button type="button" aria-pressed={show === 'all'} className={show === 'all' ? 'active' : ''} onClick={() => setShow('all')}>All</button></div>
+        {entries && entries.length > 0 && <div className="library-filters" aria-label="Filter reference library">
+          <label className="library-search"><Search size={15} /><input aria-label="Search global references" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search people, wardrobe, places, props…" /></label>
+          <select aria-label="Reference category" value={category} onChange={event => setCategory(event.target.value)}>{categories.map(value => <option key={value}>{value}</option>)}</select>
+          <div className="library-scope" role="group" aria-label="Reference availability"><button type="button" aria-pressed={show === 'available'} className={show === 'available' ? 'active' : ''} onClick={() => setShow('available')}>Available</button><button type="button" aria-pressed={show === 'all'} className={show === 'all' ? 'active' : ''} onClick={() => setShow('all')}>All</button></div>
         </div>}
         {entries?.length === 0 && <div className="library-empty">
           <Library />
           <h3>The library is empty</h3>
-          <p>Open a project authority and choose <strong>Promote to library</strong> when it is ready for reuse elsewhere.</p>
+          <p>Open a project reference and choose <strong>Promote to library</strong> when it is ready for reuse elsewhere.</p>
         </div>}
-        {entries && entries.length > 0 && visibleEntries.length === 0 && <div className="library-empty"><Search /><h3>No matching authorities</h3><p>Try another search or switch to <strong>All</strong> to include authorities already in this project.</p></div>}
+        {entries && entries.length > 0 && visibleEntries.length === 0 && <div className="library-empty"><Search /><h3>No matching references</h3><p>Try another search or switch to <strong>All</strong> to include references already in this project.</p></div>}
         {visibleEntries.map(entry => {
           const busy = busyId === entry.id
           return <article key={entry.id} className={`library-card ${entry.updateAvailable ? 'has-update' : ''}`}>
@@ -91,7 +91,7 @@ export default function AuthorityLibraryDialog({ onClose, onChanged, onError }: 
                   them buys nothing, and lazy loading inside a top-layer dialog does
                   not reliably trigger — the images simply never fetched. */}
               {entry.imageUrl
-                ? <img src={entry.imageUrl} alt={`${entry.name} library authority`} />
+                ? <img src={entry.imageUrl} alt={`${entry.name} library reference`} />
                 : <span>{entry.name.slice(0, 1)}</span>}
             </div>
             <div className="library-copy">
@@ -124,7 +124,7 @@ export default function AuthorityLibraryDialog({ onClose, onChanged, onError }: 
       </div>
 
       <footer>
-        <small>Only project-local authorities appear in shot reference pickers. Pulling an update appends a new local version; earlier generations remain reproducible.</small>
+        <small>Only project-local references appear in shot reference pickers. Pulling an update appends a new local version; earlier generations remain reproducible.</small>
         <button type="button" className="primary" onClick={onClose}>Done</button>
       </footer>
     </section>

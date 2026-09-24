@@ -160,15 +160,15 @@ test('global authorities are searchable and import into only the current project
   })
 
   await page.goto('/')
-  await page.getByRole('tab', { name: /Authorities/ }).click()
-  await page.getByRole('button', { name: 'Import authority' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Import authorities' })
+  await page.getByRole('tab', { name: /References/ }).click()
+  await page.getByRole('button', { name: 'Import reference' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Import references' })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByText('Harbour Pilot')).toBeVisible()
   await expect(dialog.getByText('Sky Observatory')).toBeHidden()
-  await dialog.getByRole('textbox', { name: 'Search global authorities' }).fill('pilot')
+  await dialog.getByRole('textbox', { name: 'Search global references' }).fill('pilot')
   await dialog.getByRole('button', { name: 'Add to project' }).click()
-  await expect(page.getByText(/Harbour Pilot imported from the library as a project authority/)).toBeVisible()
+  await expect(page.getByText(/Harbour Pilot imported from the library as a project reference/)).toBeVisible()
   expect(imports).toBe(1)
   await expectNoHorizontalPageOverflow(page)
   await expectNoSeriousAccessibilityViolations(page)
@@ -304,7 +304,7 @@ test('blocking kit stages distinct full-body people with editable poses and dura
   await expect(page.getByRole('region', { name: 'Selected blocking object' })).toBeVisible()
   await page.getByLabel('Name').fill('Left ceremonial guard')
   await page.getByLabel('Pose', { exact: true }).selectOption('Attention')
-  await page.getByLabel('Appearance / role authority').selectOption(guard.id)
+  await page.getByLabel('Appearance / role reference').selectOption(guard.id)
   await expect(page.getByText('Keep full body in frame')).toBeVisible()
   await page.getByRole('button', { name: 'Duplicate' }).click()
   await page.getByLabel('Name').fill('Right ceremonial guard')
@@ -432,7 +432,7 @@ test('candidate decisions carry unresolved instructions forward without leaking 
   await expect(page.getByRole('button', { name: /Live-version-only note/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Archived-version-only note/ })).toBeVisible()
 
-  await page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option', { name: new RegExp(`v${earlier!.version}`) }).click()
+  await page.getByRole('listbox', { name: 'Versions' }).getByRole('option', { name: new RegExp(`v${earlier!.version}`) }).click()
   await expect(page.getByTestId('shot-workspace')).toBeVisible()
   await expect(page.locator('.shot-canvas .shot-asset')).toHaveAttribute('src', earlier!.assetUrl!)
   await expect(page.getByRole('button', { name: /Live-version-only note/ })).toBeHidden()
@@ -454,10 +454,20 @@ test('candidate decisions carry unresolved instructions forward without leaking 
   expect(copied?.version).toBe(oldVersion + 1)
   expect(copied?.assetId).toBe(earlier!.assetId)
 
-  await expect(page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option').first()).toContainText(`v${oldVersion + 1}`)
-  await page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option', { name: new RegExp(`v${live!.version}`) }).click()
+  await expect(page.getByRole('listbox', { name: 'Versions' }).getByRole('option').first()).toContainText(`v${oldVersion + 1}`)
+  await page.getByRole('listbox', { name: 'Versions' }).getByRole('option', { name: new RegExp(`v${live!.version}`) }).click()
   await expect(page.getByRole('button', { name: /Live-version-only note/ })).toBeVisible()
+  // Deleting asks first, and keeping it really keeps it.
   await page.getByRole('button', { name: 'Delete draft' }).click()
+  const confirm = page.getByTestId('confirm-dialog')
+  await expect(confirm).toContainText(`Delete draft v${live!.version}?`)
+  await expect(confirm.getByRole('button', { name: 'Keep it' })).toBeFocused()
+  await confirm.getByRole('button', { name: 'Keep it' }).click()
+  await expect(confirm).toHaveCount(0)
+  const kept = await (await page.request.get(`/api/shots/${shotId}/candidates`)).json() as Array<{ id: string }>
+  expect(kept.some(candidate => candidate.id === live!.id)).toBe(true)
+  await page.getByRole('button', { name: 'Delete draft' }).click()
+  await confirm.getByRole('button', { name: `Delete v${live!.version}` }).click()
   await expect.poll(async () => {
     const candidates = await (await page.request.get(`/api/shots/${shotId}/candidates`)).json() as Array<{ id: string }>
     return candidates.some(candidate => candidate.id === live!.id)
@@ -863,7 +873,7 @@ test('timeline clips and the volume slider persist real edits', async ({ page },
   await page.getByRole('button', { name: 'Voice profiles' }).click()
   const voices = page.getByRole('dialog', { name: 'Character voices' })
   await voices.getByLabel('Profile name').fill(`Ennix ${suffix}`)
-  const characterAuthority = voices.getByRole('combobox', { name: 'Character authority', exact: true })
+  const characterAuthority = voices.getByRole('combobox', { name: 'Character reference', exact: true })
   const firstCharacterId = await characterAuthority.locator('option').nth(1).getAttribute('value')
   await characterAuthority.selectOption(firstCharacterId!)
   await voices.getByLabel('Provider', { exact: true }).fill('Editorial provider')
@@ -874,7 +884,7 @@ test('timeline clips and the volume slider persist real edits', async ({ page },
   wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(2, 40)
   await voices.locator('input[type="file"]').setInputFiles({ name: `ennix-${suffix.toLowerCase()}.wav`, mimeType: 'audio/wav', buffer: wav })
   await expect(voices.getByText(/ready to attach/)).toBeVisible()
-  await voices.getByRole('button', { name: 'Create voice authority' }).click()
+  await voices.getByRole('button', { name: 'Create voice reference' }).click()
   await expect(voices.getByText(`Ennix ${suffix}`, { exact: true })).toBeVisible()
   await voices.getByRole('button', { name: 'Done' }).click()
 
@@ -964,9 +974,9 @@ test('inline candidate review keeps versions, feedback, and tablet controls in p
   await page.reload()
   await page.getByRole('button', { name: new RegExp(`Open ${shotCode},`) }).click()
 
-  const options = page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option')
+  const options = page.getByRole('listbox', { name: 'Versions' }).getByRole('option')
   await expect(options).toHaveCount(2)
-  const archived = page.getByRole('listbox', { name: 'Candidate versions' }).locator('.review-chip:not(.is-current)').first()
+  const archived = page.getByRole('listbox', { name: 'Versions' }).locator('.review-chip:not(.is-current)').first()
   const archivedVersion = (await archived.innerText()).trim()
   await archived.click()
   await expect(archived).toHaveAttribute('aria-selected', 'true')
@@ -1149,7 +1159,7 @@ test('a ratified draft can regenerate from an exact reference note without hidin
   await page.getByRole('button', { name: 'More options' }).click()
 
   const dialog = page.getByRole('dialog', { name: 'Regenerate from feedback' })
-  await expect(dialog.getByText(`${reference.name} · authority v${reference.version}`)).toBeVisible()
+  await expect(dialog.getByText(`${reference.name} · reference v${reference.version}`)).toBeVisible()
   await expect(dialog.getByText(note)).toBeVisible()
   await expect(dialog.getByText('exact reference image included')).toBeVisible()
   await expect(dialog.getByText(new RegExp(`v${shot.version} stays preserved as the approved draft`))).toBeVisible()
@@ -1382,9 +1392,11 @@ test('asset creator directs music to the versioned composition studio', async ({
   await creator.getByRole('tab', { name: 'Music' }).click()
   await expect(creator.locator('.preview-tag')).toHaveText('Editable')
   await expect(creator).toContainText('every score edit creates a recoverable revision')
-  await creator.getByRole('button', { name: 'Go to Sequence → Music' }).click()
-
+  // The button used to only close the dialog. It now leads to where music is made.
+  await creator.getByRole('button', { name: 'Open Sequence for music' }).click()
   await expect(creator).toBeHidden()
+  await expect(page.getByTestId('sequence-workspace')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Music library' })).toBeVisible()
   verifyConsole()
 })
 
@@ -1538,7 +1550,7 @@ test('dropping an image on an authority creates a new immutable top revision', a
   } })
   expect(created.ok()).toBeTruthy()
   await page.goto('/')
-  await page.getByRole('tab', { name: /Authorities/ }).click()
+  await page.getByRole('tab', { name: /References/ }).click()
   await page.getByRole('button', { name: new RegExp(`Open ${name}.*version 1`) }).click()
 
   const canvas = page.locator('.authority-canvas')
@@ -1549,7 +1561,7 @@ test('dropping an image on an authority creates a new immutable top revision', a
   const history = page.getByRole('listbox', { name: `${name} versions` })
   await expect(history.getByRole('option')).toHaveCount(2)
   await expect(history.getByRole('option').first()).toContainText('v2')
-  await expect(history.getByRole('option').first()).toContainText('Live authority')
+  await expect(history.getByRole('option').first()).toContainText('Live reference')
   await expectNoSeriousAccessibilityViolations(page)
   verifyConsole()
 })
@@ -1561,7 +1573,7 @@ test('shot and authority editors persist real production entities', async ({ pag
   const authorityName = tablet ? 'Signal Lantern Tablet' : 'Signal Lantern Desktop'
   await page.goto('/')
 
-  await page.getByRole('button', { name: 'Add card' }).first().click()
+  await page.getByRole('button', { name: 'Add shot' }).first().click()
   const shotDialog = page.getByRole('dialog', { name: 'Add a shot' })
   await shotDialog.getByText('Camera, action and references').click()
   await shotDialog.getByLabel('Shot code').fill(code)
@@ -1575,14 +1587,14 @@ test('shot and authority editors persist real production entities', async ({ pag
   await expect(page.locator('.canvas-caption').getByText(new RegExp(code))).toBeVisible()
 
   await page.getByRole('button', { name: 'Board', exact: true }).click()
-  await page.getByRole('tab', { name: /Authorities/ }).click()
-  await page.getByRole('button', { name: 'Add authority' }).first().click()
-  const authorityDialog = page.getByRole('dialog', { name: 'Add authority' })
+  await page.getByRole('tab', { name: /References/ }).click()
+  await page.getByRole('button', { name: 'Add reference' }).first().click()
+  const authorityDialog = page.getByRole('dialog', { name: 'Add reference' })
   await authorityDialog.getByLabel('Name').fill(authorityName)
   await authorityDialog.getByLabel('Category').selectOption('Prop')
   await authorityDialog.getByLabel('Identity and context').fill('A hand-sized amber signal lantern with a weathered black grip.')
   await authorityDialog.getByLabel('Locked constraint').fill('Exactly three brass ribs surround the amber lens.')
-  await authorityDialog.getByRole('button', { name: 'Create authority' }).click()
+  await authorityDialog.getByRole('button', { name: 'Create reference' }).click()
   await expect(page.getByRole('heading', { name: authorityName })).toBeVisible()
   await expect(page.getByRole('listbox', { name: `${authorityName} versions` }).getByRole('option')).toHaveCount(1)
   await page.getByLabel('Identity and context').fill('A hand-sized amber signal lantern with a weathered black grip and a dim pilot glow.')
@@ -1590,9 +1602,9 @@ test('shot and authority editors persist real production entities', async ({ pag
   const history = page.getByRole('listbox', { name: `${authorityName} versions` })
   await expect(history.getByRole('option')).toHaveCount(2)
   await expect(history.getByRole('option').first()).toContainText('v2')
-  await expect(history.getByRole('option').first()).toContainText('Live authority')
+  await expect(history.getByRole('option').first()).toContainText('Live reference')
   await expect(history.getByRole('option').last()).toContainText('v1')
-  await page.getByRole('button', { name: 'Authorities' }).click()
+  await page.getByRole('button', { name: 'References' }).click()
   await expect(page.getByRole('button', { name: new RegExp(`Open ${authorityName}.*version 2`) })).toBeVisible()
   await expectNoHorizontalPageOverflow(page)
   await expectNoSeriousAccessibilityViolations(page)
@@ -1619,7 +1631,7 @@ test('a shot card can generate directly without visiting the sketchboard', async
   })
   await page.goto('/')
 
-  await page.getByRole('button', { name: 'Add card' }).first().click()
+  await page.getByRole('button', { name: 'Add shot' }).first().click()
   const dialog = page.getByRole('dialog', { name: 'Add a shot' })
   await dialog.getByText('Camera, action and references').click()
   await dialog.getByLabel('Shot code').fill(code)
@@ -1651,13 +1663,13 @@ test('authority workspace promotes, edits, and removes uncited revisions in plac
   await page.request.post(`/api/references/${created.id}/versions`, { data: { expectedVersion: v2.version, description: 'A graphite square continuity token with a centered circular cutout.', lockedConstraint: 'The cutout remains exactly centered.' } })
 
   await page.goto('/')
-  await page.getByRole('tab', { name: /Authorities/ }).click()
+  await page.getByRole('tab', { name: /References/ }).click()
   await page.getByRole('button', { name: new RegExp(`Open ${name}`) }).click()
   const history = page.getByRole('listbox', { name: `${name} versions` })
   await history.getByRole('option', { name: /v1/ }).click()
-  await page.getByRole('button', { name: 'Make this the live authority' }).click()
+  await page.getByRole('button', { name: 'Make this the live reference' }).click()
   await expect(history.getByRole('option').first()).toContainText('v4')
-  await expect(history.getByRole('option').first()).toContainText('Live authority')
+  await expect(history.getByRole('option').first()).toContainText('Live reference')
 
   await history.getByRole('option', { name: /v2/ }).click()
   page.once('dialog', dialog => dialog.accept())
@@ -1703,7 +1715,7 @@ test('generate authority revision uses the exact selected revision as its visibl
   })
 
   await page.goto('/')
-  await page.getByRole('tab', { name: /Authorities/ }).click()
+  await page.getByRole('tab', { name: /References/ }).click()
   await page.getByRole('button', { name: new RegExp(`Open ${name}`) }).click()
   const history = page.getByRole('listbox', { name: `${name} versions` })
   await history.getByRole('option', { name: /v1/ }).click()
@@ -1763,7 +1775,7 @@ test('a completed background authority render appears without leaving the author
   }))
 
   await page.goto('/')
-  await page.getByRole('tab', { name: /Authorities/ }).click()
+  await page.getByRole('tab', { name: /References/ }).click()
   await page.getByRole('button', { name: new RegExp(`Open ${name}.*version 1`) }).click()
   const history = page.getByRole('listbox', { name: `${name} versions` })
   await expect(history.getByRole('option')).toHaveCount(1)
@@ -1779,7 +1791,7 @@ test('a completed background authority render appears without leaving the author
 
   await expect(history.getByRole('option')).toHaveCount(2)
   await expect(history.getByRole('option').first()).toContainText('v2')
-  await expect(history.getByRole('option').first()).toContainText('Live authority')
+  await expect(history.getByRole('option').first()).toContainText('Live reference')
   await expect(page.locator('.authority-stage .eyebrow')).toContainText('v2')
   verifyConsole()
 })
@@ -1804,7 +1816,7 @@ test('image review pins stay on the exact authority asset and feed the next revi
   } })
 
   await page.goto('/')
-  await page.getByRole('tab', { name: /Authorities/ }).click()
+  await page.getByRole('tab', { name: /References/ }).click()
   await page.getByRole('button', { name: new RegExp(`Open ${name}`) }).click()
   await page.getByRole('button', { name: 'Add note' }).click()
   const layer = page.getByLabel(`${name} v1 review layer`)
@@ -1843,7 +1855,7 @@ test('asset library organizes media and carries it into shot work', async ({ pag
   await page.getByRole('button', { name: 'Assets' }).click()
   await expect(page.getByRole('heading', { name: 'Asset library' })).toBeVisible()
   await expect(page.getByText('Project media pool')).toBeVisible()
-  await page.getByRole('button', { name: /^Authorities \d+$/ }).click()
+  await page.getByRole('button', { name: /^References \d+$/ }).click()
   await expect(page.getByText('Immutable canon lives here too')).toBeVisible()
   await expectNoHorizontalPageOverflow(page)
   await page.getByRole('button', { name: /All assets/ }).click()
@@ -1873,9 +1885,9 @@ test('asset library organizes media and carries it into shot work', async ({ pag
   await promotion.locator('summary').click()
   await expect(promotion.getByText('Freeze this exact image and its rules as reusable canon.')).toBeVisible()
   await expect(promotion.getByLabel('What this reference controls')).toBeVisible()
-  await expect(promotion.getByRole('button', { name: 'Create immutable authority' })).toBeEnabled()
+  await expect(promotion.getByRole('button', { name: 'Create immutable reference' })).toBeEnabled()
   await promotion.locator('summary').click()
-  await expect(promotion.getByRole('button', { name: 'Create immutable authority' })).toBeHidden()
+  await expect(promotion.getByRole('button', { name: 'Create immutable reference' })).toBeHidden()
   await inspector.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(page.getByText(/added to SH-010/i)).toBeVisible()
   await page.locator('.image-revision-header').getByRole('button', { name: 'Assets', exact: true }).click()
@@ -2022,7 +2034,7 @@ test('director mode gives the frame the whole workstation without forking shot s
 
   // The archived revision keeps its own locks in full view, and the live
   // head note never migrates onto it.
-  const archived = page.getByRole('listbox', { name: 'Candidate versions' }).locator('.review-chip:not(.is-current)').first()
+  const archived = page.getByRole('listbox', { name: 'Versions' }).locator('.review-chip:not(.is-current)').first()
   const archivedVersion = (await archived.innerText()).trim()
   await archived.click()
   await page.getByRole('button', { name: 'Director mode' }).click()
@@ -2031,7 +2043,7 @@ test('director mode gives the frame the whole workstation without forking shot s
   await expect(page.getByRole('button', { name: 'Place comment' })).toBeDisabled()
   await expect(pin).toBeHidden()
   await page.getByRole('button', { name: 'Exit full view' }).click()
-  await page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option').first().click()
+  await page.getByRole('listbox', { name: 'Versions' }).getByRole('option').first().click()
 
   // Reopening the workspace shows exactly what was saved, and nothing that was
   // only ever a draft.

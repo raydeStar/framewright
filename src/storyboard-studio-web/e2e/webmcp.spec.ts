@@ -166,7 +166,7 @@ test.describe('browser WebMCP collaboration', () => {
     await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(11)
     // The proof job lands a new head asynchronously; read context only once the
     // artist would actually see both revisions.
-    await expect(page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option')).toHaveCount(2)
+    await expect(page.getByRole('listbox', { name: 'Versions' }).getByRole('option')).toHaveCount(2)
 
     type Envelope = { ok: boolean; code: string; data?: { stateToken?: string; subject?: { displayedVersion: number; liveVersion: number; archived: boolean; editable: boolean }; availableActions?: string[] } }
     const call = (name: string, input: object) => page.evaluate(({ name, input }) => {
@@ -179,7 +179,7 @@ test.describe('browser WebMCP collaboration', () => {
     expect(live.data!.subject!.archived).toBe(false)
     expect(live.data!.availableActions).toContain('propose_shot_revision')
 
-    const archived = page.getByRole('listbox', { name: 'Candidate versions' }).locator('.review-chip:not(.is-current)').first()
+    const archived = page.getByRole('listbox', { name: 'Versions' }).locator('.review-chip:not(.is-current)').first()
     const archivedVersion = Number((await archived.innerText()).trim().replace(/[^0-9]/g, ''))
     await archived.click()
     await expect(page.locator('.preview-banner')).toBeVisible()
@@ -199,7 +199,7 @@ test.describe('browser WebMCP collaboration', () => {
     expect(observed.ok).toBe(true)
 
     // A token read while previewing the archive is not valid for the live head.
-    await page.getByRole('listbox', { name: 'Candidate versions' }).getByRole('option').first().click()
+    await page.getByRole('listbox', { name: 'Versions' }).getByRole('option').first().click()
     await expect(page.locator('.preview-banner')).toBeHidden()
     // The workspace settles a frame after the click, so poll rather than assume
     // the agent and the artist are in lockstep to the millisecond.

@@ -88,22 +88,22 @@ test('real ComfyUI canary renders and revises a draft, then places generated mus
 
   // ── 1. Establish the authority the shot will cite ──────────────────────
   console.log('  1. authoring the authority packet')
-  await page.getByRole('tab', { name: /Authorities/ }).click()
-  await page.getByRole('button', { name: 'Add authority' }).first().click()
-  const authorityDialog = page.getByRole('dialog', { name: 'Add authority' })
+  await page.getByRole('tab', { name: /References/ }).click()
+  await page.getByRole('button', { name: 'Add reference' }).first().click()
+  const authorityDialog = page.getByRole('dialog', { name: 'Add reference' })
   await authorityDialog.getByLabel('Name').fill(AUTHORITY)
   await authorityDialog.getByLabel('Category').selectOption('Prop')
   await authorityDialog.getByLabel('Identity and context').fill(
     'A hand-carried brass signal lantern with an amber lens and a worn leather strap.')
   await authorityDialog.getByLabel('Locked constraint').fill(
     'Exactly three brass ribs around the lens. The strap is always on the left shoulder.')
-  await authorityDialog.getByRole('button', { name: 'Create authority' }).click()
+  await authorityDialog.getByRole('button', { name: 'Create reference' }).click()
   await expect(page.getByRole('button', { name: new RegExp(`Open ${AUTHORITY}`) })).toBeVisible()
 
   // ── 2. Author the shot ─────────────────────────────────────────────────
   console.log('  2. authoring the shot')
   await page.getByRole('tab', { name: /Shots/ }).click()
-  await page.getByRole('button', { name: 'Add card' }).first().click()
+  await page.getByRole('button', { name: 'Add shot' }).first().click()
   const shotDialog = page.getByRole('dialog', { name: 'Add a shot' })
   await shotDialog.getByText('Camera, action and references').click()
   await shotDialog.getByLabel('Shot code').fill(SHOT)

@@ -4,7 +4,7 @@
 **Created:** 2026-09-23  
 **Branch:** `mvp-release`  
 **Overall status:** IN_PROGRESS  
-**Active milestone:** R06
+**Active milestone:** R09 (needs the artist; see Section 5)
 
 **Implementation authority:** Existing repository and scoped `AGENTS.md` instructions remain in force. This goal does not authorize provider calls, GPU work, downloads, pushing, tagging, or publishing; each still needs the artist's explicit go-ahead.
 
@@ -48,9 +48,9 @@ Evidence labels follow the 3D goal: **D** deterministic, **A** actual applicatio
 | R03 | New shot: one description is enough, duration in seconds, a button on the empty board, and a blank frame instead of borrowed demo art | VERIFIED |
 | R04 | Generation readiness: generate actions say plainly when nothing is set up, and link to setup | VERIFIED |
 | R05 | In-app generation setup: the ComfyUI endpoint, a connection test and lane switches without scripts or JSON; the setup drawer leads with what the artist needs | VERIFIED |
-| R06 | One word for each concept across the UI | NOT_STARTED |
-| R07 | No silent loss or dead ends (the item 7 findings) | NOT_STARTED |
-| R08 | Hardening: an error boundary, polling that doesn't flicker, readable errors | NOT_STARTED |
+| R06 | One word for each concept across the UI | VERIFIED |
+| R07 | No silent loss or dead ends (the item 7 findings) | VERIFIED |
+| R08 | Hardening: an error boundary, polling that doesn't flicker, readable errors | VERIFIED |
 | R09 | 3D release path: M09, M14, M17 and M18 closed in their own goal | NOT_STARTED |
 | R10 | Ship: a downloadable build, version and changelog, accurate docs, `verify.ps1`, the mandatory acceptance rows, and the hallway test | NOT_STARTED |
 
@@ -217,3 +217,98 @@ an updated studio opened blank (reproduced twice in this session). The
 fallback now sends no-cache, matching the static file middleware.
 first-run.spec asserts it for "/" and a client route.
 ```
+
+### R06 acceptance record
+
+```text
+Milestone / status / date: R06 / VERIFIED / 2026-09-23
+Outcome: One word per concept in what the artist reads: shot (not card or
+  slot), approve (not ratify), reference (not authority), version (not
+  candidate). "Revision" stays for 3D model revisions, which are a separate
+  concept. A TypeScript-parser pass (not regex: a regex pass was tried and
+  would have renamed identifiers and the `approval === 'Ratified'` enum
+  comparison) changed 143 UI strings: JSX text, aria-label/title/placeholder/
+  alt/label values, and sentence literals. It skipped enum comparisons, CSS
+  class templates and prompt contracts sent to generators. Single-word labels
+  were edited by hand (filter chip, asset tab, project-deletion plural). 23
+  server error messages were reworded with interpolation holes preserved
+  (a first attempt had rewritten `{authority.Name}`; caught in dry run).
+  Domain types, API routes, database fields, test ids and prompts are
+  unchanged.
+Evidence: D/A. Frontend check passes. Browser selectors were updated by a
+  second parser pass limited to locator and visible-text arguments (44). The
+  backend's one message assertion was updated. Suites below.
+Limits: Code identifiers and docs still say authority/ratify; the product
+  words for artists are now consistent. Three entry points still open
+  Production setup (Connect, Settings, Local studio).
+```
+
+### R07 acceptance record
+
+```text
+Milestone / status / date: R07 / VERIFIED / 2026-09-23
+Outcome: Deleting a draft (button or Delete key) now asks, with focus on
+  "Keep it". Opening another scene or starting a new one with unsaved scene
+  edits asks, with focus on "Keep editing". A disabled Render still explains
+  that the scene must be saved first. Create new > Music opens Sequence (or
+  says to add a shot first) instead of only closing. The Sequence page shows
+  this project's sequence and shot count instead of the demo's hard-coded
+  intent sentence. The always-green Connect dot is gone. The unused
+  CreateAssetDialog is removed.
+Evidence: D/A. no-silent-loss.spec (3 journeys x desktop + iPad) and the
+  updated draft-delete journey: Keep it really keeps the draft; Delete then
+  removes it.
+Bug detection: bypassing the scene guard fails the confirm assertion;
+  deleting without confirmation fails the draft journey.
+Observed once: in a mixed focused run, the scene journey's name field was
+  briefly absent after creation. It did not reproduce in eight repeats. The
+  initial-load race was checked and is already ticket-guarded; the full-suite
+  result is recorded below.
+Full suite (R06+R07): backend 307 passed; browser 163 passed, 6 skipped, 3
+  failed. All three were tests, not app defects: the existing music journey
+  asserted the old dead end (the dialog just closing), and on iPad the
+  Sequence notes panel is hidden by design. Both were updated; the scene race
+  did not recur.
+```
+
+### R08 acceptance record
+
+```text
+Milestone / status / date: R08 / VERIFIED / 2026-09-23
+Outcome: A render error in any workspace now shows "This view stopped
+  working", says saved work is safe, and offers Reload and Back to the board.
+  The boundary is keyed by workspace, so moving to another view recovers;
+  an outer boundary covers the shell. While a job runs, a poll that returns
+  an identical snapshot keeps the previous object, so an idle poll re-renders
+  nothing. The model-viewer blink itself was already fixed at the viewer
+  (director-mode goal, 2026-09-21). With the no-cache fallback (above), an
+  update no longer opens blank.
+Evidence: D/A. hardening.spec serves a snapshot whose first shot has a null
+  approval: the board fails inside its boundary, the shell stays, Assets
+  renders, and the console records the failure.
+Bug detection: removing the workspace boundary fails the journey at the
+  shell assertion (the root boundary alone blanks the shell).
+Limits: Error toasts already persist until dismissed; success toasts clear
+  after 3.2 s, which is left as is.
+Checkpoint suites (R06-R08): browser 166 passed, 6 skipped, 0 failed;
+  backend 307 passed; frontend check passes.
+```
+
+## 5. What only the artist can do next
+
+R09 (3D path) cannot be closed by automation:
+
+- M09 needs the artist's recorded verdict on the prepared sword derivative
+  (rev 3).
+- M14 (rig creation) is compiler work in `raydeStar/reference-asset-compiler`.
+  AGENTS.md requires explicit authorization for changes to another repository
+  and for GPU or live runs.
+- M16 and M11 need human visual acceptance. M17 needs M14, an actual encoded
+  take and sign-off. M18 is the packaged recovery scenario.
+
+R10 needs, besides engineering:
+
+- Authorization to push `mvp-release`, tag, and publish.
+- The 13 mandatory acceptance rows in RELEASE_EVIDENCE.md and the 15-step QA
+  runbook (human).
+- The hallway test.
