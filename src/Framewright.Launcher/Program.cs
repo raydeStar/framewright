@@ -147,20 +147,27 @@ internal static class Launcher
     /// Starts the studio with no console window and its output in two files.
     /// The files are handed to the child as its own standard handles, so the
     /// launcher can exit while the studio keeps writing; a pipe would tie the
-    /// studio's logging to this process staying alive.
+    /// studio's logging to this process staying alive. Only those three handles
+    /// are inherited: anything else the launcher holds, such as the pipes of a
+    /// script that ran it, would otherwise stay open in the studio and leave
+    /// that script waiting for output that never ends.
     /// </summary>
     private static Process StartHidden(string application, string workingDirectory, string url, string stdout, string stderr)
     {
         using var output = OpenInheritable(stdout);
         using var error = OpenInheritable(stderr);
         using var input = OpenInheritable("NUL", FileMode.Open, FileAccess.Read);
-        var startup = new StartupInfo
+        var inherited = new[] { input.DangerousGetHandle(), output.DangerousGetHandle(), error.DangerousGetHandle() };
+        var startup = new StartupInfoEx
         {
-            cb = Marshal.SizeOf<StartupInfo>(),
-            dwFlags = StartfUseStdHandles,
-            hStdInput = input.DangerousGetHandle(),
-            hStdOutput = output.DangerousGetHandle(),
-            hStdError = error.DangerousGetHandle(),
+            StartupInfo = new StartupInfo
+            {
+                cb = Marshal.SizeOf<StartupInfoEx>(),
+                dwFlags = StartfUseStdHandles,
+                hStdInput = inherited[0],
+                hStdOutput = inherited[1],
+                hStdError = inherited[2],
+            },
         };
         var environment = new StringBuilder();
         foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
@@ -172,10 +179,32 @@ internal static class Launcher
         environment.Append("Urls=").Append(url).Append('\0').Append('\0');
         // CreateProcessW may write into its command line, so it gets a buffer.
         var command = $"\"{application}\"\0".ToCharArray();
-        if (!CreateProcess(null, command, IntPtr.Zero, IntPtr.Zero, true,
-                CreateNoWindow | CreateUnicodeEnvironment, environment.ToString(), workingDirectory,
-                ref startup, out var information))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+        var size = IntPtr.Zero;
+        _ = InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
+        var attributes = Marshal.AllocHGlobal(size);
+        var handles = Marshal.AllocHGlobal(IntPtr.Size * inherited.Length);
+        var initialized = false;
+        ProcessInformation information;
+        try
+        {
+            if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref size)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            initialized = true;
+            for (var i = 0; i < inherited.Length; i++) Marshal.WriteIntPtr(handles, i * IntPtr.Size, inherited[i]);
+            if (!UpdateProcThreadAttribute(attributes, 0, ProcThreadAttributeHandleList, handles,
+                    new IntPtr(IntPtr.Size * inherited.Length), IntPtr.Zero, IntPtr.Zero))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            startup.lpAttributeList = attributes;
+            if (!CreateProcess(null, command, IntPtr.Zero, IntPtr.Zero, true,
+                    CreateNoWindow | CreateUnicodeEnvironment | ExtendedStartupInfoPresent, environment.ToString(), workingDirectory,
+                    ref startup, out information))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        finally
+        {
+            if (initialized) DeleteProcThreadAttributeList(attributes);
+            Marshal.FreeHGlobal(attributes);
+            Marshal.FreeHGlobal(handles);
+        }
         CloseHandle(information.hThread);
         CloseHandle(information.hProcess);
         return Process.GetProcessById(information.dwProcessId);
@@ -226,6 +255,8 @@ internal static class Launcher
     private const uint CreateNoWindow = 0x08000000;
     private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint HandleFlagInherit = 0x00000001;
+    private const uint ExtendedStartupInfoPresent = 0x00080000;
+    private static readonly IntPtr ProcThreadAttributeHandleList = new(0x00020002);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct StartupInfo
@@ -238,6 +269,13 @@ internal static class Launcher
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct StartupInfoEx
+    {
+        public StartupInfo StartupInfo;
+        public IntPtr lpAttributeList;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct ProcessInformation
     {
         public IntPtr hProcess, hThread;
@@ -247,7 +285,17 @@ internal static class Launcher
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessW")]
     private static extern bool CreateProcess(string? applicationName, char[] commandLine, IntPtr processAttributes,
         IntPtr threadAttributes, bool inheritHandles, uint creationFlags, string environment, string currentDirectory,
-        ref StartupInfo startupInfo, out ProcessInformation processInformation);
+        ref StartupInfoEx startupInfo, out ProcessInformation processInformation);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref IntPtr size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, IntPtr attribute, IntPtr value,
+        IntPtr size, IntPtr previousValue, IntPtr returnSize);
+
+    [DllImport("kernel32.dll")]
+    private static extern void DeleteProcThreadAttributeList(IntPtr list);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetHandleInformation(SafeHandle handle, uint mask, uint flags);

@@ -52,8 +52,16 @@ try {
 
     # Wait on the launcher alone: Start-Process -Wait also waits for the studio
     # the launcher leaves running, which is the whole point of the launcher.
-    $first = Start-Process -FilePath $launcher -PassThru -WindowStyle Hidden
+    # Its output is read through a pipe, as a script or scheduled task would: the
+    # studio must not inherit that pipe, or the reader waits forever.
+    $start = [Diagnostics.ProcessStartInfo]::new($launcher)
+    $start.UseShellExecute = $false; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true; $start.CreateNoWindow = $true
+    $first = [Diagnostics.Process]::Start($start)
+    $firstOutput = $first.StandardOutput.ReadToEndAsync()
+    $firstErrors = $first.StandardError.ReadToEndAsync()
     if (-not $first.WaitForExit(120000)) { throw 'The launcher did not return within two minutes.' }
+    if (-not $firstOutput.Wait(10000) -or -not $firstErrors.Wait(1000)) { throw 'The studio kept the launcher''s output pipe open; a script reading it would never finish.' }
+    if ($firstOutput.Result -notmatch 'is live at') { throw "The launcher did not report the live studio: $($firstOutput.Result) $($firstErrors.Result)" }
     if ($first.ExitCode -ne 0) { throw "The launcher exited with $($first.ExitCode). See $root\voice\state\framewright.stderr.log" }
     $health = Invoke-RestMethod "$url/health/live" -TimeoutSec 5
     if ($health.status -notmatch '^(?i)(live|ready|degraded)$') { throw "The launched studio reported $($health.status)." }
@@ -81,6 +89,11 @@ try {
 }
 finally {
     if ($studio -and -not $studio.HasExited) { Stop-Process -Id $studio.Id -Force; $studio.WaitForExit(10000) | Out-Null }
+    elseif (-not $studio -and (Test-Path -LiteralPath (Join-Path $root 'voice\state\framewright.pid'))) {
+        # A check failed before the studio was recorded; stop what this run started.
+        $cleanup = Start-Process -FilePath $launcher -ArgumentList '--stop' -PassThru -WindowStyle Hidden
+        $cleanup.WaitForExit(30000) | Out-Null
+    }
     foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
     if ((Split-Path -Leaf $root).StartsWith('framewright-launcher-smoke-') -and (Test-Path -LiteralPath $root)) {
         Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
