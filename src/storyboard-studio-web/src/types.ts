@@ -279,6 +279,8 @@ export interface ModelGenerationReadiness {
   blenderInstall?: BlenderInstallSummary | null
   /** True when the compiler decides a generated model's triangle budget itself, before painting. */
   remeshDecidesBudget?: boolean
+  /** True when preparing a painted model re-bakes its paint after the reduction and compares it with the original. */
+  preparationKeepsPaint?: boolean
 }
 /**
  * Which Blender the compiler is given. An explicit setting or environment

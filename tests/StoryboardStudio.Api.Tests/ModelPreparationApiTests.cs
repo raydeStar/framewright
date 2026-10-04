@@ -63,6 +63,12 @@ public sealed class ModelPreparationApiTests
                      Stage("survey-surfaces"), Stage("compress-textures"),
                      Stage("cull-unseen")]);
 
+        /// <summary>A compiler that can also bake a reduced model's paint back.</summary>
+        public static CompilerCapabilities ReadyToKeepPaint => Ready with
+        {
+            Stages = [.. Ready.Stages, Stage("rebake-maps")],
+        };
+
         /// <summary>What <c>rac budget</c> answers here, and every time it was asked.</summary>
         public CompilerBudgetSuggestion Suggestion { get; set; } = SmallProp;
         public List<(string Name, double[] Dimensions)> BudgetQuestions { get; } = [];
@@ -169,6 +175,29 @@ public sealed class ModelPreparationApiTests
                         summary = Suggestion.Summary,
                         attempts = new[] { new { triangle_budget = Suggestion.TriangleBudget, verdict = "passed" } },
                     };
+                // A re-bake says whether the paint came back, at what rung, and
+                // how close the fixed views came -- the shape its contract gives.
+                if (stage == "rebake-maps")
+                {
+                    fields["schema"] = "reference-asset-compiler.rebake-maps.v1";
+                    fields["status"] = "accepted";
+                    fields["attempts"] = new[]
+                    {
+                        new
+                        {
+                            rung = 2_000,
+                            appearance = new
+                            {
+                                passed = true,
+                                summary = new
+                                {
+                                    beauty = new { minimum_ssim = 0.952 },
+                                    albedo = new { minimum_ssim = 0.974 },
+                                },
+                            },
+                        },
+                    };
+                }
                 receipt = JsonSerializer.Serialize(fields);
             }
             await File.WriteAllTextAsync(reportPath, receipt, cancellationToken);
@@ -343,6 +372,100 @@ public sealed class ModelPreparationApiTests
         // one, and is not handed a name to decide from.
         Assert.Empty(compiler.BudgetQuestions);
         Assert.False(compiler.Options["reduce-mesh"].ContainsKey("asset-name"));
+    }
+
+    [Fact]
+    public async Task APaintedModelHasItsPaintBakedBackAfterTheReduction()
+    {
+        // Reducing a painted model moves its UVs and the paint slides with
+        // them; nothing that measures the surface can see it. A compiler that
+        // can bake it back is asked to, between the reduction and the export.
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.ReadyToKeepPaint };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "painted-brazier.glb", ModelFixtures.TexturedDenseProp());
+        var readiness = await client.GetFromJsonAsync<ModelGenerationReadiness>(
+            "/api/models/preparation/readiness") ?? throw new InvalidOperationException();
+        Assert.True(readiness.PreparationKeepsPaint);
+
+        var job = await QueueAsync(client, source.Id, "Painted brazier (runtime)");
+        var finished = await RunAsync(factory, job.Id);
+        Assert.Equal(JobState.Completed, finished.State);
+
+        Assert.Equal(["review-views", "adopt-mesh", "reduce-mesh", "rebake-maps", "browser-payload", "review-views"],
+            compiler.Calls.Select(call => call.Stage).ToArray());
+        // It reads the reduction, and is told exactly which files it pairs: the
+        // adoption it was reduced from, the reduction's receipt that binds the
+        // two, and the library model the result has to look like.
+        var rebake = compiler.Calls.Single(call => call.Stage == "rebake-maps");
+        Assert.Equal("step-3-reduce-mesh.glb", rebake.Source);
+        var options = compiler.Options["rebake-maps"];
+        Assert.Equal("step-2-adopt-mesh.blend", Path.GetFileName(options["dense"]));
+        Assert.Equal("step-3-reduce-mesh.json", Path.GetFileName(options["reduction-report"]));
+        Assert.True(File.Exists(options["reduction-report"]));
+        Assert.Equal(StoredPath(factory, source), options["appearance-reference"]);
+        // The export carries the re-baked mesh, not the smeared one.
+        Assert.Equal("step-4-rebake-maps.glb", compiler.Calls.Single(call => call.Stage == "browser-payload").Source);
+
+        // And the person judging it reads that the paint came back, and how close.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var after = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.Contains("paint baked back from the original", after.RevisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("lit 0.952, unlit 0.974", after.RevisionPrompt, StringComparison.Ordinal);
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == job.Id);
+        Assert.Contains("rebake-maps", record.AdapterId, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnUnpaintedModelOrAnOlderCompilerKeepsTheRouteItHad()
+    {
+        // Nothing painted, nothing to slide: no re-bake is asked for.
+        var keeps = new ControlledCompiler { Capabilities = ControlledCompiler.ReadyToKeepPaint };
+        using (var factory = Factory(keeps))
+        {
+            using var client = factory.CreateClient();
+            var plain = await ImportModelAsync(client, "plain.glb", ModelFixtures.DenseProp());
+            await RunAsync(factory, (await QueueAsync(client, plain.Id, "Plain (runtime)")).Id);
+            Assert.DoesNotContain("rebake-maps", keeps.Calls.Select(call => call.Stage));
+        }
+
+        // A compiler with no such stage is not asked for one, and says so.
+        var older = new ControlledCompiler();
+        using (var factory = Factory(older))
+        {
+            using var client = factory.CreateClient();
+            var readiness = await client.GetFromJsonAsync<ModelGenerationReadiness>(
+                "/api/models/preparation/readiness") ?? throw new InvalidOperationException();
+            Assert.False(readiness.PreparationKeepsPaint);
+            var painted = await ImportModelAsync(client, "painted.glb", ModelFixtures.TexturedDenseProp());
+            var finished = await RunAsync(factory, (await QueueAsync(client, painted.Id, "Painted (runtime)")).Id);
+            Assert.Equal(JobState.Completed, finished.State);
+            Assert.Equal(["review-views", "adopt-mesh", "reduce-mesh", "browser-payload", "review-views"],
+                older.Calls.Select(call => call.Stage).ToArray());
+        }
+    }
+
+    [Fact]
+    public async Task ARebakeThatKeepsNoRungStopsThePreparationWithTheCompilersReason()
+    {
+        // The compiler refuses to ship a smear when no budget keeps the look;
+        // the studio delivers nothing rather than the reduction it refused.
+        var compiler = new ControlledCompiler
+        {
+            Capabilities = ControlledCompiler.ReadyToKeepPaint,
+            FailingStage = "rebake-maps",
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "glinting-crystal.glb", ModelFixtures.TexturedDenseProp());
+
+        var finished = await RunAsync(factory, (await QueueAsync(client, source.Id, "Crystal (runtime)")).Id);
+
+        Assert.Equal(JobState.Failed, finished.State);
+        Assert.Contains("rebake-maps", finished.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("browser-payload", compiler.Calls.Select(call => call.Stage));
+        Assert.Null(finished.OutputAssetId);
     }
 
     [Fact]

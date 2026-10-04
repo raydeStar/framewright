@@ -198,3 +198,19 @@ size.
   only a number, is still sent the detail choice's fixed number: 20,000
   triangles for set dressing, 80,000 for a hero. The generation panel says
   which of the two will happen before anything is queued.
+- **Keeping a prepared model's paint.** A library model was painted before
+  anyone reduced it, so its reduction drags the UVs and the paint slides off
+  bands and rivets; no deviation threshold sees it. When `run-stage --list`
+  offers `rebake-maps` (compiler `feat/rebake-maps`, 2026-10-04, and later) and
+  the model embeds at least one texture, preparation routes
+  `review-views → adopt-mesh → reduce-mesh → rebake-maps → browser-payload →
+  review-views`. The re-bake reads the reduction and is passed `--dense` (the
+  adoption's `.blend`), `--reduction-report` (the reduction's receipt, which
+  binds the pair by hash and carries the budget ladder) and
+  `--appearance-reference` (the library model). It bakes the paint back from
+  the original, compares four fixed views of both on the CPU, and climbs the
+  ladder until a rung looks like the original. If none does, it refuses and the
+  job fails with its reason; nothing is delivered. The revision note quotes its
+  lit and unlit similarity. The panel says this before **Prepare for runtime** is
+  pressed (`preparationKeepsPaint` on the readiness answer). An untextured model
+  or an older compiler keeps the route it had.

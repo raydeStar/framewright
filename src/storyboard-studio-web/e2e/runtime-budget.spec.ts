@@ -155,6 +155,8 @@ test('Prepare for runtime defaults to Auto, shows the compiler’s reasoning, an
     .toContainText('Blender 5.2.2 LTS, found in your Steam library.')
   // The number is there, one step away, and not filled in on anyone's behalf.
   await expect(page.getByTestId('model-preparation-budget')).toBeHidden()
+  // This compiler cannot bake a reduced model's paint back, so nothing promises it.
+  await expect(page.getByTestId('model-preparation-keeps-paint')).toHaveCount(0)
 
   await page.getByTestId('model-prepare').click()
   await expect(page.getByText(/queued\. It keeps going if you leave this screen/)).toBeVisible()
@@ -165,6 +167,29 @@ test('Prepare for runtime defaults to Auto, shows the compiler’s reasoning, an
   await expect(choice).toHaveAttribute('data-mode', 'manual')
   await expect(page.getByTestId('model-preparation-budget')).toHaveValue('')
   await expect(page.getByTestId('model-preparation-budget')).toHaveAttribute('placeholder', '5000')
+  verifyConsole()
+})
+
+test('a compiler that can keep a painted model’s paint says so beside Prepare for runtime', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  await standIn(page, {
+    assetId: '00000000-0000-0000-0000-000000000000', triangleCount: 100_000, state: 'Decided', detail: null,
+    role: 'prop', roleReason: 'nothing in its name or notes marks it as anything but a prop', sizeClass: 'medium',
+    longestMetres: 1.2, triangleBudget: 10_000, maximumP99Metres: 0.004, maximumMaxMetres: 0.017,
+    ladder: [10_000, 15_000], summary: 'A medium prop: about 10,000 triangles.',
+  })
+  // Registered after the stand-in, so this readiness is the one answered.
+  await page.route('**/api/models/preparation/readiness',
+    route => route.fulfill({ json: { ...readyToPrepare, preparationKeepsPaint: true } }))
+  await openOwnModel(page, `painted-brazier-${testInfo.project.name}-${Date.now()}`)
+
+  // Said before the artist presses anything: the paint is baked back and
+  // compared, and a look no budget can keep stops the preparation.
+  const note = page.getByTestId('model-preparation-keeps-paint')
+  await expect(note).toBeVisible()
+  await expect(note).toContainText('baked back from this original')
+  await expect(note).toContainText('rather than deliver a smear')
+  await expect(page.getByTestId('model-prepare')).toBeEnabled()
   verifyConsole()
 })
 
