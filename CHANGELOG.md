@@ -25,6 +25,18 @@
   `--triangle-budget auto` and the model's name (a hero also `--role hero`), so
   the painter paints the final mesh. Older compilers still get 20,000 / 80,000.
 
+### Library review
+- **Approve or send back any asset.** Images, models, video and audio each
+  carry a per-revision decision (Pending, Approved, Changes requested) with a
+  short reason and a time, set from the panel the asset opens in. Cards show it
+  and the library filters by it. A new revision of something sent back starts
+  Pending and shows the send-back it answers. See
+  [Review](docs/ASSET_LIBRARY.md#review-approve-send-back-and-notes).
+- **Review notes on every kind.** Images keep their pins; video and audio notes
+  can mark a moment, shown along the player's timeline; model notes can keep
+  the orbit camera they were written from; any of those can be about the whole
+  asset instead.
+
 ## 0.1.0 — 2026-09-24, first release
 
 The first Framewright release: a local-first production workspace for a trusted

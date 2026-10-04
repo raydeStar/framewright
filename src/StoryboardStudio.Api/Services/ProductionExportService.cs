@@ -485,7 +485,9 @@ public sealed class ProductionExportService(
         string TagsJson, string Notes, string Source, bool IsArchived, DateTimeOffset UpdatedAt,
         Guid? RevisionFamilyId, int? RevisionNumber, bool IsCurrentRevision, Guid? ParentAssetId,
         string RevisionPrompt, string RevisionEngine, DateTimeOffset? PreparationAcceptedAt,
-        string PreparationAcceptedBy, string PreparationAcceptanceNote, bool PreparationTopologyChanged)
+        string PreparationAcceptedBy, string PreparationAcceptanceNote, bool PreparationTopologyChanged,
+        string ReviewDecision, string ReviewNote, DateTimeOffset? ReviewDecidedAt,
+        Guid? ReviewAnswersAssetId, string ReviewAnswersNote)
     {
         public PortableAssetRecord(AssetRecord record, string archivePath) : this(
             record.Id, record.ProjectId, record.Kind, record.OriginalFileName, record.MimeType,
@@ -495,6 +497,10 @@ public sealed class ProductionExportService(
             record.RevisionNumber, record.IsCurrentRevision, record.ParentAssetId,
             record.RevisionPrompt, record.RevisionEngine, record.PreparationAcceptedAt,
             record.PreparationAcceptedBy, record.PreparationAcceptanceNote,
-            record.PreparationTopologyChanged) { }
+            record.PreparationTopologyChanged,
+            // A decision is part of what the project is: an approved asset that
+            // came back Pending after an export would have to be judged twice.
+            record.ReviewDecision, record.ReviewNote, record.ReviewDecidedAt,
+            record.ReviewAnswersAssetId, record.ReviewAnswersNote) { }
     }
 }

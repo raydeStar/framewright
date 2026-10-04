@@ -547,8 +547,21 @@ public sealed class AssetStore
         next.CollectionId = parent.CollectionId;
         next.TagsJson = parent.TagsJson;
         next.Notes = parent.Notes;
+        // A revision of something sent back is the answer to that request, and
+        // says so; so is a further revision of an answer nobody has judged yet.
+        // It still starts Pending: it is a new row that nobody has looked at.
+        if (parent.ReviewDecision == nameof(AssetReviewDecision.ChangesRequested))
+        {
+            next.ReviewAnswersAssetId = parent.Id;
+            next.ReviewAnswersNote = parent.ReviewNote;
+        }
+        else if (parent.ReviewDecision == nameof(AssetReviewDecision.Pending) && parent.ReviewAnswersAssetId is not null)
+        {
+            next.ReviewAnswersAssetId = parent.ReviewAnswersAssetId;
+            next.ReviewAnswersNote = parent.ReviewAnswersNote;
+        }
         next.UpdatedAt = timeProvider.GetUtcNow();
-        AddAudit("AssetRevisionAdded", "Asset", next.Id, new { familyId, next.RevisionNumber, next.ParentAssetId, next.RevisionEngine });
+        AddAudit("AssetRevisionAdded", "Asset", next.Id, new { familyId, next.RevisionNumber, next.ParentAssetId, next.RevisionEngine, next.ReviewAnswersAssetId });
         await db.SaveChangesAsync(cancellationToken);
         return RepositoryResult<AssetSummary>.Ok(Map(next));
     }
@@ -663,6 +676,51 @@ public sealed class AssetStore
         await db.SaveChangesAsync(cancellationToken);
         return RepositoryResult<AssetSummary>.Ok(Map(asset));
     }
+
+    /// <summary>
+    /// Records whether a person says this revision is fit to ship.
+    ///
+    /// Any kind of asset, any revision. Sending one back needs a reason,
+    /// because the reason is what the next revision answers; approving may
+    /// carry one; returning to Pending clears both. Nothing automatic decides
+    /// this, and changing it never touches the file or the revision stack.
+    /// </summary>
+    public async Task<RepositoryResult<AssetSummary>> SetReviewDecisionAsync(
+        Guid assetId, SetAssetReviewDecisionRequest request, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.SingleOrDefaultAsync(x => x.Id == assetId, cancellationToken);
+        if (asset is null) return RepositoryResult<AssetSummary>.NotFound();
+        if (!Enum.IsDefined(request.Decision))
+            return RepositoryResult<AssetSummary>.Invalid("A decision is Pending, Approved or ChangesRequested.");
+        if (asset.IsArchived)
+            return RepositoryResult<AssetSummary>.Invalid("That asset is archived. Restore it before deciding about it.");
+        var note = (request.Note ?? "").Trim();
+        if (note.Length > MaxReviewNoteLength)
+            return RepositoryResult<AssetSummary>.Invalid($"Keep the reason to {MaxReviewNoteLength:N0} characters or fewer.");
+        if (request.Decision == AssetReviewDecision.ChangesRequested && note.Length == 0)
+            return RepositoryResult<AssetSummary>.Invalid(
+                "Say what needs to change. A send-back without a reason tells the next revision nothing.");
+
+        var previous = asset.ReviewDecision;
+        asset.ReviewDecision = request.Decision.ToString();
+        asset.ReviewNote = request.Decision == AssetReviewDecision.Pending ? "" : note;
+        asset.ReviewDecidedAt = request.Decision == AssetReviewDecision.Pending ? null : timeProvider.GetUtcNow();
+        asset.UpdatedAt = timeProvider.GetUtcNow();
+        AddAudit("AssetReviewDecided", "Asset", asset.Id, new
+        {
+            decision = asset.ReviewDecision,
+            previous,
+            note = asset.ReviewNote,
+            asset.RevisionFamilyId,
+            asset.RevisionNumber,
+            asset.ReviewAnswersAssetId,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<AssetSummary>.Ok(Map(asset));
+    }
+
+    /// <summary>A send-back reason is a sentence or two, not a document.</summary>
+    public const int MaxReviewNoteLength = 1_000;
 
     public async Task<RepositoryResult<AssetSummary>> PromoteRevisionAsync(Guid assetId, CancellationToken cancellationToken)
     {
@@ -868,7 +926,9 @@ public sealed class AssetStore
         x.CollectionId, JsonSerializer.Deserialize<string[]>(string.IsNullOrWhiteSpace(x.TagsJson) ? "[]" : x.TagsJson) ?? [],
         x.Notes ?? "", string.IsNullOrWhiteSpace(x.Source) ? "Imported" : x.Source, x.IsArchived, x.UpdatedAt == default ? x.CreatedAt : x.UpdatedAt,
         x.RevisionFamilyId, x.RevisionNumber, x.IsCurrentRevision, x.ParentAssetId, x.RevisionPrompt ?? "", x.RevisionEngine ?? "",
-        x.PreparationAcceptedAt, x.PreparationAcceptedBy ?? "", x.PreparationAcceptanceNote ?? "", x.PreparationTopologyChanged);
+        x.PreparationAcceptedAt, x.PreparationAcceptedBy ?? "", x.PreparationAcceptanceNote ?? "", x.PreparationTopologyChanged,
+        Enum.TryParse<AssetReviewDecision>(x.ReviewDecision, out var decision) ? decision : AssetReviewDecision.Pending,
+        x.ReviewNote ?? "", x.ReviewDecidedAt, x.ReviewAnswersAssetId, x.ReviewAnswersNote ?? "");
 
     private void AddAudit(string type, string targetType, Guid targetId, object payload) => db.AuditEvents.Add(new AuditEventRecord { Id = Guid.NewGuid(), Type = type, TargetType = targetType, TargetId = targetId.ToString(), PayloadJson = JsonSerializer.Serialize(payload), CreatedAt = timeProvider.GetUtcNow() });
     private static string? ValidateCollection(string name, string color)

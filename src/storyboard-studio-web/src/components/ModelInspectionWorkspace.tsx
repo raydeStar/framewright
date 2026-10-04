@@ -3,6 +3,8 @@ import { Archive, ArrowLeft, Bone, Box, Check, Download, Layers3, LoaderCircle, 
 import { studioApi } from '../api'
 import { geometryBudget } from '../modelBudget'
 import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorMode'
+import AssetNotesPanel from './AssetNotesPanel'
+import ReviewDecisionPanel from './ReviewDecisionPanel'
 import { useAssetDirectorView } from './useAssetDirectorView'
 import type { AssetSummary, ModelProfileSummary, ModelTriangleBudget, RigPoseSummary } from '../types'
 
@@ -38,6 +40,10 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
   // null when it could not be asked. Read by Geometry and by preparation.
   const [budget, setBudget] = useState<ModelTriangleBudget | null>()
   const [exportClips, setExportClips] = useState<string[]>([])
+  // Where the inspection camera is, read when a note is written, and where to
+  // send it when a note written from a view is opened again.
+  const orbit = useRef<{ yaw: number; pitch: number } | undefined>(undefined)
+  const [goTo, setGoTo] = useState<{ yaw: number; pitch: number }>()
   const [exporting, setExporting] = useState(false)
 
   const active = revisions.find(item => item.id === activeId) ?? asset
@@ -214,6 +220,8 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
                 dimensions={[profile.dimensions[0], profile.dimensions[1], profile.dimensions[2]]}
                 supportedClipNames={supportedClips.map(clip => clip.name)}
                 onError={message => { setFailure(message); onError(message) }}
+                onOrbit={(yaw, pitch) => { orbit.current = { yaw, pitch } }}
+                goTo={goTo}
               />
             </Suspense>
           : !failure && <div className="asset-loading"><LoaderCircle className="spin" /><span>Measuring the model…</span></div>}
@@ -243,6 +251,12 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
           </div>
           <p className="model-note">A new revision never overwrites an earlier one. Every revision keeps its own file, measurements, and materials.</p>
         </section>
+
+        <ReviewDecisionPanel asset={active} onDecided={async (_, message) => { await loadRevisions(); onChanged?.(message) }} />
+        <AssetNotesPanel assetId={active.id}
+          capture={() => orbit.current ? { viewYaw: orbit.current.yaw, viewPitch: orbit.current.pitch } : undefined}
+          attachLabel="Attach to this view"
+          onFocus={note => { if (note.viewYaw != null && note.viewPitch != null) setGoTo({ yaw: note.viewYaw, pitch: note.viewPitch }) }} />
 
         {profile && <>
           <section data-testid="model-animation-export">

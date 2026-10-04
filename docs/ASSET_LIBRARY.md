@@ -30,6 +30,32 @@ The Assets rail opens a project-level workspace; it does not require a selected 
 
 Authority images appear in the same workspace for discovery, but continue to use the immutable authority version editor. A normal image guide cannot silently become character, wardrobe, location, prop, or style canon.
 
+## Review: approve, send back, and notes
+
+Every asset revision (image, model, video, or audio) carries a review decision
+that only a person sets: **Pending** (the default), **Approved**, or **Changes
+requested**. The panel the asset opens in has **Approve**, **Send back** (which
+asks for a short reason in place), and **Back to pending**. Cards show the
+decision as a chip, and the library's review filter narrows to Pending,
+Approved, or Changes requested.
+
+- A decision belongs to one revision. A new revision is a new record, so it
+  starts Pending; if its parent had been sent back, it shows "Answers a
+  send-back" with the reason it was sent back for (and so does a further
+  revision of an answer nobody has judged yet). The sent-back revision keeps
+  its decision as history.
+- Decisions are recorded in the audit log and travel with portable project
+  exports. `POST /api/assets/{id}/review` with `{ "decision", "note" }` is the
+  one way to set one; nothing automatic calls it.
+- Review notes work on every kind. Image notes stay pinned to a point. Video and
+  audio notes can be attached to the moment that was playing (shown as markers
+  along a timeline under the player; clicking one goes back there). Model notes
+  can be attached to the orbit camera they were written from (clicking one puts
+  the camera back). Any non-image note can instead be about the whole asset.
+
+Tags and notes are still free-form; they are no longer needed to stand in for
+"sent back" or "approved".
+
 ## Domain and trust rules
 
 - `AssetRecord` is the canonical project-scoped media object and stores editable library metadata alongside immutable source facts.

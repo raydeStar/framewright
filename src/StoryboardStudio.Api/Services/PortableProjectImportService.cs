@@ -169,6 +169,7 @@ public sealed class PortableProjectImportService(
             row.CollectionId = Optional(collectionIds, row.CollectionId, "collection");
             row.RevisionFamilyId = Optional(revisionFamilyIds, row.RevisionFamilyId, "asset revision family");
             row.ParentAssetId = Optional(assetIds, row.ParentAssetId, "parent asset");
+            row.ReviewAnswersAssetId = Optional(assetIds, row.ReviewAnswersAssetId, "answered revision");
             row.StoragePath = staged.StoragePath;
         }
         foreach (var row in package.Shots)
@@ -725,6 +726,13 @@ public sealed class PortableProjectImportService(
         public string PreparationAcceptedBy { get; set; } = "";
         public string PreparationAcceptanceNote { get; set; } = "";
         public bool PreparationTopologyChanged { get; set; }
+        // Absent from packages written before review decisions existed, which
+        // then import as Pending: what every asset was at the time.
+        public string ReviewDecision { get; set; } = "Pending";
+        public string ReviewNote { get; set; } = "";
+        public DateTimeOffset? ReviewDecidedAt { get; set; }
+        public Guid? ReviewAnswersAssetId { get; set; }
+        public string ReviewAnswersNote { get; set; } = "";
         public string StoragePath { get; set; } = "";
 
         public AssetRecord ToRecord() => new()
@@ -757,7 +765,12 @@ public sealed class PortableProjectImportService(
             PreparationAcceptedAt = PreparationAcceptedAt,
             PreparationAcceptedBy = PreparationAcceptedBy,
             PreparationAcceptanceNote = PreparationAcceptanceNote,
-            PreparationTopologyChanged = PreparationTopologyChanged
+            PreparationTopologyChanged = PreparationTopologyChanged,
+            ReviewDecision = ReviewDecision is "Approved" or "ChangesRequested" ? ReviewDecision : "Pending",
+            ReviewNote = ReviewNote ?? "",
+            ReviewDecidedAt = ReviewDecidedAt,
+            ReviewAnswersAssetId = ReviewAnswersAssetId,
+            ReviewAnswersNote = ReviewAnswersNote ?? ""
         };
     }
 }

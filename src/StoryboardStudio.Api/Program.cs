@@ -477,6 +477,10 @@ app.MapPost("/api/assets/generate-image", async Task<IResult> (
 });
 app.MapPut("/api/assets/{assetId:guid}", async Task<IResult> (Guid assetId, UpdateAssetRequest request, AssetStore assets, CancellationToken cancellationToken)
     => ToHttpResult(await assets.UpdateAsync(assetId, request, cancellationToken)));
+// Approve, send back with a reason, or return to Pending. A person's decision
+// about one revision; nothing automatic calls this.
+app.MapPost("/api/assets/{assetId:guid}/review", async Task<IResult> (Guid assetId, SetAssetReviewDecisionRequest request, AssetStore assets, CancellationToken cancellationToken)
+    => ToHttpResult(await assets.SetReviewDecisionAsync(assetId, request, cancellationToken)));
 app.MapPost("/api/assets/{assetId:guid}/archive", async Task<IResult> (Guid assetId, AssetStore assets, CancellationToken cancellationToken)
     => ToHttpResult(await assets.SetArchivedAsync(assetId, true, cancellationToken)));
 app.MapPost("/api/assets/{assetId:guid}/restore", async Task<IResult> (Guid assetId, AssetStore assets, CancellationToken cancellationToken)

@@ -29,6 +29,10 @@ export interface ModelViewerProps {
   dimensions: [number, number, number]
   supportedClipNames?: string[]
   onError?: (message: string) => void
+  /** Told where the inspection camera is whenever it moves, so a note can say what it was written from. */
+  onOrbit?: (yaw: number, pitch: number) => void
+  /** Puts the inspection camera back at a view; a new object each time it is asked. */
+  goTo?: { yaw: number; pitch: number }
 }
 
 type ViewerState = 'loading' | 'ready' | 'failed' | 'unsupported'
@@ -36,7 +40,7 @@ type ViewerState = 'loading' | 'ready' | 'failed' | 'unsupported'
 const openingYaw = 0.9
 const openingPitch = 0.42
 
-export default function ModelViewer({ contentUrl, label, dimensions, supportedClipNames, onError }: ModelViewerProps) {
+export default function ModelViewer({ contentUrl, label, dimensions, supportedClipNames, onError, onOrbit, goTo }: ModelViewerProps) {
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewerState>('loading')
   const [detail, setDetail] = useState('Preparing the model surface')
@@ -61,6 +65,10 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
   const drag = useRef<{ pointerId: number; x: number; y: number; panning: boolean } | undefined>(undefined)
   const reportError = useRef(onError)
   reportError.current = onError
+  // Read through a ref, like the error callback: a parent that re-renders
+  // must never rebuild the surface just to keep listening.
+  const reportOrbit = useRef(onOrbit)
+  reportOrbit.current = onOrbit
   // The three numbers, not the array. A parent that rebuilds the array on
   // every render -- and the inspection workspace does, every 700 ms while a
   // job is running -- would otherwise tear this whole surface down and load
@@ -139,6 +147,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
         target.z + distance * Math.cos(pitch) * Math.cos(yaw))
       camera.lookAt(target)
       setReadout({ yaw, pitch })
+      reportOrbit.current?.(yaw, pitch)
       draw()
     }
 
@@ -332,6 +341,15 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
       renderer.forceContextLoss()
     }
   }, [contentUrl, width, height, depth])
+
+  // A note written from a view takes the camera back there. Only the angle
+  // moves: distance and target stay where the artist left them.
+  useEffect(() => {
+    if (!goTo) return
+    view.current.yaw = goTo.yaw
+    view.current.pitch = Math.min(1.5, Math.max(-1.5, goTo.pitch))
+    surface.current?.place()
+  }, [goTo])
 
   const orbitBy = (yaw: number, pitch: number) => {
     view.current.yaw += yaw

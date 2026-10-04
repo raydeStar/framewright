@@ -1853,30 +1853,84 @@ public sealed class StudioRepository(
             .Select(MapAssetReviewNote)
             .ToArray();
 
+    /// <summary>
+    /// A review note on any kind of asset, attached the way that kind is
+    /// looked at: a point on an image, a moment in video or audio, the orbit
+    /// camera a model was seen from -- or, for anything but an image, the asset
+    /// as a whole.
+    /// </summary>
     public async Task<RepositoryResult<AssetReviewNoteSummary>> AddAssetReviewNoteAsync(
         Guid assetId,
         CreateAssetReviewNoteRequest request,
         CancellationToken cancellationToken)
     {
-        if (!await db.Assets.AsNoTracking().AnyAsync(x => x.Id == assetId && x.Kind == AssetKind.Image.ToString(), cancellationToken))
-            return RepositoryResult<AssetReviewNoteSummary>.NotFound();
+        var asset = await db.Assets.AsNoTracking()
+            .Where(x => x.Id == assetId)
+            .Select(x => new { x.Kind, x.DurationSeconds })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (asset is null) return RepositoryResult<AssetReviewNoteSummary>.NotFound();
         if (string.IsNullOrWhiteSpace(request.Body) || request.Body.Trim().Length > 2_000)
             return RepositoryResult<AssetReviewNoteSummary>.Invalid("Review notes must contain 1 to 2,000 characters.");
-        if (!double.IsFinite(request.X) || !double.IsFinite(request.Y))
-            return RepositoryResult<AssetReviewNoteSummary>.Invalid("Review-note coordinates must be finite numbers.");
 
         var note = new AssetReviewNoteRecord
         {
             Id = Guid.NewGuid(),
             AssetId = assetId,
-            X = Math.Clamp(request.X, 0, 1),
-            Y = Math.Clamp(request.Y, 0, 1),
             Body = request.Body.Trim(),
             State = "Open",
-            CreatedAt = timeProvider.GetUtcNow()
+            CreatedAt = timeProvider.GetUtcNow(),
+            Anchor = AssetReviewNoteAnchors.None,
         };
+        var pointed = request.X is not null || request.Y is not null;
+        var timed = request.TimeSeconds is not null;
+        var viewed = request.ViewYaw is not null || request.ViewPitch is not null;
+        switch (asset.Kind)
+        {
+            case nameof(AssetKind.Image):
+                // An image note is always somewhere: that is what makes it
+                // actionable, and the image studio has always pinned them.
+                if (request.X is not { } x || request.Y is not { } y || !double.IsFinite(x) || !double.IsFinite(y))
+                    return RepositoryResult<AssetReviewNoteSummary>.Invalid(
+                        "An image note is pinned to a place: give finite x and y coordinates.");
+                if (timed || viewed)
+                    return RepositoryResult<AssetReviewNoteSummary>.Invalid("An image note is pinned to a point, not a time or a view.");
+                note.Anchor = AssetReviewNoteAnchors.Point;
+                note.X = Math.Clamp(x, 0, 1);
+                note.Y = Math.Clamp(y, 0, 1);
+                break;
+            case nameof(AssetKind.Video) or nameof(AssetKind.Audio):
+                if (pointed || viewed)
+                    return RepositoryResult<AssetReviewNoteSummary>.Invalid("A video or audio note names a moment, not a place.");
+                if (request.TimeSeconds is { } seconds)
+                {
+                    if (!double.IsFinite(seconds) || seconds < 0)
+                        return RepositoryResult<AssetReviewNoteSummary>.Invalid("A note's time is a finite number of seconds from the start.");
+                    // A little slack past the end: players report the last
+                    // frame's time, which can sit a hair beyond the measured length.
+                    if (asset.DurationSeconds is { } duration && seconds > duration + 0.5)
+                        return RepositoryResult<AssetReviewNoteSummary>.Invalid(
+                            $"That moment is past the end: this runs {duration:0.##} seconds.");
+                    note.Anchor = AssetReviewNoteAnchors.Time;
+                    note.TimeSeconds = Math.Round(asset.DurationSeconds is { } length ? Math.Min(seconds, length) : seconds, 3);
+                }
+                break;
+            case nameof(AssetKind.Model):
+                if (pointed || timed)
+                    return RepositoryResult<AssetReviewNoteSummary>.Invalid("A model note names the view it was written from, not a point or a time.");
+                if (viewed)
+                {
+                    if (request.ViewYaw is not { } yaw || request.ViewPitch is not { } pitch
+                        || !double.IsFinite(yaw) || !double.IsFinite(pitch))
+                        return RepositoryResult<AssetReviewNoteSummary>.Invalid("A model note's view needs both a finite yaw and pitch.");
+                    note.Anchor = AssetReviewNoteAnchors.View;
+                    // Yaw wraps; pitch is held where the inspection camera holds it.
+                    note.ViewYaw = Math.Round(Math.IEEERemainder(yaw, 2 * Math.PI), 4);
+                    note.ViewPitch = Math.Round(Math.Clamp(pitch, -1.5, 1.5), 4);
+                }
+                break;
+        }
         db.AssetReviewNotes.Add(note);
-        AddAudit("AssetReviewNoteAdded", "Asset", assetId.ToString(), new { note.Id, note.X, note.Y });
+        AddAudit("AssetReviewNoteAdded", "Asset", assetId.ToString(), new { note.Id, note.Anchor, note.X, note.Y, note.TimeSeconds, note.ViewYaw, note.ViewPitch });
         await db.SaveChangesAsync(cancellationToken);
         return RepositoryResult<AssetReviewNoteSummary>.Ok(MapAssetReviewNote(note));
     }
@@ -1888,6 +1942,8 @@ public sealed class StudioRepository(
     {
         var note = await db.AssetReviewNotes.SingleOrDefaultAsync(x => x.Id == noteId, cancellationToken);
         if (note is null) return RepositoryResult<AssetReviewNoteSummary>.NotFound();
+        if (note.Anchor != AssetReviewNoteAnchors.Point)
+            return RepositoryResult<AssetReviewNoteSummary>.Invalid("Only a note pinned to a point on an image can be moved.");
         if (!double.IsFinite(request.X) || !double.IsFinite(request.Y))
             return RepositoryResult<AssetReviewNoteSummary>.Invalid("Review-note coordinates must be finite numbers.");
         note.X = Math.Clamp(request.X, 0, 1);
@@ -2269,7 +2325,10 @@ public sealed class StudioRepository(
         x.ProductionVideoAssetId is null ? null : $"/api/assets/{x.ProductionVideoAssetId}/content");
 
     private static CommentSummary MapComment(CommentRecord x) => new(x.Id, x.ShotId, x.Version, x.X, x.Y, x.Body, x.State, x.CreatedAt, x.ReferenceId, x.ReferenceVersion);
-    private static AssetReviewNoteSummary MapAssetReviewNote(AssetReviewNoteRecord x) => new(x.Id, x.AssetId, x.X, x.Y, x.Body, x.State, x.CreatedAt);
+    private static AssetReviewNoteSummary MapAssetReviewNote(AssetReviewNoteRecord x) => new(
+        x.Id, x.AssetId, x.X, x.Y, x.Body, x.State, x.CreatedAt,
+        string.IsNullOrWhiteSpace(x.Anchor) ? AssetReviewNoteAnchors.Point : x.Anchor,
+        x.TimeSeconds, x.ViewYaw, x.ViewPitch);
     /// <summary>
     /// One job on its own. The API has always handed out /api/jobs/{id} as the
     /// place to watch queued work; this is that place. A screen following a

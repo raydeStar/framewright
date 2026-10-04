@@ -900,9 +900,13 @@ public sealed record CommentSummary(
     int? ReferenceVersion = null);
 
 /// <summary>
-/// A spatial review instruction bound to one immutable image asset. The same
-/// note is visible from an authority revision and the standalone image studio.
+/// A review instruction bound to one immutable asset revision. On an image it
+/// is pinned to a point; on video or audio it may name a moment; on a model it
+/// may name the orbit camera it was written from; any non-image note may
+/// simply be about the whole asset. The same note is visible wherever that
+/// revision is opened.
 /// </summary>
+/// <param name="Anchor">Point, Time, View or None: what the note is attached to.</param>
 public sealed record AssetReviewNoteSummary(
     Guid Id,
     Guid AssetId,
@@ -910,9 +914,46 @@ public sealed record AssetReviewNoteSummary(
     double Y,
     string Body,
     string State,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string Anchor = AssetReviewNoteAnchors.Point,
+    double? TimeSeconds = null,
+    double? ViewYaw = null,
+    double? ViewPitch = null);
 
-public sealed record CreateAssetReviewNoteRequest(double X, double Y, string Body);
+/// <summary>What a review note can be attached to.</summary>
+public static class AssetReviewNoteAnchors
+{
+    public const string Point = "Point";
+    public const string Time = "Time";
+    public const string View = "View";
+    public const string None = "None";
+}
+
+/// <summary>
+/// A new review note. An image note needs <paramref name="X"/> and
+/// <paramref name="Y"/>; a video or audio note may give
+/// <paramref name="TimeSeconds"/>; a model note may give the orbit camera's
+/// <paramref name="ViewYaw"/> and <paramref name="ViewPitch"/> (radians).
+/// Leaving those out of a non-image note makes it about the whole asset.
+/// </summary>
+public sealed record CreateAssetReviewNoteRequest(
+    double? X, double? Y, string Body,
+    double? TimeSeconds = null, double? ViewYaw = null, double? ViewPitch = null);
+
+/// <summary>Whether a person has said an asset revision is fit to ship.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum AssetReviewDecision
+{
+    Pending,
+    Approved,
+    ChangesRequested,
+}
+
+/// <summary>
+/// A person's decision about one asset revision. Sending one back needs a
+/// reason, because the reason is what the next revision answers.
+/// </summary>
+public sealed record SetAssetReviewDecisionRequest(AssetReviewDecision Decision, string? Note);
 
 public sealed record MoveCommentRequest(double X, double Y);
 
@@ -1440,7 +1481,14 @@ public sealed record AssetSummary(
     // revision it came from. A rig or an anchor agreed against the old surface
     // cannot follow it across a change of topology, and a reader should not
     // have to work that out by comparing two profiles.
-    bool PreparationTopologyChanged = false);
+    bool PreparationTopologyChanged = false,
+    // Whether a person has said this revision is fit to ship, why, and when.
+    AssetReviewDecision ReviewDecision = AssetReviewDecision.Pending,
+    string ReviewNote = "",
+    DateTimeOffset? ReviewDecidedAt = null,
+    // The revision whose send-back this one answers, and what it asked for.
+    Guid? ReviewAnswersAssetId = null,
+    string ReviewAnswersNote = "");
 
 public sealed record AssetCollectionSummary(
     Guid Id,

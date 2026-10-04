@@ -29,6 +29,7 @@ public static class StudioDatabaseInitializer
     private const string PortableProjectMigration = "20260922-portable-projects-v18";
     private const string SceneLightingMigration = "20260922-scene-local-lighting-v19";
     private const string SampleProjectMigration = "20260923-sample-project-flag-v20";
+    private const string AssetReviewMigration = "20261004-asset-review-decisions-v21";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -286,6 +287,27 @@ public static class StudioDatabaseInitializer
                 () => EnsureColumnAsync(db, "Projects", "IsSample", "INTEGER NOT NULL DEFAULT 0", cancellationToken), cancellationToken);
         }
 
+        // Review decisions on every asset, and notes on every kind of asset.
+        // Existing assets start Pending, which is what they always were: nobody
+        // had a way to say otherwise. Existing notes were all image pins.
+        if (!await HasMigrationAsync(db, AssetReviewMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, AssetReviewMigration, cancellationToken);
+            await RunMigrationAsync(db, AssetReviewMigration, async () =>
+            {
+                await EnsureColumnAsync(db, "Assets", "ReviewDecision", "TEXT NOT NULL DEFAULT 'Pending'", cancellationToken);
+                await EnsureColumnAsync(db, "Assets", "ReviewNote", "TEXT NOT NULL DEFAULT ''", cancellationToken);
+                await EnsureColumnAsync(db, "Assets", "ReviewDecidedAt", "TEXT NULL", cancellationToken);
+                await EnsureColumnAsync(db, "Assets", "ReviewAnswersAssetId", "TEXT NULL", cancellationToken);
+                await EnsureColumnAsync(db, "Assets", "ReviewAnswersNote", "TEXT NOT NULL DEFAULT ''", cancellationToken);
+                await EnsureColumnAsync(db, "AssetReviewNotes", "Anchor", "TEXT NOT NULL DEFAULT 'Point'", cancellationToken);
+                await EnsureColumnAsync(db, "AssetReviewNotes", "TimeSeconds", "REAL NULL", cancellationToken);
+                await EnsureColumnAsync(db, "AssetReviewNotes", "ViewYaw", "REAL NULL", cancellationToken);
+                await EnsureColumnAsync(db, "AssetReviewNotes", "ViewPitch", "REAL NULL", cancellationToken);
+            }, cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -434,6 +456,7 @@ public static class StudioDatabaseInitializer
             PortableProjectMigration => "round-trippable-project-package-with-project-local-manifest-hash-identity",
             SceneLightingMigration => "scene-environment-json-with-local-lights-color-exposure-and-grid",
             SampleProjectMigration => "project-sample-flag-set-only-when-a-new-database-seeds-the-demo",
+            AssetReviewMigration => "per-revision-review-decision-with-answered-send-back-and-review-notes-on-every-asset-kind",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

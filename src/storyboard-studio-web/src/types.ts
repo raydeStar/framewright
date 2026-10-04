@@ -23,7 +23,18 @@ export interface ReferenceVersionSummary { id: string; referenceId: string; vers
 export interface LibraryAuthoritySummary { id: string; slug: string; name: string; category: string; version: number; description: string; lockedConstraint: string; accent: string; visualVariant: number; imageUrl?: string; updatedAt: string; importedAsReferenceId?: string; importedVersion?: number; updateAvailable: boolean }
 export interface LibraryAuthorityVersionSummary { id: string; libraryAuthorityId: string; version: number; description: string; lockedConstraint: string; imageUrl?: string; contentHash: string; ratifiedAt: string; originProjectId?: string }
 export interface CommentSummary { id: string; shotId: string; version: number; x: number; y: number; body: string; state: string; createdAt: string; referenceId?: string; referenceVersion?: number }
-export interface AssetReviewNoteSummary { id: string; assetId: string; x: number; y: number; body: string; state: string; createdAt: string }
+/**
+ * A review note on one asset revision. Image notes are pins (x/y); video and
+ * audio notes may name a moment; model notes may name the orbit camera they
+ * were written from; any non-image note may be about the whole asset.
+ */
+export interface AssetReviewNoteSummary {
+  id: string; assetId: string; x: number; y: number; body: string; state: string; createdAt: string
+  anchor: 'Point' | 'Time' | 'View' | 'None'
+  timeSeconds?: number | null; viewYaw?: number | null; viewPitch?: number | null
+}
+/** Whether a person has said an asset revision is fit to ship. */
+export type AssetReviewDecision = 'Pending' | 'Approved' | 'ChangesRequested'
 export interface JobSummary { id: string; shotId: string; shotCode: string; kind: string; state: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'; progress: number; phase: string; backend: string; createdAt: string; completedAt?: string; error?: string; manifestId?: string; adapterId?: string; outputAssetId?: string; outputAssetUrl?: string; providerRequestId?: string; attempt: number; retryOfJobId?: string; lastHeartbeatAt?: string; workType: 'Shot' | 'Asset' | 'Voice' | 'Music' | 'VoiceDesign' | 'SceneRender'; acknowledgedAt?: string }
 export interface StudioSnapshot { project: ProjectSummary; shots: ShotSummary[]; references: ReferenceSummary[]; comments: CommentSummary[]; jobs: JobSummary[]; serverTime: string; demoMode: boolean }
 export interface IntegrationSummary { id: string; name: string; state: 'Connected' | 'Ready' | 'NeedsSetup' | 'Offline' | 'Protected'; headline: string; detail: string; endpoint?: string; canInspect: boolean; canSubmit: boolean; checkedAt: string }
@@ -105,7 +116,10 @@ export interface RuntimeReadinessSummary { status: 'Ready' | 'Degraded' | 'NotRe
 export interface ProductionExportReadiness { canExportProduction: boolean; blockers: string[]; warnings: string[]; shotCount: number; ratifiedShotCount: number; openNoteCount: number; activeJobCount: number; examinedAt: string }
 export interface AuthorityBinding { id: string; name: string; category: string; version: number }
 export interface GenerationManifestSummary { id: string; shotId: string; shotCode: string; shotVersion: number; sketchId: string; sketchRevision: number; route: GenerationRoute; purpose: GenerationPurpose; state: 'Prepared' | 'Dispatched' | 'Completed' | 'Failed' | 'Cancelled'; creativeBrief: string; authorities: AuthorityBinding[]; constraints: string[]; manifestHash: string; providerCallMade: boolean; compositionAssetId?: string; compositionAssetHash?: string; createdAt: string; lastFrameAssetId?: string; lastFrameAssetHash?: string; videoQuality?: VideoQuality; videoSeed?: number; videoTakeId?: string; promotedFromJobId?: string }
-export interface AssetSummary { id: string; projectId: string; kind: 'Image' | 'Video' | 'Audio' | 'Model'; originalFileName: string; mimeType: string; bytes: number; width?: number; height?: number; durationSeconds?: number; contentHash: string; contentUrl: string; createdAt: string; displayName: string; collectionId?: string; tags: string[]; notes: string; source: string; isArchived: boolean; updatedAt: string; revisionFamilyId?: string; revisionNumber?: number; isCurrentRevision: boolean; parentAssetId?: string; revisionPrompt: string; revisionEngine: string; preparationAcceptedAt?: string; preparationAcceptedBy: string; preparationAcceptanceNote: string; preparationTopologyChanged: boolean }
+export interface AssetSummary { id: string; projectId: string; kind: 'Image' | 'Video' | 'Audio' | 'Model'; originalFileName: string; mimeType: string; bytes: number; width?: number; height?: number; durationSeconds?: number; contentHash: string; contentUrl: string; createdAt: string; displayName: string; collectionId?: string; tags: string[]; notes: string; source: string; isArchived: boolean; updatedAt: string; revisionFamilyId?: string; revisionNumber?: number; isCurrentRevision: boolean; parentAssetId?: string; revisionPrompt: string; revisionEngine: string; preparationAcceptedAt?: string; preparationAcceptedBy: string; preparationAcceptanceNote: string; preparationTopologyChanged: boolean
+  /** A person's decision about this revision, why, and when; and the send-back it answers, if any. */
+  reviewDecision: AssetReviewDecision; reviewNote: string; reviewDecidedAt?: string | null
+  reviewAnswersAssetId?: string | null; reviewAnswersNote: string }
 export interface AssetCollectionSummary { id: string; projectId: string; name: string; color: string; sortOrder: number; assetCount: number; createdAt: string; updatedAt: string }
 /** Where one asset is actually used, across shots, scenes and clip bindings. */
 export interface AssetUsageSummary { assetId: string; shots: number; scenes: number; clips: number; where: string[] }

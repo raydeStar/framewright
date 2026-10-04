@@ -2146,3 +2146,42 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .asset-inspector{display:grid;grid-template-rows:auto minmax(0,1fr)}
 .asset-inspector>header{height:auto;min-height:58px;padding-block:8px}
 .asset-inspector-scroll{height:auto}
+
+/* Library review: a decision per revision, shown as a chip on cards and in
+   every inspection panel, and notes attached the way each kind is looked at. */
+.decision-chip { display: inline-flex; align-items: center; white-space: nowrap; padding: 3px 7px; border-radius: 999px; font-size: var(--text-2xs); font-style: normal; font-weight: 650; border: 1px solid var(--line); color: var(--muted); background: transparent; }
+.decision-chip.decision-Approved { color: var(--authority); background: var(--authority-bg); border-color: var(--authority-line); }
+.decision-chip.decision-ChangesRequested { color: var(--amber-strong); background: var(--amber-bg); border-color: var(--amber-line); }
+.asset-card-copy em.decision-chip { flex: 0 0 auto; }
+.asset-review-decision { display: grid; gap: 7px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }
+.asset-review-decision h3, .asset-notes h3 { margin: 0; color: var(--muted); font-size: var(--text-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.asset-review-state { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; }
+.asset-review-state .decision-chip { flex: 0 0 auto; }
+.asset-review-state small { color: var(--quiet); font-size: var(--text-2xs); }
+.asset-review-reason, .asset-review-answers { margin: 0; color: var(--muted); font-size: var(--text-2xs); line-height: 1.45; }
+.asset-review-answers { display: flex; gap: 6px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; color: var(--amber-soft); background: var(--amber-bg); }
+.asset-review-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.asset-review-actions button, .asset-review-send-back button, .asset-notes button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; }
+.asset-review-send-back { display: grid; gap: 6px; }
+.asset-review-send-back label { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-2xs); font-weight: 650; }
+.asset-review-send-back textarea, .asset-notes-composer textarea { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: var(--text-xs); resize: vertical; }
+.asset-review-send-back > div { display: flex; justify-content: flex-end; gap: 6px; }
+.asset-notes { display: grid; gap: 7px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }
+.asset-notes h3 small { color: var(--accent); text-transform: none; letter-spacing: 0; }
+.asset-notes-timeline { position: relative; height: 14px; margin: 2px 6px; border-radius: 999px; background: var(--surface-3); }
+.asset-notes-marker { position: absolute; top: 50%; width: 12px; height: 12px; min-height: 0 !important; padding: 0; transform: translate(-50%, -50%); border: 2px solid var(--surface-1); border-radius: 50%; background: var(--amber); cursor: pointer; }
+.asset-notes-list { list-style: none; display: grid; gap: 6px; margin: 0; padding: 0; }
+.asset-notes-list li { display: grid; gap: 3px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-1); }
+.asset-notes-list li[data-state="Resolved"] { opacity: .6; }
+.asset-notes-list li p { margin: 0; color: var(--text); font-size: var(--text-xs); line-height: 1.4; }
+.asset-notes-list li > button:last-child, .asset-notes-list li > small:last-child { justify-self: end; }
+.asset-note-anchor { justify-self: start; color: var(--accent); font-size: var(--text-2xs); background: transparent; border: 0; padding: 0; min-height: 0 !important; cursor: pointer; }
+small.asset-note-anchor { color: var(--quiet); cursor: default; }
+.asset-notes-composer { display: grid; gap: 6px; }
+.asset-notes-attach { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--muted); font-size: var(--text-2xs); }
+.asset-notes .asset-notes-attach label { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: var(--text-2xs); font-weight: 500; }
+.asset-notes .asset-notes-attach label input { width: auto; margin: 0; padding: 0; }
+.asset-notes-attach em { color: var(--accent); font-style: normal; }
+.asset-notes-composer > button { justify-self: end; }
+.image-revision-inspector .asset-review-decision { margin-bottom: 12px; }
+.asset-inspector-scroll .asset-review-decision, .asset-inspector-scroll .asset-notes { margin-bottom: 12px; }

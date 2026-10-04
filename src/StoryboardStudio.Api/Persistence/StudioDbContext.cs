@@ -312,6 +312,17 @@ public sealed class AssetReviewNoteRecord
     public required string Body { get; set; }
     public required string State { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// What the note is attached to: <c>Point</c> (x/y on an image),
+    /// <c>Time</c> (a moment in video or audio), <c>View</c> (a model's orbit
+    /// camera) or <c>None</c> (the asset as a whole). Notes written before
+    /// other kinds could be noted were all image pins, which is the default.
+    /// </summary>
+    public string Anchor { get; set; } = "Point";
+    public double? TimeSeconds { get; set; }
+    public double? ViewYaw { get; set; }
+    public double? ViewPitch { get; set; }
 }
 
 public sealed class ShotRevisionProposalRecord
@@ -573,6 +584,25 @@ public sealed class AssetRecord
     /// asset rather than left for a reader to derive from two profiles.
     /// </summary>
     public bool PreparationTopologyChanged { get; set; }
+
+    /// <summary>
+    /// Whether a person has said this revision is fit to ship: Pending until
+    /// somebody looks, then Approved or ChangesRequested with a short reason.
+    ///
+    /// Per revision, for the same reason acceptance is: a new revision is a new
+    /// row, so it starts Pending however its parent was judged, and nothing has
+    /// to remember to clear anything.
+    /// </summary>
+    public string ReviewDecision { get; set; } = "Pending";
+    public string ReviewNote { get; set; } = "";
+    public DateTimeOffset? ReviewDecidedAt { get; set; }
+
+    /// <summary>
+    /// The revision whose send-back this one answers, and what was asked,
+    /// copied so the request stays readable whatever later happens to it.
+    /// </summary>
+    public Guid? ReviewAnswersAssetId { get; set; }
+    public string ReviewAnswersNote { get; set; } = "";
 }
 
 public sealed class AssetCollectionRecord
