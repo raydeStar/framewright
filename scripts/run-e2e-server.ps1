@@ -50,6 +50,12 @@ $env:Integrations__ReferenceAssetCompiler__SkeletonProfilePath = (Join-Path $rep
 # compiler needs none. Naming an absent one also exercises how a Blender that
 # was set but does not answer is reported, exactly as a mistyped path would be.
 $env:Integrations__ReferenceAssetCompiler__BlenderPath = (Join-Path $resolvedTestData 'blender-absent-for-e2e')
+# One shipping destination, inside this run's own throwaway data root, so the
+# ship-to-game journey writes a real bundle and reads it back from disk.
+$gameImport = Join-Path $resolvedTestData 'game-import'
+New-Item -ItemType Directory -Path $gameImport | Out-Null
+$env:Integrations__Shipping__Targets__0__Name = 'E2E game'
+$env:Integrations__Shipping__Targets__0__Path = $gameImport
 
 $stopFile = $env:STUDIO_E2E_STOP_FILE
 if ([string]::IsNullOrWhiteSpace($stopFile)) {

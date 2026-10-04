@@ -2185,3 +2185,44 @@ small.asset-note-anchor { color: var(--quiet); cursor: default; }
 .asset-notes-composer > button { justify-self: end; }
 .image-revision-inspector .asset-review-decision { margin-bottom: 12px; }
 .asset-inspector-scroll .asset-review-decision, .asset-inspector-scroll .asset-notes { margin-bottom: 12px; }
+
+/* Ship to game: toolbar actions, picking cards, and the ship dialog. */
+.asset-toolbar-action { height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--muted); font-size: var(--text-xs); font-weight: 650; white-space: nowrap; cursor: pointer; }
+.asset-toolbar-action.active, .asset-toolbar-action[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-strong); }
+.asset-selection-bar { display: flex; align-items: center; gap: 8px; margin: 0 15px; padding: 7px 10px; border: 1px solid var(--accent-line); border-radius: 7px; background: var(--accent-bg); color: var(--text); font-size: var(--text-xs); }
+.asset-selection-bar > span { flex: 1; }
+.asset-selection-bar button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; }
+.asset-card-pick { position: absolute; z-index: 3; top: 8px; right: 8px; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 7px; background: color-mix(in srgb, var(--surface-1) 82%, transparent); cursor: pointer; }
+.asset-card-pick input { width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.asset-card.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+dialog.studio-dialog.edit-dialog.ship-dialog { width: min(620px, calc(100vw - 32px)); }
+.ship-summary { margin: 0; color: var(--text); font-size: var(--text-sm); font-weight: 650; }
+.ship-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; max-height: 240px; overflow-y: auto; }
+.ship-items li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
+.ship-items li strong { overflow: hidden; color: var(--text); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.ship-items li small { grid-column: 1; color: var(--quiet); font-size: var(--text-2xs); }
+.ship-items li em { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-style: normal; font-size: var(--text-2xs); color: var(--authority); }
+.ship-items li[data-ships="false"] em { color: var(--amber-soft); max-width: 220px; text-align: right; }
+.edit-dialog-body label.ship-pending { display: flex; align-items: flex-start; gap: 9px; }
+.ship-pending input { margin-top: 3px; }
+.ship-pending span, .ship-destinations label span { display: grid; gap: 2px; }
+.ship-pending small, .ship-destinations small { color: var(--quiet); font-weight: 500; font-size: var(--text-2xs); overflow-wrap: anywhere; }
+.ship-destinations { display: grid; gap: 7px; margin: 0; padding: 0; border: 0; }
+.ship-destinations legend { margin-bottom: 6px; color: var(--muted); font-size: var(--text-xs); font-weight: 650; }
+.edit-dialog-body .ship-destinations label { display: flex; align-items: flex-start; gap: 9px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); cursor: pointer; }
+.ship-destinations label.unavailable { opacity: .65; cursor: not-allowed; }
+.ship-destinations strong { color: var(--text); font-size: var(--text-xs); }
+.ship-destinations input { margin-top: 2px; }
+.ship-receipt { display: grid; grid-template-columns: 24px 1fr; gap: 10px; align-items: start; color: var(--authority); }
+.ship-receipt p { margin: 0; color: var(--text); font-size: var(--text-sm); line-height: 1.5; }
+.ship-receipt code { display: block; margin: 6px 0; overflow-wrap: anywhere; color: var(--muted); font-size: var(--text-2xs); }
+.ship-dialog footer .primary { display: inline-flex; align-items: center; gap: 7px; }
+/* The browser stacks optional bars (thumbnail prompt, selection) above its
+   content; only the content stretches, whatever bars are showing. */
+.asset-browser { display: flex; flex-direction: column; }
+.asset-browser > * { flex: 0 0 auto; }
+.asset-browser > .asset-items, .asset-browser > .asset-loading, .asset-browser > .asset-empty, .asset-browser > .authority-library { flex: 1 1 auto; min-height: 0; }
+.asset-browser > .asset-thumbnail-prompt { margin-top: 10px; }
+.asset-browser > .asset-selection-bar { margin-top: 10px; }
+.ship-dialog .edit-dialog-body { align-content: start; }
+.edit-dialog-body .ship-destinations input[type="radio"], .edit-dialog-body .ship-pending input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; min-height: 0; margin: 2px 0 0; padding: 0; }

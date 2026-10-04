@@ -955,6 +955,36 @@ public enum AssetReviewDecision
 /// </summary>
 public sealed record SetAssetReviewDecisionRequest(AssetReviewDecision Decision, string? Note);
 
+/// <summary>
+/// What to hand to a game: one collection, or a chosen set of library assets
+/// (each resolved to its family's current revision). Only Approved revisions
+/// ship unless <paramref name="IncludePending"/> says Pending ones may too;
+/// a revision that was sent back never ships.
+/// </summary>
+/// <param name="Target">The name of a configured destination; ignored for a zip download.</param>
+public sealed record ShipAssetsRequest(
+    Guid? CollectionId, Guid[]? AssetIds, bool IncludePending = false, string? Target = null);
+
+/// <summary>A configured place a bundle can be written, and whether it can be written now.</summary>
+public sealed record ShippingTargetSummary(string Name, string Path, bool Available, string? Problem);
+
+/// <summary>One asset's place in a shipment: whether it goes, and if not, why.</summary>
+public sealed record ShipmentItemPreview(
+    Guid AssetId, Guid RevisionId, string DisplayName, AssetKind Kind,
+    AssetReviewDecision Decision, bool Ships, string? Reason);
+
+/// <summary>What a shipment would contain, before anything is written.</summary>
+public sealed record ShipmentPreview(
+    string SourceName, bool IncludePending, ShipmentItemPreview[] Items, int ShipCount, int SkippedCount);
+
+/// <summary>
+/// What a shipment wrote: a new, versioned folder (or a zip), never on top of
+/// an earlier one. <paramref name="Folder"/> is null for a zip download.
+/// </summary>
+public sealed record ShipmentReceipt(
+    Guid ShipmentId, string? Target, string? Folder, string BundleName, int ItemCount, int SkippedCount,
+    string[] Files, DateTimeOffset CreatedAt);
+
 public sealed record MoveCommentRequest(double X, double Y);
 
 public sealed record PromoteCandidateRequest(int ExpectedCurrentVersion);

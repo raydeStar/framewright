@@ -82,6 +82,7 @@ builder.Services.AddSingleton<IBlenderHost, SystemBlenderHost>();
 builder.Services.AddSingleton<IBlenderLocator, BlenderLocator>();
 builder.Services.AddSingleton<ICompilerGateway, CompilerGateway>();
 builder.Services.AddScoped<ModelGenerationService>();
+builder.Services.AddScoped<ShippingService>();
 builder.Services.AddScoped<VisualConsistencyService>();
 builder.Services.AddScoped<TimelineService>();
 builder.Services.AddScoped<QwenVoiceService>();
@@ -485,6 +486,27 @@ app.MapPost("/api/assets/{assetId:guid}/archive", async Task<IResult> (Guid asse
     => ToHttpResult(await assets.SetArchivedAsync(assetId, true, cancellationToken)));
 app.MapPost("/api/assets/{assetId:guid}/restore", async Task<IResult> (Guid assetId, AssetStore assets, CancellationToken cancellationToken)
     => ToHttpResult(await assets.SetArchivedAsync(assetId, false, cancellationToken)));
+// Handing approved assets to a game: an engine-neutral bundle of files and a
+// manifest, written as a new folder under a configured destination or
+// downloaded as a zip. Destinations come from configuration only; the browser
+// names one, it never supplies a path. See docs/GAME_BUNDLE.md.
+app.MapGet("/api/shipping/targets", (ShippingService shipping) => Results.Ok(shipping.Targets()));
+app.MapPost("/api/shipping/preview", async Task<IResult> (ShipAssetsRequest request, ShippingService shipping, CancellationToken cancellationToken)
+    => ToHttpResult(await shipping.PreviewAsync(request, cancellationToken)));
+app.MapPost("/api/shipping/ship", async Task<IResult> (ShipAssetsRequest request, ShippingService shipping, CancellationToken cancellationToken)
+    => ToHttpResult(await shipping.ShipAsync(request, cancellationToken)));
+app.MapPost("/api/shipping/zip", async Task<IResult> (ShipAssetsRequest request, HttpContext context, ShippingService shipping, CancellationToken cancellationToken) =>
+{
+    var zipped = await shipping.ZipAsync(request, cancellationToken);
+    if (zipped.Kind != RepositoryResultKind.Ok)
+        return ToHttpResult(new RepositoryResult<ShipmentReceipt>(null, zipped.Kind, zipped.Error));
+    var (path, receipt) = zipped.Value;
+    context.Response.Headers["X-Framewright-Bundle-Items"] = receipt.ItemCount.ToString(CultureInfo.InvariantCulture);
+    context.Response.Headers["X-Framewright-Bundle-Skipped"] = receipt.SkippedCount.ToString(CultureInfo.InvariantCulture);
+    // The temporary zip removes itself once the download stream closes.
+    var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81_920, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+    return Results.File(stream, "application/zip", $"{receipt.BundleName}.zip");
+});
 app.MapGet("/api/asset-collections", async (AssetStore assets, CancellationToken cancellationToken)
     => Results.Ok(await assets.ListCollectionsAsync(cancellationToken)));
 app.MapPost("/api/asset-collections", async Task<IResult> (CreateAssetCollectionRequest request, AssetStore assets, CancellationToken cancellationToken)

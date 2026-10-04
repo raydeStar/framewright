@@ -36,6 +36,15 @@
   can mark a moment, shown along the player's timeline; model notes can keep
   the orbit camera they were written from; any of those can be about the whole
   asset instead.
+- **Ship to game.** Ship a collection, or a picked selection, of approved assets
+  to a game project as an engine-neutral bundle: the current revision's files
+  plus `framewright-bundle.json` (schema `framewright.bundle.v1`: asset and
+  revision ids, kind, collection, file, SHA-256, measured size and triangle
+  count for models, tags, notes and the review decision). It goes to a
+  destination named in `Integrations:Shipping:Targets` as a new timestamped
+  folder (never over an earlier one), or downloads as a zip. Only approved work
+  ships unless pending work is included; sent-back work never does. See
+  [Shipping to a game](docs/GAME_BUNDLE.md).
 
 ## 0.1.0 — 2026-09-24, first release
 

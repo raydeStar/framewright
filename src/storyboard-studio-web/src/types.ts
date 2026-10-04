@@ -35,6 +35,13 @@ export interface AssetReviewNoteSummary {
 }
 /** Whether a person has said an asset revision is fit to ship. */
 export type AssetReviewDecision = 'Pending' | 'Approved' | 'ChangesRequested'
+/** What to hand to a game: one collection, or chosen assets (each shipped as its current revision). */
+export interface ShipAssetsRequest { collectionId?: string; assetIds?: string[]; includePending: boolean; target?: string }
+/** A configured destination folder, named in workstation settings; the browser can only pick one by name. */
+export interface ShippingTargetSummary { name: string; path: string; available: boolean; problem: string | null }
+export interface ShipmentItemPreview { assetId: string; revisionId: string; displayName: string; kind: 'Image' | 'Video' | 'Audio' | 'Model'; decision: AssetReviewDecision; ships: boolean; reason: string | null }
+export interface ShipmentPreview { sourceName: string; includePending: boolean; items: ShipmentItemPreview[]; shipCount: number; skippedCount: number }
+export interface ShipmentReceipt { shipmentId: string; target: string | null; folder: string | null; bundleName: string; itemCount: number; skippedCount: number; files: string[]; createdAt: string }
 export interface JobSummary { id: string; shotId: string; shotCode: string; kind: string; state: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'; progress: number; phase: string; backend: string; createdAt: string; completedAt?: string; error?: string; manifestId?: string; adapterId?: string; outputAssetId?: string; outputAssetUrl?: string; providerRequestId?: string; attempt: number; retryOfJobId?: string; lastHeartbeatAt?: string; workType: 'Shot' | 'Asset' | 'Voice' | 'Music' | 'VoiceDesign' | 'SceneRender'; acknowledgedAt?: string }
 export interface StudioSnapshot { project: ProjectSummary; shots: ShotSummary[]; references: ReferenceSummary[]; comments: CommentSummary[]; jobs: JobSummary[]; serverTime: string; demoMode: boolean }
 export interface IntegrationSummary { id: string; name: string; state: 'Connected' | 'Ready' | 'NeedsSetup' | 'Offline' | 'Protected'; headline: string; detail: string; endpoint?: string; canInspect: boolean; canSubmit: boolean; checkedAt: string }

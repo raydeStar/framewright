@@ -1,5 +1,5 @@
 import type { ComfyUiConnectionTest, GenerationSetup, GenerationSetupChange, AssetCollectionSummary, AssetPlacementSummary, AssetUsageSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PortableProjectImportSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewDecision, AssetReviewNoteSummary, DirectorAssetView, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, ModelTriangleBudget, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneRenderFrameReceipt, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewDecision, AssetReviewNoteSummary, ShipAssetsRequest, ShipmentPreview, ShipmentReceipt, ShippingTargetSummary, DirectorAssetView, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, ModelTriangleBudget, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneRenderFrameReceipt, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -86,6 +86,23 @@ export const studioApi = {
   assetReviewNotes: (assetId: string) => request<AssetReviewNoteSummary[]>(`/api/assets/${assetId}/review-notes`),
   /** An image note needs x/y; a video/audio note may give timeSeconds; a model note may give viewYaw/viewPitch. */
   addAssetReviewNote: (assetId: string, body: { body: string; x?: number; y?: number; timeSeconds?: number; viewYaw?: number; viewPitch?: number }) => request<AssetReviewNoteSummary>(`/api/assets/${assetId}/review-notes`, { method: 'POST', body: JSON.stringify(body) }),
+  shippingTargets: () => request<ShippingTargetSummary[]>('/api/shipping/targets'),
+  shipPreview: (body: ShipAssetsRequest) => request<ShipmentPreview>('/api/shipping/preview', { method: 'POST', body: JSON.stringify(body) }),
+  /** Writes a new bundle folder under a configured destination. */
+  ship: (body: ShipAssetsRequest) => request<ShipmentReceipt>('/api/shipping/ship', { method: 'POST', body: JSON.stringify(body) }),
+  /** The same bundle as a zip, for a workstation with no destination configured. */
+  shipZip: async (body: ShipAssetsRequest) => {
+    const response = await fetch('/api/shipping/zip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (!response.ok) {
+      const text = await response.text()
+      let problem: { error?: string; title?: string } | undefined
+      try { problem = JSON.parse(text) as { error?: string; title?: string } } catch { /* keep the text */ }
+      throw new ApiError(problem?.error || problem?.title || text || `${response.status} ${response.statusText}`, response.status)
+    }
+    const disposition = response.headers.get('Content-Disposition') ?? ''
+    const fileName = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)?.[1] ?? 'framewright-bundle.zip'
+    return { blob: await response.blob(), fileName: decodeURIComponent(fileName), items: Number(response.headers.get('X-Framewright-Bundle-Items') ?? 0) }
+  },
   /** Approve, send back with a reason, or return an asset revision to Pending. */
   setAssetReview: (assetId: string, decision: AssetReviewDecision, note?: string) => request<AssetSummary>(`/api/assets/${assetId}/review`, { method: 'POST', body: JSON.stringify({ decision, note }) }),
   moveAssetReviewNote: (noteId: string, x: number, y: number) => request<AssetReviewNoteSummary>(`/api/asset-review-notes/${noteId}/position`, { method: 'PUT', body: JSON.stringify({ x, y }) }),

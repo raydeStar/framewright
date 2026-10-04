@@ -29,6 +29,8 @@ public class StudioApiFactory : WebApplicationFactory<Program>
     private readonly IVideoMediaProbe? videoMediaProbe;
     /// <summary>Lets a test stand in for a collaborator the application talks to.</summary>
     private readonly Action<IServiceCollection>? configureServices;
+    /// <summary>Workstation settings one test needs, such as a shipping destination.</summary>
+    private readonly IReadOnlyDictionary<string, string?>? settings;
     public string DataRoot { get; }
     public string DisabledCodexExecutable => Path.Combine(DataRoot, "codex-disabled-for-tests.exe");
     public string SkeletonProfilePath => Path.Combine(DataRoot, "rig-profiles");
@@ -49,9 +51,11 @@ public class StudioApiFactory : WebApplicationFactory<Program>
         string? assetRoot = null,
         bool startGenerationWorker = true,
         IVideoMediaProbe? videoMediaProbe = null,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        IReadOnlyDictionary<string, string?>? settings = null)
     {
         this.configureServices = configureServices;
+        this.settings = settings;
         DataRoot = Path.GetFullPath(dataRoot);
         this.deleteDataRoot = deleteDataRoot;
         this.assetRoot = assetRoot is null ? null : Path.GetFullPath(assetRoot);
@@ -84,7 +88,7 @@ public class StudioApiFactory : WebApplicationFactory<Program>
             ["Studio:Backups:Enabled"] = "false",
             ["Studio:DataRoot"] = DataRoot,
             ["Studio:AssetRoot"] = assetRoot
-        }));
+        }).AddInMemoryCollection(settings ?? new Dictionary<string, string?>()));
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<StudioDbContext>();

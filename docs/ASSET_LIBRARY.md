@@ -56,6 +56,16 @@ Approved, or Changes requested.
 Tags and notes are still free-form; they are no longer needed to stand in for
 "sent back" or "approved".
 
+## Ship to game
+
+Approved work leaves Framewright as an engine-neutral bundle: **Ship
+collection** in a collection, or **Select** cards and **Ship to game**. The
+dialog lists what will ship and what stays (pending, sent back, archived), lets
+pending work go too, and writes either a new timestamped folder under a game
+destination configured on the workstation, or a zip. Nothing already shipped is
+written over. The bundle layout, the `framewright-bundle.json` schema and
+importer guidance are in [Shipping to a game](GAME_BUNDLE.md).
+
 ## Domain and trust rules
 
 - `AssetRecord` is the canonical project-scoped media object and stores editable library metadata alongside immutable source facts.

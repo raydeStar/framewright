@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Archive, ArrowLeft, ArrowRight, BadgeCheck, Box, Check, Clapperboard, Download, Folder, FolderOpen, GitCompare, Grid2X2, Image, ImagePlus, Library, List, LoaderCircle, Music2, Pause, PenLine, Play, Plus, Search, SlidersHorizontal, Sparkles, Upload, Video, WandSparkles, X } from 'lucide-react'
+import { Archive, ArrowLeft, ArrowRight, BadgeCheck, Box, Check, CheckSquare, Clapperboard, Download, Folder, FolderOpen, GitCompare, Grid2X2, Image, ImagePlus, Library, List, LoaderCircle, Music2, PackageCheck, Pause, PenLine, Play, Plus, Search, SlidersHorizontal, Sparkles, Upload, Video, WandSparkles, X } from 'lucide-react'
 import { studioApi } from '../api'
 import ModelFromReference from './ModelFromReference'
 import type { AssetCollectionSummary, AssetGenerationDraft, AssetGenerationReference, AssetPlacementSummary, AssetReviewNoteSummary, AssetSummary, AssetUsageSummary, JobSummary, ReferenceSummary, ShotSummary, StudioSnapshot } from '../types'
@@ -8,6 +8,7 @@ import ModelInspectionWorkspace from './ModelInspectionWorkspace'
 import AssetReviewPins from './AssetReviewPins'
 import AssetNotesPanel from './AssetNotesPanel'
 import ReviewDecisionPanel from './ReviewDecisionPanel'
+import ShipDialog, { type ShipSource } from './ShipDialog'
 import { matchesReviewFilter, reviewBadge, type ReviewFilter } from '../assetReview'
 import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorMode'
 import { useAssetDirectorView } from './useAssetDirectorView'
@@ -33,6 +34,15 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sort, setSort] = useState<'newest' | 'name' | 'type'>('newest')
   const [review, setReview] = useState<ReviewFilter>('all')
+  // Shipping: a collection or a picked set of cards, handed to the ship dialog.
+  const [shipping, setShipping] = useState<ShipSource>()
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const togglePicked = (assetId: string) => setPicked(current => {
+    const next = new Set(current)
+    if (next.has(assetId)) next.delete(assetId); else next.add(assetId)
+    return next
+  })
   const [selectedId, setSelectedId] = useState<string | undefined>(initialAssetId)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -206,23 +216,37 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
           <label className="asset-search"><Search size={16} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search names, tags, notes, or source" aria-label="Search assets" />{query && <button onClick={() => setQuery('')} aria-label="Clear asset search"><X size={14} /></button>}</label>
           <label className="asset-sort"><SlidersHorizontal size={15} /><select aria-label="Sort assets" value={sort} onChange={event => setSort(event.target.value as typeof sort)}><option value="newest">Newest</option><option value="name">Name</option><option value="type">Media type</option></select></label>
           <label className="asset-sort asset-review-filter"><BadgeCheck size={15} /><select aria-label="Filter by review" data-testid="asset-review-filter" value={review} onChange={event => setReview(event.target.value as ReviewFilter)}><option value="all">Any review</option><option value="Pending">Pending</option><option value="Approved">Approved</option><option value="ChangesRequested">Changes requested</option></select></label>
+          {/* Shipping lives in the toolbar so it is reachable on every layout,
+              including tablets, where the collection sidebar is a strip. */}
+          {activeCollection && <button type="button" className="asset-toolbar-action" data-testid="collection-ship"
+            onClick={() => setShipping({ kind: 'collection', collectionId: activeCollection.id, name: activeCollection.name })}><PackageCheck size={15} />Ship collection</button>}
+          <button type="button" className={`asset-toolbar-action${selecting ? ' active' : ''}`} aria-pressed={selecting} data-testid="asset-select-mode"
+            onClick={() => { setSelecting(value => !value); setPicked(new Set()) }}><CheckSquare size={15} />{selecting ? 'Done selecting' : 'Select'}</button>
           <div className="asset-view-toggle" role="group" aria-label="Asset layout"><button aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')}><Grid2X2 size={16} /></button><button aria-pressed={layout === 'list'} onClick={() => setLayout('list')}><List size={17} /></button></div>
         </div>
         {error && <p className="asset-error" role="alert"><span>{error}</span><button onClick={() => setError(undefined)}><X size={15} /></button></p>}
+        {selecting && <div className="asset-selection-bar" data-testid="asset-selection-bar" role="status">
+          <span>{picked.size === 0 ? 'Pick the assets to ship.' : `${picked.size} selected`}</span>
+          <button type="button" className="primary compact" data-testid="selection-ship" disabled={picked.size === 0}
+            onClick={() => setShipping({ kind: 'selection', assetIds: [...picked], name: `${picked.size} selected asset${picked.size === 1 ? '' : 's'}` })}><PackageCheck size={15} />Ship to game</button>
+          <button type="button" className="secondary compact" disabled={picked.size === 0} onClick={() => setPicked(new Set())}>Clear</button>
+        </div>}
         {loading ? <div className="asset-loading"><LoaderCircle className="spin" /><span>Opening the media pool…</span></div> : view === 'authorities' ? <AuthorityLibrary references={studio.references} query={normalized} onEdit={onEditAuthority} /> : visible.length === 0 ? <AssetEmpty view={view} query={query} onCreate={() => setCreateOpen(true)} onImport={() => fileRef.current?.click()} /> : <div className={`asset-items ${layout}`}>
-          {visible.map(asset => <AssetCard key={asset.id} asset={asset} usage={usage.get(asset.id)} hasPoster={postered.has(asset.id)} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} onDirect={() => { setSelectedId(asset.id); director.onDirectorMode(true) }} />)}
+          {visible.map(asset => <AssetCard key={asset.id} asset={asset} usage={usage.get(asset.id)} hasPoster={postered.has(asset.id)} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} onDirect={() => { setSelectedId(asset.id); director.onDirectorMode(true) }} pickable={selecting} picked={picked.has(asset.id)} onPick={() => togglePicked(asset.id)} />)}
         </div>}
       </section>
       {selected && <AssetInspector {...director} asset={selected} collections={collections} onReviewed={async (updated, message) => { setAssets(current => current.map(item => item.id === updated.id ? updated : item)); await refresh(); onToast(message) }} placements={placements.filter(item => item.assetId === selected.id)} originJob={studio.jobs.find(job => job.outputAssetId === selected.id && job.workType === 'Shot')} shots={studio.shots} onClose={closeAsset} onSaved={updated => { setAssets(current => current.map(item => item.id === updated.id ? updated : item)); void refresh(); onToast(`${updated.displayName} metadata saved.`) }} onPlacementsChanged={() => void refresh()} onOpenGeneration={() => onOpenGeneration({ id: crypto.randomUUID(), name: `${selected.displayName} variation`, initialPrompt: `Create a new reusable variation of ${selected.displayName}. Preserve its defining identity and design while following my composition notes.`, route: 'fast', underlayAssetId: selected.id, references: generationReferences, revisionFamilyId: selected.revisionFamilyId, parentAssetId: selected.id })} onOpenSequence={onOpenSequence} />}
     </div>
     {createOpen && <CreateAssetLauncher references={generationReferences} onOpenMusic={studio.shots.length > 0 ? () => { setCreateOpen(false); onOpenSequence() } : undefined} onClose={() => setCreateOpen(false)} onImport={() => { setCreateOpen(false); fileRef.current?.click() }} onOpenGeneration={draft => { setCreateOpen(false); onOpenGeneration(draft) }} onJobQueued={onJobQueued} />}
+    {shipping && <ShipDialog source={shipping} onClose={() => setShipping(undefined)} onShipped={message => { onToast(message); void refresh() }} />}
     {collectionEditor && <CollectionDialog collection={collectionEditor === 'new' ? undefined : collectionEditor} onClose={() => setCollectionEditor(undefined)} onSaved={async saved => { setCollectionEditor(undefined); await refresh(); setView(`collection:${saved.id}`); onToast(`${saved.name} collection saved.`) }} />}
   </main>
 }
 
-function AssetCard({ asset, usage, hasPoster, selected, onSelect, onDirect }: { asset: AssetSummary; usage?: AssetUsageSummary; hasPoster: boolean; selected: boolean; onSelect: () => void; onDirect: () => void }) {
+function AssetCard({ asset, usage, hasPoster, selected, onSelect, onDirect, pickable, picked, onPick }: { asset: AssetSummary; usage?: AssetUsageSummary; hasPoster: boolean; selected: boolean; onSelect: () => void; onDirect: () => void; pickable: boolean; picked: boolean; onPick: () => void }) {
   const [playing, setPlaying] = useState(false)
-  return <article className={`asset-card ${selected ? 'selected' : ''}`} draggable={!asset.isArchived} onDragStart={event => { event.dataTransfer.setData('text/asset-id', asset.id); event.dataTransfer.effectAllowed = 'move' }}>
+  return <article className={`asset-card ${selected ? 'selected' : ''}${picked ? ' picked' : ''}`} draggable={!asset.isArchived} onDragStart={event => { event.dataTransfer.setData('text/asset-id', asset.id); event.dataTransfer.effectAllowed = 'move' }}>
+    {pickable && <label className="asset-card-pick"><input type="checkbox" checked={picked} onChange={onPick} aria-label={`Select ${asset.displayName}`} /></label>}
     <button className="asset-card-open" onClick={onSelect} aria-label={`Open ${asset.displayName}`}>
       <div className={`asset-thumbnail ${asset.kind.toLowerCase()}`}>{asset.kind === 'Image' ? <img src={asset.contentUrl} alt="" /> : asset.kind === 'Video' ? <video src={asset.contentUrl} muted preload="metadata" /> : asset.kind === 'Model' ? (hasPoster ? <img src={`/api/assets/${asset.id}/poster`} alt="" /> : <Box size={26} />) : <><Music2 /><div className="asset-wave">{[2,5,3,7,4,8,3,6,2,5,7,3].map((height, index) => <i key={index} style={{ height: `${height * 8}%` }} />)}</div></>}<span>{asset.kind}</span></div>
       <div className="asset-card-copy">

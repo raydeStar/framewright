@@ -51,6 +51,7 @@ Everything runs on your machine. Projects, media, approvals, and credentials sta
 | **3D scenes and previs** | Generate a static prop from a reference image, rig a humanoid, block out a scene from a reference, replace stand-ins with library models, and animate with clips and pivot motion. |
 | **Animated takes** | Render a scene still into ordinary shot review. Once it is approved, render an exact-frame animated take, or send approved frames to a first/last-frame video workflow. |
 | **Sound editorial** | Separate Dialogue, Voice, and Music lanes with sequence assembly and an independent WAV mix export, so picture and sound stay separately editable. |
+| **Review and ship to a game** | Approve or send back any library asset (image, model, video, audio) with a reason, leave notes pinned to a spot, a moment, or a model view, and ship approved work to a game project as an engine-neutral bundle of files and a JSON manifest. |
 | **Local-first and recoverable** | SQLite plus content-addressed media, durable provider jobs that survive a restart, editable project export and import, and verified backups with an offline restore tool. |
 
 ## From sketch to animated take
@@ -336,6 +337,7 @@ The certificate includes hostname, localhost, and current IPv4 subject-alternati
 | [Implementation handoff](docs/IMPLEMENTATION_HANDOFF.md)       | Current product decisions, boundaries, provider strategy, and known risks         |
 | [Architecture](docs/ARCHITECTURE.md)                           | Domain ownership, persistence, adapters, security, and trust boundaries           |
 | [Asset library](docs/ASSET_LIBRARY.md)                         | Media-pool model, collections, references, generation routes, and shot placement  |
+| [Shipping to a game](docs/GAME_BUNDLE.md)                       | The ship-to-game bundle, its manifest schema, destinations, and writing an importer |
 | [Reference Asset Compiler](docs/REFERENCE_ASSET_COMPILER.md)   | How 3D generation, preparation, and rigging are delegated and verified            |
 | [3D conventions](docs/3D_CONVENTIONS.md)                       | Coordinate system, units, and the supported 3D route as it behaves today           |
 | [Workflow templates](workflows/README.md)                      | Allowlisted ComfyUI contracts and endpoint roles                                   |
