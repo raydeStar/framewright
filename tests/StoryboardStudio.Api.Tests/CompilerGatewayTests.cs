@@ -316,4 +316,111 @@ public sealed class CompilerGatewayTests
         Assert.False(capabilities.Installed);
         Assert.Equal("/usr/bin/blender", capabilities.BlenderInstall?.Executable);
     }
+
+    [Fact]
+    public async Task ABudgetIsAskedForByNameAndRealSizeAndReadFieldForField()
+    {
+        using var budget = Stub(
+            "echo %* >> \"%~f0.args\"",
+            "echo {\"schema\": \"reference-asset-compiler.triangle-budget.v1\", \"role\": \"prop\", "
+            + "\"role_reason\": \"nothing in its name or notes marks it as anything but a prop\", "
+            + "\"size_class\": \"medium\", \"longest_m\": 1.2, \"triangle_budget\": 10000, "
+            + "\"maximum_p99_m\": 0.0039, \"maximum_max_m\": 0.0157, \"ladder\": [10000, 15000, 22500], "
+            + "\"summary\": \"A medium prop: about 10,000 triangles.\"}");
+
+        var answer = await Gateway(("Executable", budget.Path)).SuggestTriangleBudgetAsync(
+            "Iron-bound chest", [1.2, 0.8, 0.75], CancellationToken.None);
+
+        Assert.Equal(TriangleBudgetState.Decided, answer.State);
+        Assert.Equal("prop", answer.Role);
+        Assert.Equal("medium", answer.SizeClass);
+        Assert.Equal(10_000, answer.TriangleBudget);
+        Assert.Equal(1.2, answer.LongestMetres);
+        Assert.Equal(0.0039, answer.MaximumP99Metres);
+        Assert.Equal(0.0157, answer.MaximumMaxMetres);
+        Assert.Equal([10_000, 15_000, 22_500], answer.Ladder!);
+        Assert.Equal("A medium prop: about 10,000 triangles.", answer.Summary);
+        Assert.Contains("anything but a prop", answer.RoleReason, StringComparison.Ordinal);
+
+        // The name the artist gave it and the size measured from its bytes,
+        // in metres, the way the compiler's own command line takes them.
+        var passed = File.ReadAllText(budget.Path + ".args");
+        Assert.Contains("budget", passed, StringComparison.Ordinal);
+        Assert.Contains("--name=Iron-bound chest", passed, StringComparison.Ordinal);
+        Assert.Contains("--dims 1.2 0.8 0.75", passed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ACharacterIsAnsweredWithNoNumberRatherThanAnInventedOne()
+    {
+        using var character = Stub(
+            "echo {\"schema\": \"reference-asset-compiler.triangle-budget.v1\", \"role\": \"character\", "
+            + "\"role_reason\": \"its name says 'npc'\", \"size_class\": \"medium\", \"longest_m\": 1.8, "
+            + "\"triangle_budget\": null, \"ladder\": [], "
+            + "\"summary\": \"A character takes the rig route; its skeleton profile sets its budget, not this table.\"}");
+
+        var answer = await Gateway(("Executable", character.Path)).SuggestTriangleBudgetAsync(
+            "Innkeeper NPC", [0.6, 1.8, 0.4], CancellationToken.None);
+
+        Assert.Equal(TriangleBudgetState.Decided, answer.State);
+        Assert.Equal("character", answer.Role);
+        Assert.Null(answer.TriangleBudget);
+        Assert.Empty(answer.Ladder!);
+        Assert.Contains("rig route", answer.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ACompilerWithoutTheBudgetCommandIsOutdatedRatherThanMissing()
+    {
+        // What argparse says about a subcommand it has never heard of.
+        using var outdated = Stub(
+            "echo usage: rac [-h] {new,plan,run-stage,export-animations} ... 1>&2",
+            "echo rac: error: argument command: invalid choice: 'budget' 1>&2",
+            "exit /b 2");
+
+        var answer = await Gateway(("Executable", outdated.Path)).SuggestTriangleBudgetAsync(
+            "Iron-bound chest", [1.2, 0.8, 0.75], CancellationToken.None);
+
+        Assert.Equal(TriangleBudgetState.Outdated, answer.State);
+        Assert.Null(answer.TriangleBudget);
+        Assert.Contains("older", answer.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AMissingCompilerSuggestsNothing()
+    {
+        var answer = await Gateway(("Executable", "rac-that-is-not-installed-anywhere"))
+            .SuggestTriangleBudgetAsync("Iron-bound chest", [1.2, 0.8, 0.75], CancellationToken.None);
+
+        Assert.Equal(TriangleBudgetState.NotInstalled, answer.State);
+        Assert.Null(answer.TriangleBudget);
+    }
+
+    [Fact]
+    public async Task ACompilerThatRefusesAModelIsQuotedInItsOwnWords()
+    {
+        using var refusing = Stub(
+            "echo RAC_ERROR An object with no extent has no size to budget for. 1>&2",
+            "exit /b 2");
+
+        var answer = await Gateway(("Executable", refusing.Path)).SuggestTriangleBudgetAsync(
+            "Flat decal", [0, 0, 0], CancellationToken.None);
+
+        Assert.Equal(TriangleBudgetState.Refused, answer.State);
+        Assert.Contains("no size to budget for", answer.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("RAC_ERROR", answer.Detail, StringComparison.Ordinal);
+        Assert.Null(answer.TriangleBudget);
+    }
+
+    [Fact]
+    public async Task AnAnswerThatIsNotABudgetIsNotReadAsOne()
+    {
+        using var confused = Stub("echo {\"ok\": true, \"stages\": []}");
+
+        var answer = await Gateway(("Executable", confused.Path)).SuggestTriangleBudgetAsync(
+            "Iron-bound chest", [1.2, 0.8, 0.75], CancellationToken.None);
+
+        Assert.Equal(TriangleBudgetState.Refused, answer.State);
+        Assert.Null(answer.TriangleBudget);
+    }
 }

@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
     "format:check": "prettier --check package.json tsconfig.json vite.config.ts playwright.config.ts eslint.config.js .prettierrc.json",
-    "check": "npm run typecheck && npm run lint && npm run format:check",
+    "test:unit": "node --experimental-strip-types --test \"unit/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test:unit",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test:e2e": "playwright test"

@@ -392,8 +392,40 @@ public sealed record CreateModelSurfacingRequest(
 /// Prepare an existing library model for browser or runtime use: the same
 /// compiler, a different route. Nothing about the source is touched.
 /// </summary>
+/// <param name="TriangleBudget">
+/// A number the artist chose, or null for Auto: the compiler decides the
+/// budget from what the model is and how big it is, and its receipt records
+/// what it decided and why. This studio never fills in a number of its own.
+/// </param>
 public sealed record CreateModelPreparationRequest(
     Guid SourceAssetId, string? Name, int? TriangleBudget);
+
+/// <summary>Whether the compiler could say what a model should cost.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TriangleBudgetState
+{
+    /// <summary>The compiler answered. A character's answer has no number: it takes the rig route.</summary>
+    Decided,
+    /// <summary>No compiler is installed, so nobody can say.</summary>
+    NotInstalled,
+    /// <summary>The installed compiler predates <c>rac budget</c>.</summary>
+    Outdated,
+    /// <summary>The compiler was asked and refused, in its own words.</summary>
+    Refused,
+}
+
+/// <summary>
+/// What the Reference Asset Compiler says one model should cost at runtime,
+/// read from its <c>rac budget</c> answer for this model's name and measured
+/// size. Every field but the first three is the compiler's; this studio only
+/// carries them, and when the compiler cannot answer there is no number here
+/// at all rather than one invented to fill the gap.
+/// </summary>
+public sealed record ModelTriangleBudget(
+    Guid AssetId, int TriangleCount, TriangleBudgetState State, string? Detail,
+    string? Role = null, string? RoleReason = null, string? SizeClass = null, double? LongestMetres = null,
+    int? TriangleBudget = null, double? MaximumP99Metres = null, double? MaximumMaxMetres = null,
+    int[]? Ladder = null, string? Summary = null);
 
 /// <summary>
 /// Which Blender the compiler is handed, and how this studio came to choose it.

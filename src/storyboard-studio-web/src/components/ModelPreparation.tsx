@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bone, Check, Eye, LoaderCircle, Scaling, TriangleAlert, X } from 'lucide-react'
 import { studioApi } from '../api'
+import { autoOffer, manualBudgetProblem, MAXIMUM_BUDGET, MINIMUM_BUDGET, preparationBudget } from '../modelBudget'
 import BlenderInstallNote from './BlenderInstallNote'
 import type {
   AssetSummary,
@@ -8,6 +9,7 @@ import type {
   ModelGenerationReadiness,
   ModelPreparationEvidence,
   ModelProfileSummary,
+  ModelTriangleBudget,
 } from '../types'
 
 /**
@@ -36,10 +38,18 @@ import type {
  * all, so a crease is exactly as sharp afterwards. On a generated mesh that is
  * often half the model, and doing it first means the budget gets spent on the
  * silhouette rather than on the inside of a hollow body.
+ *
+ * The budget defaults to Auto: the compiler decides from what the model is and
+ * how big it is -- a prop, a hero piece, a length of railing -- and its answer
+ * is shown before anything runs. Typing a number is still there, one step
+ * away. When the compiler cannot answer, there is no Auto and no invented
+ * number either: the artist types one.
  */
-export default function ModelPreparation({ asset, profile, onQueued, onDecided }: {
+export default function ModelPreparation({ asset, profile, budget, onQueued, onDecided }: {
   asset: AssetSummary
   profile: ModelProfileSummary
+  /** The compiler's suggestion for this revision: undefined while asking, null if it could not be asked. */
+  budget: ModelTriangleBudget | null | undefined
   onQueued: (message: string) => void
   onDecided: (message: string) => void
 }) {
@@ -50,7 +60,10 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
   // A ray cannot see through glass, so culling a lantern empties it through the
   // panes, and this is the artist saying nothing behind them is meant to show.
   const [throughGlass, setThroughGlass] = useState(false)
-  const [budget, setBudget] = useState(() => suggested(profile.triangleCount))
+  // Auto unless the artist opens the number. The number starts empty: a
+  // figure filled in here would be this studio deciding, which it does not.
+  const [manual, setManual] = useState(false)
+  const [manualBudget, setManualBudget] = useState('')
   const [job, setJob] = useState<JobSummary>()
   const [evidence, setEvidence] = useState<ModelPreparationEvidence>()
   const [pass, setPass] = useState<'beauty' | 'matcap'>('beauty')
@@ -75,7 +88,8 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
     return () => { live = false }
   }, [])
 
-  useEffect(() => { setBudget(suggested(profile.triangleCount)) }, [profile.triangleCount])
+  // A typed number belongs to the revision it was typed for.
+  useEffect(() => { setManual(false); setManualBudget('') }, [asset.id])
 
   // A derivative carries its own evidence, so opening one tomorrow shows the
   // same comparison it was delivered with. Without this the pictures the
@@ -118,11 +132,11 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
     return () => window.clearInterval(timer)
   }, [job, follow])
 
-  const prepare = async () => {
+  const prepare = async (triangleBudget: number | null) => {
     setBusy(true); setError(undefined); setEvidence(undefined)
     try {
       const queued = await studioApi.prepareModel(
-        asset.id, `${asset.displayName} (runtime)`, budget)
+        asset.id, `${asset.displayName} (runtime)`, triangleBudget)
       setJob(queued)
       onQueued(`${queued.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
@@ -188,6 +202,25 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
     (of === 'source' ? evidence?.source : evidence?.derivative)?.views
       .filter(view => view.pass === pass) ?? []
 
+  const offer = autoOffer(budget, profile.triangleCount)
+  // With no Auto to fall back on, the number is the only way, so it is shown
+  // outright rather than tucked behind a disclosure.
+  const typing = offer.kind === 'unavailable' || manual
+  const sending = preparationBudget(typing, offer, manualBudget, profile.triangleCount)
+  const typedProblem = typing && manualBudget.trim() !== ''
+    ? manualBudgetProblem(manualBudget, profile.triangleCount) : null
+  const numberInput = <label className="model-size">
+    <span>Triangles</span>
+    <input type="number" inputMode="numeric" min={MINIMUM_BUDGET}
+      max={Math.max(MINIMUM_BUDGET, Math.min(MAXIMUM_BUDGET, profile.triangleCount - 1))} step={500}
+      value={manualBudget} data-testid="model-preparation-budget"
+      placeholder={offer.kind === 'ready' || offer.kind === 'within' ? String(offer.budget) : undefined}
+      onChange={event => setManualBudget(event.target.value)} />
+    <span className="model-note" data-testid="model-preparation-budget-note">
+      {typedProblem ?? `This model has ${profile.triangleCount.toLocaleString()}. A derivative has to be smaller.`}
+    </span>
+  </label>
+
   return <section className="model-preparation" data-testid="model-preparation">
     <h2><Scaling size={15} />Runtime derivative</h2>
 
@@ -198,19 +231,33 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
             data-can-run={readiness.canRun ? 'true' : 'false'}>{readiness.detail}</p>
           <BlenderInstallNote install={readiness.blenderInstall} />
 
-          {readiness.canRun && <label className="model-size">
-            <span>Runtime triangle budget</span>
-            <input type="number" min={1000} max={Math.max(1000, profile.triangleCount - 1)} step={500}
-              value={budget} data-testid="model-preparation-budget"
-              onChange={event => setBudget(Number(event.target.value))} />
-            <span className="model-note">
-              This model has {profile.triangleCount.toLocaleString()}. A derivative has to be smaller.
-            </span>
-          </label>}
+          {readiness.canRun && <div className="model-budget" data-testid="model-preparation-budget-choice"
+            data-mode={typing ? 'manual' : 'auto'} data-offer={offer.kind}>
+            <span className="model-budget-label">Runtime triangle budget</span>
+            {offer.kind === 'loading'
+              ? <p className="model-note"><LoaderCircle className="spin" size={14} /> Asking the compiler what this should cost…</p>
+              : offer.kind === 'unavailable'
+              ? <p className="model-note" data-testid="model-preparation-auto-unavailable">
+                  No Auto budget here: {offer.text}
+                </p>
+              : <p className={`model-budget-auto${manual ? ' set-aside' : ''}`} data-testid="model-preparation-auto">
+                  <strong>Auto</strong>
+                  <span>{offer.text}</span>
+                  {offer.reason && <small>Why: {offer.reason}.</small>}
+                </p>}
+            {offer.kind === 'unavailable'
+              ? numberInput
+              : offer.kind !== 'loading' && <details className="model-budget-manual" open={manual}
+                  data-testid="model-preparation-manual"
+                  onToggle={event => setManual(event.currentTarget.open)}>
+                  <summary>{manual ? 'Using your number instead of Auto' : 'Choose a number instead'}</summary>
+                  {numberInput}
+                </details>}
+          </div>}
 
           <button type="button" className="secondary" data-testid="model-prepare"
-            disabled={busy || running || !readiness.canRun || budget >= profile.triangleCount}
-            onClick={() => void prepare()}>
+            disabled={busy || running || !readiness.canRun || sending === undefined}
+            onClick={() => { if (sending !== undefined) void prepare(sending) }}>
             <Scaling size={15} />{running ? 'Preparing…' : 'Prepare for runtime'}
           </button>
         </>}
@@ -356,11 +403,6 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
       one, never instead of it, and it stays unapproved until somebody says otherwise.
     </p>
   </section>
-}
-
-/** Half, rounded to something a person would have typed, and never below the floor. */
-function suggested(triangles: number) {
-  return Math.max(1000, Math.round(triangles / 2 / 500) * 500)
 }
 
 /** UV maps in the terms a loss is read in: how many channels, or none at all. */

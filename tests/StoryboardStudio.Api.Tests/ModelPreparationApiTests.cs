@@ -63,12 +63,31 @@ public sealed class ModelPreparationApiTests
                      Stage("survey-surfaces"), Stage("compress-textures"),
                      Stage("cull-unseen")]);
 
+        /// <summary>What <c>rac budget</c> answers here, and every time it was asked.</summary>
+        public CompilerBudgetSuggestion Suggestion { get; set; } = SmallProp;
+        public List<(string Name, double[] Dimensions)> BudgetQuestions { get; } = [];
+
+        /// <summary>The compiler's answer for an ordinary small prop, as its contract shapes it.</summary>
+        public static CompilerBudgetSuggestion SmallProp => new(
+            TriangleBudgetState.Decided, null, Role: "prop",
+            RoleReason: "nothing in its name or notes marks it as anything but a prop",
+            SizeClass: "small", LongestMetres: 0.6, TriangleBudget: 2_000,
+            MaximumP99Metres: 0.0015, MaximumMaxMetres: 0.005, Ladder: [2_000, 3_000, 4_500],
+            Summary: "A small prop: about 2,000 triangles.");
+
         public Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Capabilities);
 
         public Task<CompilerAnimationExport> ExportAnimationsAsync(
             string sourcePath, IReadOnlyList<string> clips, CancellationToken cancellationToken) =>
             Task.FromResult(new CompilerAnimationExport(null, "This fixture does not export animations."));
+
+        public Task<CompilerBudgetSuggestion> SuggestTriangleBudgetAsync(
+            string name, IReadOnlyList<double> dimensions, CancellationToken cancellationToken)
+        {
+            BudgetQuestions.Add((name, [.. dimensions]));
+            return Task.FromResult(Suggestion);
+        }
 
         public async Task<CompilerStageRun> RunStageAsync(
             string stage, string sourcePath, string outputPath, string reportPath,
@@ -126,12 +145,31 @@ public sealed class ModelPreparationApiTests
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
                 await File.WriteAllBytesAsync(outputPath, Payload, cancellationToken);
-                receipt = JsonSerializer.Serialize(new
+                var fields = new Dictionary<string, object?>
                 {
-                    schema = $"reference-asset-compiler.{stage}.v1",
-                    status = "mechanical_pass",
-                    production_grade = false,
-                });
+                    ["schema"] = $"reference-asset-compiler.{stage}.v1",
+                    ["status"] = "mechanical_pass",
+                    ["production_grade"] = false,
+                };
+                // A reduction told to decide for itself records what it decided,
+                // with the same fields `rac budget` answers and every rung it tried.
+                if (stage == "reduce-mesh" && Options[stage].GetValueOrDefault("triangle-budget") == "auto")
+                    fields["budget_decision"] = new
+                    {
+                        schema = "reference-asset-compiler.triangle-budget.v1",
+                        name = Options[stage].GetValueOrDefault("asset-name"),
+                        role = Suggestion.Role,
+                        role_reason = Suggestion.RoleReason,
+                        size_class = Suggestion.SizeClass,
+                        longest_m = Suggestion.LongestMetres,
+                        triangle_budget = Suggestion.TriangleBudget,
+                        maximum_p99_m = Suggestion.MaximumP99Metres,
+                        maximum_max_m = Suggestion.MaximumMaxMetres,
+                        ladder = Suggestion.Ladder,
+                        summary = Suggestion.Summary,
+                        attempts = new[] { new { triangle_budget = Suggestion.TriangleBudget, verdict = "passed" } },
+                    };
+                receipt = JsonSerializer.Serialize(fields);
             }
             await File.WriteAllTextAsync(reportPath, receipt, cancellationToken);
             return new CompilerStageRun(true, stage, 0, 0.5, outputPath, receipt, null, ["done"]);
@@ -301,6 +339,163 @@ public sealed class ModelPreparationApiTests
         Assert.Equal("2500", compiler.Options["reduce-mesh"]["triangle-budget"]);
         Assert.True(compiler.Options["reduce-mesh"].ContainsKey("runtime-derivative"));
         Assert.Equal("", compiler.Options["reduce-mesh"]["runtime-derivative"]);
+        // A number the artist chose is theirs: the compiler is not asked for
+        // one, and is not handed a name to decide from.
+        Assert.Empty(compiler.BudgetQuestions);
+        Assert.False(compiler.Options["reduce-mesh"].ContainsKey("asset-name"));
+    }
+
+    [Fact]
+    public async Task TheCompilersSuggestionIsAskedForTheModelsOwnNameAndMeasuredSize()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "iron-chest.glb", ModelFixtures.DenseProp());
+        var profile = await client.GetFromJsonAsync<ModelProfileSummary>(
+            $"/api/assets/{source.Id}/model-profile") ?? throw new InvalidOperationException();
+
+        var budget = await client.GetFromJsonAsync<ModelTriangleBudget>(
+            $"/api/assets/{source.Id}/triangle-budget") ?? throw new InvalidOperationException();
+
+        // Everything the compiler said, carried rather than restated.
+        Assert.Equal(TriangleBudgetState.Decided, budget.State);
+        Assert.Equal(2_000, budget.TriangleBudget);
+        Assert.Equal("prop", budget.Role);
+        Assert.Equal("small", budget.SizeClass);
+        Assert.Equal("A small prop: about 2,000 triangles.", budget.Summary);
+        Assert.Equal([2_000, 3_000, 4_500], budget.Ladder!);
+        // And beside it, what the model actually has, so the two can be compared.
+        Assert.Equal(source.Id, budget.AssetId);
+        Assert.Equal(profile.TriangleCount, budget.TriangleCount);
+
+        var (name, dimensions) = Assert.Single(compiler.BudgetQuestions);
+        Assert.Equal(source.DisplayName, name);
+        Assert.Equal(profile.Dimensions, dimensions);
+        // A question, not work.
+        Assert.Equal(0, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task NoBudgetMeansAutoAndTheCompilerDecidesAndSaysWhat()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "auto-chest.glb", ModelFixtures.DenseProp());
+
+        var queued = await client.PostAsJsonAsync("/api/models/preparation",
+            new { sourceAssetId = source.Id, name = "Auto chest (runtime)" });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        // Asked once before queueing, so a model Auto cannot help is refused
+        // now rather than a stage later.
+        Assert.Single(compiler.BudgetQuestions);
+
+        var finished = await RunAsync(factory, job.Id);
+        Assert.Equal(JobState.Completed, finished.State);
+
+        // Said, not implied: "auto" by name, with the name it is decided from.
+        var reduce = compiler.Options["reduce-mesh"];
+        Assert.Equal("auto", reduce["triangle-budget"]);
+        Assert.Equal(source.DisplayName, reduce["asset-name"]);
+        Assert.Equal("", reduce["runtime-derivative"]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == job.Id);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.Equal("auto", result.RootElement.GetProperty("triangleBudgetMode").GetString());
+        // No number of this studio's own: the compiler's decision is the record.
+        Assert.Equal(JsonValueKind.Null, result.RootElement.GetProperty("triangleBudget").ValueKind);
+        var decision = result.RootElement.GetProperty("budgetDecision");
+        Assert.Equal(2_000, decision.GetProperty("triangle_budget").GetInt32());
+        Assert.Equal("prop", decision.GetProperty("role").GetString());
+        Assert.Equal("passed", decision.GetProperty("attempts")[0].GetProperty("verdict").GetString());
+
+        // And the person judging the result reads who chose the number.
+        var after = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.Contains("on the compiler's own budget (A small prop: about 2,000 triangles)",
+            after.RevisionPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnOlderCompilerSuggestsNothingAndLeavesTheNumberToTheArtist()
+    {
+        var compiler = new ControlledCompiler
+        {
+            Suggestion = new CompilerBudgetSuggestion(TriangleBudgetState.Outdated,
+                "The installed Reference Asset Compiler is older than this: it has no budget command, so it "
+                + "cannot choose a budget itself. Enter one, or update the compiler."),
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "older.glb", ModelFixtures.DenseProp());
+
+        var budget = await client.GetFromJsonAsync<ModelTriangleBudget>(
+            $"/api/assets/{source.Id}/triangle-budget") ?? throw new InvalidOperationException();
+        Assert.Equal(TriangleBudgetState.Outdated, budget.State);
+        Assert.Null(budget.TriangleBudget);
+        Assert.Contains("older", budget.Detail, StringComparison.Ordinal);
+
+        // Auto cannot be honoured, so it is refused by name before anything runs ...
+        var refused = await client.PostAsJsonAsync("/api/models/preparation",
+            new { sourceAssetId = source.Id, name = "Older (auto)" });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
+        Assert.Contains("Enter one", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+
+        // ... and a number the artist types still works exactly as before.
+        var job = await QueueAsync(client, source.Id, "Older (manual)", triangleBudget: 3_000);
+        Assert.Equal(JobState.Completed, (await RunAsync(factory, job.Id)).State);
+        Assert.Equal("3000", compiler.Options["reduce-mesh"]["triangle-budget"]);
+    }
+
+    [Fact]
+    public async Task AutoThatWouldNotReduceAnythingIsRefusedBeforeQueueing()
+    {
+        // The fixture has 5,000 triangles; the compiler would allow 10,000.
+        var compiler = new ControlledCompiler
+        {
+            Suggestion = ControlledCompiler.SmallProp with
+            {
+                SizeClass = "medium", TriangleBudget = 10_000, Summary = "A medium prop: about 10,000 triangles.",
+            },
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "within.glb", ModelFixtures.DenseProp());
+
+        var refused = await client.PostAsJsonAsync("/api/models/preparation",
+            new { sourceAssetId = source.Id, name = "Within budget" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        var said = await refused.Content.ReadAsStringAsync();
+        Assert.Contains("A medium prop: about 10,000 triangles.", said, StringComparison.Ordinal);
+        Assert.Contains("nothing to reduce", said, StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task ACharacterIsNotGivenAnAutoBudget()
+    {
+        var compiler = new ControlledCompiler
+        {
+            Suggestion = new CompilerBudgetSuggestion(TriangleBudgetState.Decided, null,
+                Role: "character", RoleReason: "its name says 'npc'", SizeClass: "medium", LongestMetres: 1.8,
+                TriangleBudget: null, Ladder: [],
+                Summary: "A character takes the rig route; its skeleton profile sets its budget, not this table."),
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "npc.glb", ModelFixtures.DenseProp());
+
+        var refused = await client.PostAsJsonAsync("/api/models/preparation",
+            new { sourceAssetId = source.Id, name = "Innkeeper NPC (runtime)" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("rig route", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
     }
 
     [Fact]

@@ -267,6 +267,20 @@ export interface BlenderInstallSummary {
   source: 'setting' | 'environment' | 'path' | 'program-files' | 'microsoft-store' | 'steam' | 'applications' | 'system' | 'none' | 'disabled'
   foundBy: string; override: string; problem: string | null
 }
+/**
+ * What the Reference Asset Compiler says a model should cost at runtime, for
+ * its name and measured size. When it cannot say, there is no number at all.
+ */
+export interface ModelTriangleBudget {
+  assetId: string; triangleCount: number
+  state: 'Decided' | 'NotInstalled' | 'Outdated' | 'Refused'
+  detail: string | null
+  role: string | null; roleReason: string | null; sizeClass: string | null; longestMetres: number | null
+  /** Null for a character, which takes the rig route instead. */
+  triangleBudget: number | null
+  maximumP99Metres: number | null; maximumMaxMetres: number | null
+  ladder: number[] | null; summary: string | null
+}
 export interface ModelDetailChoice { detail: string; description: string; cost: string }
 /** The fixed views one preparation rendered, of the source and of what it made. */
 export interface ModelPreparationEvidence {

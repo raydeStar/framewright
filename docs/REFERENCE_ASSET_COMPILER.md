@@ -153,3 +153,43 @@ restart.
 To stop Framewright looking at all, set
 `Integrations:ReferenceAssetCompiler:DiscoverBlender` to `false`; then only
 `BlenderPath` is used.
+
+## Runtime triangle budgets
+
+What a model should cost at runtime is the compiler's decision. A coin, a chest
+and a cart are not the same budget, and a fixed number in this studio gave them
+one. The compiler decides from the asset's name (which says whether it is a
+prop, a hero piece, a modular kit piece, vegetation or a character) and its real
+size.
+
+- **Asking.** For any model, Framewright runs
+  `rac budget --name=<display name> --dims <x> <y> <z>`, using the model's
+  library name and the dimensions measured from its stored file. This needs no
+  Blender and runs nothing on a GPU. The answer
+  (`reference-asset-compiler.triangle-budget.v1`) is served unchanged from
+  `GET /api/assets/{id}/triangle-budget`.
+- **Showing.** The Geometry panel shows the budget beside the triangle count,
+  for example `100,000 · budget 5,000 (prop)`, with a gentle note when the model
+  is over it. Over budget is not an error: a reviewed master is often dense on
+  purpose.
+- **Preparing.** **Prepare for runtime** defaults to **Auto**, showing the
+  compiler's sentence and its reason before anything runs. A request with no
+  `triangleBudget` is Auto: the reduce stage is told `--triangle-budget auto`
+  and `--asset-name <display name>`, and decides from the mesh it actually
+  measures. Its receipt's `budget_decision` (the same fields, plus every rung of
+  the ladder it tried) is copied into the job result, and the new revision's
+  note says the budget was the compiler's. A number typed under **Choose a
+  number instead** is sent as it was before.
+- **Refusing early.** Auto is refused before anything is queued when the
+  compiler gives the model no number (a character takes the rig route), when the
+  model is already within the budget, or when the compiler cannot answer.
+- **Degrading honestly.** With no compiler, a compiler older than `rac budget`
+  (argparse's "invalid choice"), or a compiler that refuses the model, there is
+  no suggestion and no Auto: the panel says why and asks for a number.
+  Framewright never fills in a budget of its own.
+
+Generation keeps two fixed numbers on purpose: set dressing is remeshed to
+20,000 triangles and a hero to 80,000. The remesh stage has no Auto in the
+compiler's contract, and those numbers are what the artist's own answer to "how
+close will the camera get?" stands for, together with the grid, octree and
+texture sizes of the same recipe.

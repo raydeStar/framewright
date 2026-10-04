@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using StoryboardStudio.Api.Services;
+using StoryboardStudio.Core;
 
 namespace StoryboardStudio.Api.Tests;
 
@@ -21,6 +22,10 @@ public sealed class AnimationExportApiTests
             string outputPath, string reportPath, CancellationToken token,
             IEnumerable<KeyValuePair<string, string>>? options = null) =>
             throw new NotSupportedException();
+
+        public Task<CompilerBudgetSuggestion> SuggestTriangleBudgetAsync(
+            string name, IReadOnlyList<double> dimensions, CancellationToken token) =>
+            Task.FromResult(new CompilerBudgetSuggestion(TriangleBudgetState.NotInstalled, "Not needed for this test."));
 
         public Task<CompilerAnimationExport> ExportAnimationsAsync(string sourcePath,
             IReadOnlyList<string> clips, CancellationToken token)

@@ -1,5 +1,5 @@
 import type { ComfyUiConnectionTest, GenerationSetup, GenerationSetupChange, AssetCollectionSummary, AssetPlacementSummary, AssetUsageSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PortableProjectImportSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
-import type { AssetReviewNoteSummary, DirectorAssetView, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneRenderFrameReceipt, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewNoteSummary, DirectorAssetView, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, ModelTriangleBudget, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneRenderFrameReceipt, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -146,7 +146,10 @@ export const studioApi = {
     request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, size, glassColour, detail, headEnd }) }),
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
   modelPreparationReadiness: () => request<ModelGenerationReadiness>('/api/models/preparation/readiness'),
-  prepareModel: (sourceAssetId: string, name: string, triangleBudget: number) =>
+  /** What the compiler says this model should cost at runtime, from its name and measured size. */
+  modelTriangleBudget: (assetId: string) => request<ModelTriangleBudget>(`/api/assets/${assetId}/triangle-budget`),
+  /** A null budget is Auto: the compiler decides when the reduction runs. */
+  prepareModel: (sourceAssetId: string, name: string, triangleBudget: number | null) =>
     request<JobSummary>('/api/models/preparation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, triangleBudget }) }),
   modelCullReadiness: () => request<ModelGenerationReadiness>('/api/models/cull/readiness'),
   modelRigReadiness: () => request<ModelGenerationReadiness>('/api/models/rig/readiness'),

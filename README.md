@@ -128,7 +128,7 @@ ComfyUI integration is deliberately model-agnostic at the product boundary. Fram
 Framewright's 3D path turns reference images into a small, editable scene you can shoot:
 
 - **Image to 3D prop.** Pick a reference, say roughly how big the object is, and generate. The model arrives in the library at real size and names the reference it came from.
-- **Prepare for runtime.** Reduce triangles, drop faces nothing can see, compress textures, or resurface materials. Each result is a new, reviewable revision, never an overwrite.
+- **Prepare for runtime.** Reduce triangles, drop faces nothing can see, compress textures, or resurface materials. The triangle budget defaults to Auto: the compiler decides what the model should cost from what it is and how big it is, and says so before anything runs. Each result is a new, reviewable revision, never an overwrite.
 - **Rig a humanoid.** Rig a standing figure on the UE5 Manny skeleton, review how it bends in a five-pose suite, and accept it as the current revision.
 - **Block out a scene.** A browser agent can read a reference into a blockout plan of library models and stand-ins. You build it, correct placements and framing, and replace any stand-in with an exact library revision without moving anything else.
 - **Animate.** Bind compatible clips to rigged characters with their own trim, speed, and loop, and give rigid parts pivot motion.

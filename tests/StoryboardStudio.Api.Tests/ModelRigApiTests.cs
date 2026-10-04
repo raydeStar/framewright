@@ -47,6 +47,10 @@ public sealed class ModelRigApiTests
             string sourcePath, IReadOnlyList<string> clips, CancellationToken cancellationToken) =>
             Task.FromResult(new CompilerAnimationExport(null, "Not used here."));
 
+        public Task<CompilerBudgetSuggestion> SuggestTriangleBudgetAsync(
+            string name, IReadOnlyList<double> dimensions, CancellationToken cancellationToken) =>
+            Task.FromResult(new CompilerBudgetSuggestion(TriangleBudgetState.NotInstalled, "Not used here."));
+
         public async Task<CompilerStageRun> RunStageAsync(
             string stage, string sourcePath, string outputPath, string reportPath,
             CancellationToken cancellationToken, IEnumerable<KeyValuePair<string, string>>? options = null)

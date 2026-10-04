@@ -81,6 +81,11 @@ public sealed class ModelGenerationApiTests
             string sourcePath, IReadOnlyList<string> clips, CancellationToken cancellationToken) =>
             Task.FromResult(new CompilerAnimationExport(null, "This fixture does not export animations."));
 
+        public Task<CompilerBudgetSuggestion> SuggestTriangleBudgetAsync(
+            string name, IReadOnlyList<double> dimensions, CancellationToken cancellationToken) =>
+            Task.FromResult(new CompilerBudgetSuggestion(TriangleBudgetState.NotInstalled,
+                "Generation does not ask for a budget."));
+
         /// <summary>Per stage, what it was told beyond its three paths.</summary>
         public Dictionary<string, IReadOnlyDictionary<string, string>> Options { get; } = [];
 

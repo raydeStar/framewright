@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Archive, ArrowLeft, Bone, Box, Check, Download, Layers3, LoaderCircle, LockKeyhole, Ruler, TriangleAlert, Upload } from 'lucide-react'
 import { studioApi } from '../api'
+import { geometryBudget } from '../modelBudget'
 import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorMode'
 import { useAssetDirectorView } from './useAssetDirectorView'
-import type { AssetSummary, ModelProfileSummary, RigPoseSummary } from '../types'
+import type { AssetSummary, ModelProfileSummary, ModelTriangleBudget, RigPoseSummary } from '../types'
 
 // three.js only loads when an artist actually opens a model, so the ordinary
 // image and audio workflows keep their current start-up cost.
@@ -33,6 +34,9 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
   const [notes, setNotes] = useState(asset.notes)
   const revisionFile = useRef<HTMLInputElement>(null)
   const [pose, setPose] = useState<RigPoseSummary>()
+  // The compiler's runtime budget for this revision: undefined while asking,
+  // null when it could not be asked. Read by Geometry and by preparation.
+  const [budget, setBudget] = useState<ModelTriangleBudget | null>()
   const [exportClips, setExportClips] = useState<string[]>([])
   const [exporting, setExporting] = useState(false)
 
@@ -97,6 +101,17 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
     return () => { live = false }
   }, [activeId])
 
+  // Asked alongside the profile rather than after it: the server measures the
+  // same stored bytes, and the answer takes about a second either way.
+  useEffect(() => {
+    let live = true
+    setBudget(undefined)
+    studioApi.modelTriangleBudget(activeId)
+      .then(answer => { if (live) setBudget(answer) })
+      .catch(() => { if (live) setBudget(null) })
+    return () => { live = false }
+  }, [activeId])
+
   const act = async (operation: () => Promise<string>) => {
     setBusy(true); setFailure(undefined)
     try { onChanged?.(await operation()) }
@@ -153,6 +168,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
   })
 
   const supportedClips = (profile?.clips ?? []).filter(clip => clip.supported)
+  const budgetLine = profile ? geometryBudget(budget, profile.triangleCount) : null
   const exportModel = async () => {
     setExporting(true); setFailure(undefined)
     try {
@@ -268,6 +284,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
             <ModelPreparation
               asset={active}
               profile={profile}
+              budget={budget}
               onQueued={message => onChanged?.(message)}
               onDecided={message => { onChanged?.(message); void loadRevisions() }}
             />
@@ -277,12 +294,26 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
             <h2>Geometry</h2>
             <dl>
               <div><dt>Vertices</dt><dd>{profile.vertexCount.toLocaleString()}</dd></div>
-              <div><dt>Triangles</dt><dd>{profile.triangleCount.toLocaleString()}</dd></div>
+              {/* The compiler's budget beside the count, so "is this heavy?" is
+                  answered where the number is read. Over it is worth noticing,
+                  not an error: a reviewed master is often meant to be dense. */}
+              <div data-testid="model-triangles" data-over-budget={budgetLine?.over ? 'true' : 'false'}>
+                <dt>Triangles</dt>
+                <dd>
+                  {profile.triangleCount.toLocaleString()}
+                  {budgetLine && <span className="model-budget-inline" data-testid="model-triangle-budget"
+                    title={budget?.summary ?? undefined}> · {budgetLine.text}</span>}
+                </dd>
+              </div>
               <div><dt>Meshes</dt><dd>{profile.meshCount.toLocaleString()}</dd></div>
               <div><dt>Nodes</dt><dd>{profile.nodeCount.toLocaleString()}</dd></div>
               <div><dt>File</dt><dd>{(profile.bytes / 1024).toFixed(0)} KB</dd></div>
               <div><dt>Embedded textures</dt><dd>{profile.imageCount === 0 ? 'None' : `${profile.imageCount} · ${(profile.embeddedTextureBytes / 1024).toFixed(0)} KB`}</dd></div>
             </dl>
+            {budgetLine?.over && <p className="model-note model-over-budget" data-testid="model-over-budget">
+              Over its runtime budget. Prepare for runtime can make a lighter revision beside this one;
+              this revision stays as it is.
+            </p>}
           </section>
 
           <section data-testid="model-materials">

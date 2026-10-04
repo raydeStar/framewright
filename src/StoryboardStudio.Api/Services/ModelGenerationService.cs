@@ -83,6 +83,14 @@ public sealed class ModelGenerationService(
     ///
     /// Delivered as JPEG at 92 on a 4096 sheet with 2048 data maps: a lossless
     /// hero is sixty megabytes, and the whole route's masters stay on disk.
+    ///
+    /// The triangle numbers here are kept explicit on purpose, unlike a
+    /// preparation's budget. The remesh stage that receives them has no Auto
+    /// in the compiler's contract -- only reduce-mesh decides a budget itself --
+    /// and these are not a guess about what the asset is: they are what the
+    /// artist's own answer ("seen from a distance" or "shot up close") stands
+    /// for, quoted back to them in <see cref="DetailChoices"/>, and coupled to
+    /// the grid, octree and sheet sizes of the same recipe.
     /// </summary>
     private const string HeroOctreeResolution = "384";
     private const string HeroTriangleBudget = "80000";
@@ -293,11 +301,13 @@ public sealed class ModelGenerationService(
     };
 
     /// <summary>
-    /// The runtime budget for a prepared derivative when the artist named
-    /// none. Half the V1 cohort ceiling, because a derivative that is the same
-    /// size as its source is not a derivative of anything.
+    /// What the reduction is told when the artist named no budget. The
+    /// compiler decides from the mesh's real size and the asset's name, and
+    /// its receipt records the decision. There used to be a fixed 10,000 here,
+    /// which gave a coin and a cart the same budget; deciding what something
+    /// should cost is the compiler's job, not a number this studio keeps.
     /// </summary>
-    private const int DefaultPreparedTriangleBudget = 10_000;
+    private const string AutoBudgetArgument = "auto";
 
     /// <summary>
     /// The generator's own default octree is a production one, and this is a
@@ -325,7 +335,12 @@ public sealed class ModelGenerationService(
     private const string PaintViews = "12";
     private const string PaintResolution = "768";
 
-    /// <summary>The V1 cohort contract's ceiling, which the library also enforces.</summary>
+    /// <summary>
+    /// The V1 cohort contract's ceiling, which the library also enforces. A
+    /// fixed contract rather than a decision about the asset: the remesh stage
+    /// takes no Auto, and "set dressing" is promised as this number in the
+    /// detail choice the artist picks from (see <see cref="HeroOctreeResolution"/>).
+    /// </summary>
     private const string RuntimeTriangleBudget = "20000";
 
     // Version 2 carries a route where version 1 carried one stage name. A
@@ -343,6 +358,10 @@ public sealed class ModelGenerationService(
     // could only have been asking for set dressing, and defaulting it would
     // be right -- but a packet that says nothing and a packet that says "set"
     // should not be the same bytes, so it is asked for again.
+    // Auto budgets did not need a version 10. A version 9 preparation always
+    // carried a number (the studio filled one in when the artist did not), so
+    // reading one without AutoTriangleBudget as "the number it carries" is
+    // exactly what it meant; only new packets can say "auto".
     private const int FrozenPacketVersion = 9;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -351,6 +370,11 @@ public sealed class ModelGenerationService(
     /// argument six weeks later all read the same answer: these bytes, that
     /// stage, this compiler.
     /// </summary>
+    /// <param name="AutoTriangleBudget">
+    /// True when the artist left the budget to the compiler. The number is
+    /// then the compiler's to decide when the stage runs, and its receipt says
+    /// what it chose; nothing here guesses at it in advance.
+    /// </param>
     private sealed record FrozenModelRequest(
         int PacketVersion, Guid SourceAssetId, string SourceContentHash, string SourceName,
         int SourceRevisionNumber, RouteStep[] Route, string? CompilerVersion, DateTimeOffset FrozenAt,
@@ -360,7 +384,8 @@ public sealed class ModelGenerationService(
         double Relief = 0,
         int ColourSize = 0, int DataSize = 0, int Quality = 0, string? TextureFormat = null,
         int Directions = 0, double Most = 0, double LargestPart = 0,
-        bool IgnoreTransparency = false, string Detail = SetDetail, string HeadEnd = "top");
+        bool IgnoreTransparency = false, string Detail = SetDetail, string HeadEnd = "top",
+        bool AutoTriangleBudget = false);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -642,11 +667,13 @@ public sealed class ModelGenerationService(
         if (name.Length is 0 or > 120)
             return RepositoryResult<JobSummary>.Invalid("A prepared derivative needs a name of 1 to 120 characters.");
 
-        var budget = request.TriangleBudget ?? DefaultPreparedTriangleBudget;
-        // The compiler's reducer refuses a budget that does not reduce, and it
-        // refuses one below a thousand. Saying so here means the artist hears
-        // it in their own terms rather than as a stage that died.
-        if (budget is < 1_000 or > 200_000)
+        // No number is Auto: the compiler decides when the stage runs. A number
+        // is the artist's, and is checked here against what the reducer is
+        // known to refuse, so they hear it in their own terms rather than as a
+        // stage that died.
+        var auto = request.TriangleBudget is null;
+        var budget = request.TriangleBudget ?? 0;
+        if (!auto && budget is < 1_000 or > 200_000)
             return RepositoryResult<JobSummary>.Invalid(
                 "A runtime triangle budget is between 1,000 and 200,000.");
 
@@ -660,7 +687,7 @@ public sealed class ModelGenerationService(
         // A budget at or above what the source already has would ask the
         // reducer to grow a mesh, which it refuses. The number the artist
         // needs to hear is the one their model actually has.
-        if (budget >= inspection.Profile.TriangleCount)
+        if (!auto && budget >= inspection.Profile.TriangleCount)
             return RepositoryResult<JobSummary>.Invalid(
                 $"That model already has {inspection.Profile.TriangleCount:N0} triangles. "
                 + "A derivative has to be smaller than its source; choose a lower budget.");
@@ -668,6 +695,9 @@ public sealed class ModelGenerationService(
         var readiness = await PreparationPreflightAsync(cancellationToken);
         if (!readiness.CanRun)
             return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+
+        if (auto && await RefuseAutoAsync(source.DisplayName, inspection.Profile, cancellationToken) is { } refusal)
+            return refusal;
 
         var now = timeProvider.GetUtcNow();
         var packet = new FrozenModelRequest(
@@ -681,7 +711,7 @@ public sealed class ModelGenerationService(
             // A preparation asks none of generation's questions: the size is
             // already the size, and the glass is already glass.
             Size: "", SizeAdjust: 1.0, GlassColour: null,
-            Work: PrepareWork, TriangleBudget: budget);
+            Work: PrepareWork, TriangleBudget: budget, AutoTriangleBudget: auto);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -706,6 +736,62 @@ public sealed class ModelGenerationService(
         db.Jobs.Add(job);
         await db.SaveChangesAsync(cancellationToken);
         return RepositoryResult<JobSummary>.Ok(Map(job));
+    }
+
+    /// <summary>
+    /// What the compiler says this model should cost at runtime, asked with
+    /// the name the artist gave it and the size measured from its own bytes.
+    ///
+    /// A question rather than work, so it is answered whether or not any
+    /// route is commissioned. When the compiler cannot answer -- missing,
+    /// older than <c>rac budget</c>, or refusing this model -- the answer says
+    /// why and carries no number, and the artist chooses one.
+    /// </summary>
+    public async Task<RepositoryResult<ModelTriangleBudget>> TriangleBudgetAsync(
+        Guid assetId, CancellationToken cancellationToken)
+    {
+        var profile = await assets.ModelProfileAsync(assetId, cancellationToken);
+        if (profile.Kind != RepositoryResultKind.Ok || profile.Value is null)
+            return new RepositoryResult<ModelTriangleBudget>(null, profile.Kind, profile.Error);
+        var suggestion = await compiler.SuggestTriangleBudgetAsync(
+            profile.Value.DisplayName, profile.Value.Dimensions, cancellationToken);
+        return RepositoryResult<ModelTriangleBudget>.Ok(new ModelTriangleBudget(
+            assetId, profile.Value.TriangleCount, suggestion.State, suggestion.Detail,
+            suggestion.Role, suggestion.RoleReason, suggestion.SizeClass, suggestion.LongestMetres,
+            suggestion.TriangleBudget, suggestion.MaximumP99Metres, suggestion.MaximumMaxMetres,
+            suggestion.Ladder ?? [], suggestion.Summary));
+    }
+
+    /// <summary>
+    /// Whether Auto can prepare this model, asked of the same compiler the
+    /// stage will run on, before anything is queued. Null means it can.
+    ///
+    /// The number is the compiler's, and is used only to say no early in the
+    /// cases its reducer is known to refuse: a model already within the budget,
+    /// a character (which takes the rig route instead), or a compiler that
+    /// cannot decide at all. The stage still decides for itself when it runs.
+    /// </summary>
+    private async Task<RepositoryResult<JobSummary>?> RefuseAutoAsync(
+        string name, GlbModelProfile profile, CancellationToken cancellationToken)
+    {
+        var suggestion = await compiler.SuggestTriangleBudgetAsync(name, profile.Dimensions, cancellationToken);
+        if (suggestion.State == TriangleBudgetState.Refused)
+            return RepositoryResult<JobSummary>.Invalid(
+                $"The compiler could not choose a budget for this model: {suggestion.Detail} "
+                + "Choose a triangle budget yourself instead.");
+        if (suggestion.State != TriangleBudgetState.Decided)
+            return RepositoryResult<JobSummary>.Unavailable(
+                suggestion.Detail ?? "The compiler cannot choose a budget here. Choose one yourself instead.");
+        if (suggestion.TriangleBudget is not { } decided)
+            return RepositoryResult<JobSummary>.Invalid(
+                $"{suggestion.Summary ?? "The compiler gives this model no reduction budget."} "
+                + "Choose a triangle budget yourself to reduce it anyway.");
+        if (decided >= profile.TriangleCount)
+            return RepositoryResult<JobSummary>.Invalid(
+                $"{suggestion.Summary ?? $"Auto would allow about {decided:N0} triangles."} This model already has "
+                + $"{profile.TriangleCount:N0}, so Auto has nothing to reduce. Choose a lower budget yourself to "
+                + "reduce it anyway.");
+        return null;
     }
 
     /// <summary>
@@ -788,6 +874,33 @@ public sealed class ModelGenerationService(
     private static double? Number(JsonElement element, string name) =>
         element.TryGetProperty(name, out var found) && found.ValueKind == JsonValueKind.Number
             ? found.GetDouble() : null;
+
+    /// <summary>
+    /// The budget the compiler chose, as its reduction receipt records it:
+    /// role, size, the number, its reasons and every rung it tried. Absent when
+    /// the artist chose the number, or the compiler wrote no decision.
+    /// </summary>
+    private static JsonElement? BudgetDecision(IEnumerable<StepOutcome> steps)
+    {
+        var receipt = steps.LastOrDefault(step => step.Stage == ReduceMeshStage)?.ReceiptJson;
+        if (string.IsNullOrWhiteSpace(receipt)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(receipt);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                   && document.RootElement.TryGetProperty("budget_decision", out var decision)
+                   && decision.ValueKind == JsonValueKind.Object
+                ? decision.Clone()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? DecisionSummary(JsonElement? decision) =>
+        decision is { } found && Text(found, "summary") is { Length: > 0 } summary ? summary : null;
 
     private static string[] Strings(JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object
@@ -1345,13 +1458,14 @@ public sealed class ModelGenerationService(
         // says so rather than implying it matches what is on screen now.
         var stale = !string.Equals(source.ContentHash, packet.SourceContentHash, StringComparison.OrdinalIgnoreCase);
         var topologyChanged = false;
+        var budgetDecision = BudgetDecision(completed);
         if (preparing)
         {
             // A derivative belongs in its source's own revision stack, citing
             // it, rather than arriving as an unrelated model that happens to
             // look similar.
             var stacked = await StackDerivativeAsync(
-                source, imported.Value, packet, payloadPath, sourcePath, cancellationToken);
+                source, imported.Value, packet, payloadPath, sourcePath, cancellationToken, budgetDecision);
             if (stacked.Kind != RepositoryResultKind.Ok)
                 return await RefuseDeliveryAsync(stacked.Error ?? "The derivative could not be recorded against its source.");
             topologyChanged = stacked.Value;
@@ -1375,6 +1489,11 @@ public sealed class ModelGenerationService(
             detail = packet.Work == GenerateWork ? packet.Detail : null,
             headEnd = packet.Work == GenerateWork && packet.Detail == HeroDetail ? packet.HeadEnd : null,
             triangleBudget = packet.TriangleBudget == 0 ? (int?)null : packet.TriangleBudget,
+            // Whether the artist chose the number or left it to the compiler,
+            // and, when the compiler chose, its own record of what and why --
+            // copied from the reduction's receipt, not restated.
+            triangleBudgetMode = packet.Work == PrepareWork ? (packet.AutoTriangleBudget ? "auto" : "chosen") : null,
+            budgetDecision,
             topologyChanged = preparing ? topologyChanged : (bool?)null,
             rerunAfterIncompleteAnswer = rerunAfterPartial,
             // Per step, because "the route succeeded" hides which half of it
@@ -1506,11 +1625,24 @@ public sealed class ModelGenerationService(
         // The collapse, judged as a derivative of something already reviewed
         // rather than as a candidate production authority. The compiler owns
         // what that changes and records every allowance it makes.
-        ReduceMeshStage => new Dictionary<string, string>()
-        {
-            ["triangle-budget"] = packet.TriangleBudget.ToString(CultureInfo.InvariantCulture),
-            ["runtime-derivative"] = "",
-        },
+        //
+        // Auto is said, not implied by leaving the flag out: a compiler too old
+        // to decide would read a missing flag as its own fixed default and
+        // carry on, where "auto" is refused by name. The name is the one the
+        // budget was suggested for, because the stored file is called after
+        // its hash and a hash says nothing about whether this is a chest.
+        ReduceMeshStage => packet.AutoTriangleBudget
+            ? new Dictionary<string, string>()
+            {
+                ["triangle-budget"] = AutoBudgetArgument,
+                ["asset-name"] = packet.SourceName,
+                ["runtime-derivative"] = "",
+            }
+            : new Dictionary<string, string>()
+            {
+                ["triangle-budget"] = packet.TriangleBudget.ToString(CultureInfo.InvariantCulture),
+                ["runtime-derivative"] = "",
+            },
         _ => [],
     };
 
@@ -1528,7 +1660,8 @@ public sealed class ModelGenerationService(
     /// </summary>
     private async Task<RepositoryResult<bool>> StackDerivativeAsync(
         AssetRecord source, AssetSummary derivative, FrozenModelRequest packet,
-        string derivativePath, string sourcePath, CancellationToken cancellationToken)
+        string derivativePath, string sourcePath, CancellationToken cancellationToken,
+        JsonElement? budgetDecision = null)
     {
         var before = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(sourcePath, cancellationToken));
         var after = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(derivativePath, cancellationToken));
@@ -1588,9 +1721,17 @@ public sealed class ModelGenerationService(
             note.Append(": ").Append(string.Join(", ", (packet.Assignments ?? [])
                 .Select(entry => $"{entry.Part} as {entry.Surface}")));
         else if (before.Profile is not null && after.Profile is not null)
+        {
             note.Append(": ").Append(before.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture))
                 .Append(" triangles reduced to ")
                 .Append(after.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture));
+            // Who chose the number matters to the person judging the result:
+            // a budget they typed is theirs to change, the compiler's is the
+            // compiler's, and its reasoning is quoted rather than paraphrased.
+            if (packet.AutoTriangleBudget)
+                note.Append(", on the compiler's own budget")
+                    .Append(DecisionSummary(budgetDecision) is { } said ? $" ({said.TrimEnd('.')})" : "");
+        }
         note.Append('.');
 
         var added = await assets.AddRevisionAsync(source.Id,

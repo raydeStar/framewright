@@ -1021,6 +1021,23 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
 .model-through-glass input { margin-top: 2px; flex: none; }
 .model-preparation .model-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
 .model-preparation input[type="number"], .model-preparation textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-size: var(--text-2xs); font-family: inherit; }
+/* The runtime budget: Auto, in the compiler's words, with a typed number one
+   disclosure away. Set aside rather than hidden when a number is chosen, so it
+   is plain what the number replaced. */
+.model-budget { display: grid; gap: 6px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }
+.model-budget-label { color: var(--muted); font-size: var(--text-2xs); font-weight: 650; }
+.model-budget-auto { display: grid; gap: 2px; margin: 0; font-size: var(--text-2xs); line-height: 1.4; color: var(--text); }
+.model-budget-auto strong { color: var(--accent); }
+.model-budget-auto small { color: var(--quiet); }
+.model-budget-auto.set-aside { opacity: .6; }
+.model-budget-manual summary { min-height: 32px; display: flex; align-items: center; gap: 6px; list-style: none; color: var(--muted); font-size: var(--text-2xs); font-weight: 650; cursor: pointer; }
+.model-budget-manual[open] summary { color: var(--text); }
+.model-budget-manual .model-size { margin-top: 4px; }
+.model-budget .model-size .model-note { font-weight: 500; }
+/* A flex summary loses the browser's own marker, so it gets one back. */
+.model-budget-manual summary::-webkit-details-marker, .model-blender summary::-webkit-details-marker { display: none; }
+.model-budget-manual summary::before, .model-blender summary::before { content: '▸'; color: var(--quiet); }
+.model-budget-manual[open] summary::before, .model-blender details[open] summary::before { content: '▾'; }
 /* Which Blender the compiler is given. One quiet line when it is fine. */
 .model-blender { display: grid; gap: 4px; color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
 .model-blender p { margin: 0; }
@@ -1028,10 +1045,8 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
 .model-blender code { overflow-wrap: anywhere; color: var(--muted); font-size: var(--text-2xs); }
 .model-blender details > p, .model-blender details > code { display: block; margin-top: 3px; }
 .model-blender[data-usable="false"] { padding: 7px 8px; border: 1px solid var(--amber-line); border-radius: 6px; background: var(--amber-bg); color: var(--amber-soft); }
-/* A flex summary loses the browser's own marker, so it gets one back. */
-.model-blender summary::-webkit-details-marker { display: none; }
-.model-blender summary::before { content: '▸'; color: var(--quiet); }
-.model-blender details[open] summary::before { content: '▾'; }
+.model-budget-inline { color: var(--quiet); font-weight: 500; }
+.model-inspector [data-over-budget="true"] .model-budget-inline { color: var(--amber-soft); }
 .model-comparison { display: grid; gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }
 .model-comparison-passes { display: flex; gap: 6px; }
 .model-comparison-passes button { min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--text-2xs); font-weight: 650; cursor: pointer; }

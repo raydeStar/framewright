@@ -13,6 +13,13 @@
   panels show which Blender is in use, its version, how it was found, and how to
   choose another. Blender stays optional, and a configured path is always used
   as given. See [Setting it up](docs/REFERENCE_ASSET_COMPILER.md#setting-it-up).
+- **Auto runtime budgets.** **Prepare for runtime** defaults to Auto: the
+  Reference Asset Compiler decides the triangle budget from what the model is
+  and how big it is (`rac budget`, and `--triangle-budget auto` on the reduce
+  stage), and the panel shows its answer before anything runs. The Geometry
+  panel shows the budget beside the triangle count. A typed number is still one
+  step away. With a compiler that cannot decide, there is no suggestion and the
+  artist types a number; the old fixed 10,000 default is gone.
 
 ## 0.1.0 — 2026-09-24, first release
 

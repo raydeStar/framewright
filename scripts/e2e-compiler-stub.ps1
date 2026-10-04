@@ -88,6 +88,36 @@ if ($arguments.Count -ge 3 -and $arguments[0] -eq 'export-animations') {
     exit 0
 }
 
+if ($arguments.Count -ge 1 -and $arguments[0] -eq 'budget') {
+    # The shape `rac budget` answers in, for the name and size it was given.
+    # The numbers are a fixed stand-in: deciding them is the compiler's job,
+    # and a journey only proves that the studio asks with the model's own name
+    # and measured size, and shows the answer it gets.
+    $name = $arguments | Where-Object { $_ -like '--name=*' } | Select-Object -First 1
+    $dimsAt = [Array]::IndexOf($arguments, '--dims')
+    if (-not $name -or $dimsAt -lt 0 -or ($dimsAt + 3) -ge $arguments.Count) {
+        Write-Error 'RAC_ERROR budget needs --name and --dims X Y Z'
+        exit 2
+    }
+    $dims = @($arguments[($dimsAt + 1)..($dimsAt + 3)] |
+        ForEach-Object { [double]::Parse($_, [Globalization.CultureInfo]::InvariantCulture) })
+    $decision = [ordered]@{
+        schema        = 'reference-asset-compiler.triangle-budget.v1'
+        name          = $name.Substring('--name='.Length)
+        role          = 'prop'
+        role_reason   = 'nothing in its name or notes marks it as anything but a prop'
+        size_class    = 'medium'
+        longest_m     = ($dims | Measure-Object -Maximum).Maximum
+        triangle_budget = 5000
+        maximum_p99_m = 0.004
+        maximum_max_m = 0.016
+        ladder        = @(5000, 7500, 11300)
+        summary       = 'A medium prop: about 5,000 triangles.'
+    }
+    Write-Output ($decision | ConvertTo-Json -Depth 4)
+    exit 0
+}
+
 if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     if ($arguments -contains '--list') {
         $report = [ordered]@{

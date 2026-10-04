@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using StoryboardStudio.Core;
 
@@ -23,6 +24,19 @@ public sealed record CompilerCapabilities(
 
     public static CompilerCapabilities Absent(string detail, BlenderInstallSummary? blender = null) =>
         new(false, false, null, null, null, [], detail, BlenderInstall: blender);
+}
+
+/// <summary>
+/// What <c>rac budget</c> said one asset should cost, field for field. The
+/// decision is the compiler's; this is only its answer, read.
+/// </summary>
+public sealed record CompilerBudgetSuggestion(
+    TriangleBudgetState State, string? Detail,
+    string? Role = null, string? RoleReason = null, string? SizeClass = null, double? LongestMetres = null,
+    int? TriangleBudget = null, double? MaximumP99Metres = null, double? MaximumMaxMetres = null,
+    int[]? Ladder = null, string? Summary = null)
+{
+    public const string Schema = "reference-asset-compiler.triangle-budget.v1";
 }
 
 public sealed record CompilerStage(
@@ -72,6 +86,14 @@ public interface ICompilerGateway
         // surface each should be is four --assign, and a dictionary can only
         // hold the last of them.
         IEnumerable<KeyValuePair<string, string>>? options = null);
+
+    /// <summary>
+    /// Asks the compiler what an asset of this name and real size should cost
+    /// at runtime. A question rather than a stage: it needs no Blender, runs
+    /// nothing on a GPU, and is answered in about a second.
+    /// </summary>
+    Task<CompilerBudgetSuggestion> SuggestTriangleBudgetAsync(
+        string name, IReadOnlyList<double> dimensions, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -190,6 +212,72 @@ public sealed class CompilerGateway(
         catch (JsonException)
         {
             return CompilerCapabilities.Absent("The compiler's capability report could not be read as JSON.", blender);
+        }
+    }
+
+    public async Task<CompilerBudgetSuggestion> SuggestTriangleBudgetAsync(
+        string name, IReadOnlyList<double> dimensions, CancellationToken cancellationToken)
+    {
+        if (dimensions.Count != 3)
+            return new CompilerBudgetSuggestion(TriangleBudgetState.Refused,
+                "A budget is decided from three measured dimensions, and this model has none.");
+
+        // "--name=value" rather than two arguments, so a name that starts with
+        // a dash is read as a name rather than as an option nobody meant.
+        var arguments = new List<string> { "budget", $"--name={name}", "--dims" };
+        arguments.AddRange(dimensions.Select(value => value.ToString("0.######", CultureInfo.InvariantCulture)));
+
+        var run = await RunAsync(arguments, TimeSpan.FromSeconds(30), cancellationToken);
+        if (!run.Started)
+            return new CompilerBudgetSuggestion(TriangleBudgetState.NotInstalled,
+                "The Reference Asset Compiler was not found, so nothing can suggest a budget.");
+
+        if (run.ExitCode != 0)
+        {
+            // The same version skew as a compiler without run-stage, and the
+            // same difference: this one needs updating, not installing.
+            var complaint = run.StandardError + run.StandardOutput;
+            if (complaint.Contains("invalid choice", StringComparison.OrdinalIgnoreCase)
+                && complaint.Contains("budget", StringComparison.OrdinalIgnoreCase))
+                return new CompilerBudgetSuggestion(TriangleBudgetState.Outdated,
+                    "The installed Reference Asset Compiler is older than this: it has no budget command, so it "
+                    + "cannot choose a budget itself. Enter one, or update the compiler.");
+            return new CompilerBudgetSuggestion(TriangleBudgetState.Refused,
+                Tail(run.StandardError)?.Replace("RAC_ERROR ", "", StringComparison.Ordinal)
+                ?? $"The compiler could not suggest a budget (exit code {run.ExitCode}).");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(run.StandardOutput);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || Text(root, "schema") != CompilerBudgetSuggestion.Schema)
+                return new CompilerBudgetSuggestion(TriangleBudgetState.Refused,
+                    "The compiler answered, but not with a triangle budget this studio can read.");
+            return new CompilerBudgetSuggestion(
+                TriangleBudgetState.Decided, null,
+                Role: Text(root, "role"),
+                RoleReason: Text(root, "role_reason"),
+                SizeClass: Text(root, "size_class"),
+                LongestMetres: Number(root, "longest_m"),
+                // Null for a character, which the compiler budgets by its rig
+                // route instead; that is an answer, not a missing one.
+                TriangleBudget: root.TryGetProperty("triangle_budget", out var budget)
+                                && budget.ValueKind == JsonValueKind.Number && budget.TryGetInt32(out var count)
+                    ? count : null,
+                MaximumP99Metres: Number(root, "maximum_p99_m"),
+                MaximumMaxMetres: Number(root, "maximum_max_m"),
+                Ladder: root.TryGetProperty("ladder", out var ladder) && ladder.ValueKind == JsonValueKind.Array
+                    ? [.. ladder.EnumerateArray()
+                        .Where(rung => rung.ValueKind == JsonValueKind.Number && rung.TryGetInt32(out _))
+                        .Select(rung => rung.GetInt32())]
+                    : [],
+                Summary: Text(root, "summary"));
+        }
+        catch (JsonException)
+        {
+            return new CompilerBudgetSuggestion(TriangleBudgetState.Refused,
+                "The compiler's budget could not be read as JSON.");
         }
     }
 
@@ -319,6 +407,9 @@ public sealed class CompilerGateway(
 
     private static string? Text(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static double? Number(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetDouble() : null;
 
     private static string? Trimmed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

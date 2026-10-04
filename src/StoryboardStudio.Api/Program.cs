@@ -949,6 +949,13 @@ app.MapGet("/api/assets/{assetId:guid}/model-profile", async Task<IResult> (
     Guid assetId, AssetStore assets, CancellationToken cancellationToken)
     => ToHttpResult(await assets.ModelProfileAsync(assetId, cancellationToken)));
 
+// What the compiler says this model should cost at runtime, from its name and
+// measured size. A question, not work: no Blender, no GPU, nothing queued, and
+// it is answered whether or not the compiler's routes are commissioned.
+app.MapGet("/api/assets/{assetId:guid}/triangle-budget", async Task<IResult> (
+    Guid assetId, ModelGenerationService models, CancellationToken cancellationToken)
+    => ToHttpResult(await models.TriangleBudgetAsync(assetId, cancellationToken)));
+
 app.MapPost("/api/assets/{assetId:guid}/rig-pose", async Task<IResult> (
     Guid assetId, RigPoseRequest request, AssetStore assets, CancellationToken cancellationToken)
     => ToHttpResult(await assets.RigPoseAsync(assetId, request, cancellationToken)));
