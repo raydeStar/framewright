@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using StoryboardStudio.Api.Services;
+using StoryboardStudio.Core;
 
 namespace StoryboardStudio.Api.Tests;
 
@@ -40,13 +41,25 @@ public sealed class CompilerGatewayTests
         return new StubCompiler { Path = path };
     }
 
-    private static CompilerGateway Gateway(params (string Key, string Value)[] settings)
+    /// <summary>A Blender that has already been found, or not, without looking.</summary>
+    private sealed class FixedBlenderLocator(BlenderInstallSummary answer) : IBlenderLocator
+    {
+        public Task<BlenderInstallSummary> LocateAsync(CancellationToken cancellationToken) => Task.FromResult(answer);
+    }
+
+    private static readonly BlenderInstallSummary NoBlender =
+        new(null, null, "none", "not found", BlenderLocator.OverrideAdvice, "No Blender was found.");
+
+    private static CompilerGateway Gateway(params (string Key, string Value)[] settings) =>
+        Gateway(NoBlender, settings);
+
+    private static CompilerGateway Gateway(BlenderInstallSummary blender, params (string Key, string Value)[] settings)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(settings.Select(setting =>
                 new KeyValuePair<string, string?>($"Integrations:ReferenceAssetCompiler:{setting.Key}", setting.Value)))
             .Build();
-        return new CompilerGateway(configuration, TimeProvider.System);
+        return new CompilerGateway(configuration, TimeProvider.System, new FixedBlenderLocator(blender));
     }
 
     [Fact]
@@ -245,5 +258,62 @@ public sealed class CompilerGatewayTests
         // studio's configuration: what matters is the tree it actually used.
         Assert.Equal(@"C:\studio\tree", capabilities.StudioTree);
         Assert.True(capabilities.CanRun("geometry"));
+    }
+
+    /// <summary>
+    /// The compiler does no searching of its own, so a Blender this studio
+    /// found has to reach it the same way a configured one always did: as
+    /// --blender with the exact path, on describing and on running alike.
+    /// </summary>
+    [Fact]
+    public async Task AFoundBlenderIsPassedExactlyAsAConfiguredOneWouldBe()
+    {
+        using var recording = Stub(
+            "echo %* >> \"%~f0.args\"",
+            "echo {\"ok\":true,\"stages\":[]}");
+        var found = new BlenderInstallSummary(@"D:\Games\steamapps\common\Blender\blender.exe", "5.2.2 LTS",
+            "steam", "found in your Steam library", BlenderLocator.OverrideAdvice, null);
+        var gateway = Gateway(found, ("Executable", recording.Path));
+
+        var capabilities = await gateway.DescribeAsync(CancellationToken.None);
+        await gateway.RunStageAsync("review-views", "model.glb", "views", "receipt.json", CancellationToken.None);
+
+        var passed = File.ReadAllLines(recording.Path + ".args");
+        const string Flag = @"--blender D:\Games\steamapps\common\Blender\blender.exe";
+        Assert.Contains(passed, line => line.Contains("--list", StringComparison.Ordinal)
+                                        && line.Contains(Flag, StringComparison.Ordinal));
+        Assert.Contains(passed, line => line.Contains("review-views", StringComparison.Ordinal)
+                                        && line.Contains(Flag, StringComparison.Ordinal));
+        // And readiness can say which one, how it was found, and how to change it.
+        Assert.Equal(found, capabilities.BlenderInstall);
+    }
+
+    [Fact]
+    public async Task NoBlenderMeansTheCompilerIsNotHandedOne()
+    {
+        using var recording = Stub(
+            "echo %* >> \"%~f0.args\"",
+            "echo {\"ok\":true,\"stages\":[]}");
+
+        var capabilities = await Gateway(("Executable", recording.Path)).DescribeAsync(CancellationToken.None);
+
+        // Not an empty --blender, which the compiler would read as the next
+        // flag's value: no flag at all, and the compiler says what is missing.
+        Assert.DoesNotContain("--blender", File.ReadAllText(recording.Path + ".args"), StringComparison.Ordinal);
+        Assert.True(capabilities.Installed);
+        Assert.Equal("none", capabilities.BlenderInstall?.Source);
+    }
+
+    [Fact]
+    public async Task AMissingCompilerStillSaysWhichBlenderItWouldHaveBeenGiven()
+    {
+        var found = new BlenderInstallSummary("/usr/bin/blender", "4.2.3 LTS", "system", "found in /usr/bin",
+            BlenderLocator.OverrideAdvice, null);
+
+        var capabilities = await Gateway(found, ("Executable", "rac-that-is-not-installed-anywhere"))
+            .DescribeAsync(CancellationToken.None);
+
+        Assert.False(capabilities.Installed);
+        Assert.Equal("/usr/bin/blender", capabilities.BlenderInstall?.Executable);
     }
 }

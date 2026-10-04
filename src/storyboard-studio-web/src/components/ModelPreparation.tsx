@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bone, Check, Eye, LoaderCircle, Scaling, TriangleAlert, X } from 'lucide-react'
 import { studioApi } from '../api'
+import BlenderInstallNote from './BlenderInstallNote'
 import type {
   AssetSummary,
   JobSummary,
@@ -195,6 +196,7 @@ export default function ModelPreparation({ asset, profile, onQueued, onDecided }
       : <>
           <p className="model-note" data-testid="model-preparation-readiness"
             data-can-run={readiness.canRun ? 'true' : 'false'}>{readiness.detail}</p>
+          <BlenderInstallNote install={readiness.blenderInstall} />
 
           {readiness.canRun && <label className="model-size">
             <span>Runtime triangle budget</span>

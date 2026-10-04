@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### 3D models
+- **Blender is found for you.** When no Blender is configured, Framewright uses
+  the `BLENDER` or `RAC_BLENDER` environment variable, then `PATH`, then the
+  usual install places for the system: Program Files (newest version first),
+  every Steam library, the Microsoft Store app, `/Applications` on macOS, and
+  `/usr/bin`, `/snap/bin` and Steam on Linux. A found Blender is used only if it
+  answers `--version`. It is passed to the compiler as `--blender`, exactly like
+  a configured one, so receipts still name the exact executable. The model
+  panels show which Blender is in use, its version, how it was found, and how to
+  choose another. Blender stays optional, and a configured path is always used
+  as given. See [Setting it up](docs/REFERENCE_ASSET_COMPILER.md#setting-it-up).
+
 ## 0.1.0 — 2026-09-24, first release
 
 The first Framewright release: a local-first production workspace for a trusted

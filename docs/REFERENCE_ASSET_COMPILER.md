@@ -83,11 +83,73 @@ proportionally smaller.
 
 The pinned wheel gives contracts and receipts. It does **not** give the Blender
 stages or the pinned workflow bundles; those need a configured checkout, the
-same way Framewright already needs a Blender path and a ComfyUI root, and it is
-discovered and reported through the same readiness surface. With no checkout,
-the capability is unavailable and the work is refused with a reason.
+same way Framewright needs a Blender and a ComfyUI root, and it is discovered
+and reported through the same readiness surface. With no checkout, the
+capability is unavailable and the work is refused with a reason.
 
 Compiler stages are minutes to hours. They are queued work, never a request, and
 progress is reported from stage receipts landing on disk — `stage 4 of 9 ·
 retopology` — because the ledger stages are a known ordered list. A percentage
 interpolated against a guessed duration is a lie and is not shown.
+
+## Setting it up
+
+You do not need an agent for this. Three things make the 3D routes work:
+
+1. **The compiler.** Install it so that `rac` runs from a terminal (from a
+   checkout: `pip install -e .`). If it lives somewhere else, set
+   `Integrations:ReferenceAssetCompiler:Executable` to its full path.
+2. **A checkout of the compiler**, for the stages that run scripts. Set
+   `Integrations:ReferenceAssetCompiler:CheckoutPath` to it.
+3. **Blender**, for most stages. Framewright looks for it for you (below).
+
+Settings go in `appsettings.Local.json` beside Framewright (it is never
+committed or packaged; `appsettings.Local.example.json` shows the shape).
+Generation and preparation stay switched off until you also set
+`Integrations:ReferenceAssetCompiler:SubmissionEnabled` to `true`. Open any
+model or reference image afterwards: the 3D panels say what is ready, what is
+missing and why.
+
+### How Framewright finds Blender
+
+Blender is optional. Without it, everything that does not need it keeps
+working, and the stages that do need it say "blender missing" along with what
+Framewright looked for and how to point it at one.
+
+Framewright takes the first of these that applies:
+
+| Order | Where | Used how |
+| --- | --- | --- |
+| 1 | `Integrations:ReferenceAssetCompiler:BlenderPath` | As given |
+| 2 | The `BLENDER` environment variable, then `RAC_BLENDER` | As given |
+| 3 | `blender` (`blender.exe` on Windows) on `PATH` | If it answers `--version` |
+| 4 | The usual install places for this system (below) | If it answers `--version` |
+
+The usual install places:
+
+- **Windows:** `%ProgramFiles%\Blender Foundation\Blender X.Y\blender.exe`
+  (the newest version first); then every Steam library, read from Steam's
+  `libraryfolders.vdf`, at `steamapps\common\Blender\blender.exe` (Steam is
+  found from the registry, or at `%ProgramFiles(x86)%\Steam`); then the
+  Microsoft Store app. A winget install lands in Program Files.
+- **macOS:** `/Applications/Blender.app` and `~/Applications/Blender.app`.
+- **Linux:** `/usr/bin/blender`, `/usr/local/bin/blender`, `/snap/bin/blender`,
+  then Steam libraries under `~/.steam/steam` and `~/.local/share/Steam`.
+
+A Blender you named yourself (rows 1 and 2) is always the one used. Framewright
+still asks it for its version, and if it does not answer, the panel says so; it
+does not quietly swap in a different Blender. A Blender it found (rows 3 and
+4) is only used if it answers `blender --version`; one that does not is
+skipped.
+
+Whichever it is, Framewright hands it to the compiler as `--blender <path>`,
+exactly as a configured path always was, so every receipt names the exact
+executable. The compiler itself does no searching. The model panels show the
+Blender in use, its version, how it was found, and how to choose another. The
+answer is remembered until a setting changes; when nothing usable was found,
+Framewright looks again a minute later, so installing Blender does not need a
+restart.
+
+To stop Framewright looking at all, set
+`Integrations:ReferenceAssetCompiler:DiscoverBlender` to `false`; then only
+`BlenderPath` is used.

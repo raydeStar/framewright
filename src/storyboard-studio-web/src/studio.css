@@ -1021,6 +1021,17 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
 .model-through-glass input { margin-top: 2px; flex: none; }
 .model-preparation .model-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
 .model-preparation input[type="number"], .model-preparation textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-size: var(--text-2xs); font-family: inherit; }
+/* Which Blender the compiler is given. One quiet line when it is fine. */
+.model-blender { display: grid; gap: 4px; color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
+.model-blender p { margin: 0; }
+.model-blender summary { min-height: 28px; display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; }
+.model-blender code { overflow-wrap: anywhere; color: var(--muted); font-size: var(--text-2xs); }
+.model-blender details > p, .model-blender details > code { display: block; margin-top: 3px; }
+.model-blender[data-usable="false"] { padding: 7px 8px; border: 1px solid var(--amber-line); border-radius: 6px; background: var(--amber-bg); color: var(--amber-soft); }
+/* A flex summary loses the browser's own marker, so it gets one back. */
+.model-blender summary::-webkit-details-marker { display: none; }
+.model-blender summary::before { content: '▸'; color: var(--quiet); }
+.model-blender details[open] summary::before { content: '▾'; }
 .model-comparison { display: grid; gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }
 .model-comparison-passes { display: flex; gap: 6px; }
 .model-comparison-passes button { min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--text-2xs); font-weight: 650; cursor: pointer; }

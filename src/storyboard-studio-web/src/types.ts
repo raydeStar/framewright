@@ -254,6 +254,18 @@ export interface ModelGenerationReadiness {
   colours: ModelColourChoice[] | null
   /** How close the camera will get; hero is offered only where the compiler can paint a head on its own. */
   details: ModelDetailChoice[] | null
+  /** The Blender Framewright hands the compiler, its version, and how it was found. */
+  blenderInstall?: BlenderInstallSummary | null
+}
+/**
+ * Which Blender the compiler is given. An explicit setting or environment
+ * variable is used as given; otherwise Framewright looks on PATH and in the
+ * usual install places, and takes the first one that answers --version.
+ */
+export interface BlenderInstallSummary {
+  executable: string | null; version: string | null
+  source: 'setting' | 'environment' | 'path' | 'program-files' | 'microsoft-store' | 'steam' | 'applications' | 'system' | 'none' | 'disabled'
+  foundBy: string; override: string; problem: string | null
 }
 export interface ModelDetailChoice { detail: string; description: string; cost: string }
 /** The fixed views one preparation rendered, of the source and of what it made. */

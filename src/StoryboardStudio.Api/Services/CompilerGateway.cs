@@ -1,9 +1,12 @@
 using System.Diagnostics;
 using System.Text.Json;
+using StoryboardStudio.Core;
 
 namespace StoryboardStudio.Api.Services;
 
 /// <summary>What the Reference Asset Compiler can do on this workstation right now.</summary>
+/// <param name="Blender">The Blender the compiler reports, in its own answer.</param>
+/// <param name="BlenderInstall">The Blender this studio handed it, and how it was found.</param>
 public sealed record CompilerCapabilities(
     bool Installed,
     bool Commissioned,
@@ -12,13 +15,14 @@ public sealed record CompilerCapabilities(
     string? Blender,
     IReadOnlyList<CompilerStage> Stages,
     string? Detail = null,
-    string? StudioTree = null)
+    string? StudioTree = null,
+    BlenderInstallSummary? BlenderInstall = null)
 {
     public bool CanRun(string stage) =>
         Installed && Stages.Any(candidate => candidate.Stage == stage && candidate.Available);
 
-    public static CompilerCapabilities Absent(string detail) =>
-        new(false, false, null, null, null, [], detail);
+    public static CompilerCapabilities Absent(string detail, BlenderInstallSummary? blender = null) =>
+        new(false, false, null, null, null, [], detail, BlenderInstall: blender);
 }
 
 public sealed record CompilerStage(
@@ -74,13 +78,13 @@ public interface ICompilerGateway
 /// Drives the compiler's own `rac run-stage` command, so this studio binds to a
 /// stage name rather than to a file layout it does not own.
 /// </summary>
-public sealed class CompilerGateway(IConfiguration configuration, TimeProvider timeProvider) : ICompilerGateway
+public sealed class CompilerGateway(
+    IConfiguration configuration, TimeProvider timeProvider, IBlenderLocator blenderLocator) : ICompilerGateway
 {
     private const string Section = "Integrations:ReferenceAssetCompiler";
 
     private string Executable => configuration.GetValue($"{Section}:Executable", "rac") ?? "rac";
     private string? Checkout => Trimmed(configuration.GetValue<string>($"{Section}:CheckoutPath"));
-    private string? Blender => Trimmed(configuration.GetValue<string>($"{Section}:BlenderPath"));
 
     /// <summary>
     /// The studio tree holding the geometry weights and their environment. It
@@ -122,15 +126,15 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
 
     public async Task<CompilerCapabilities> DescribeAsync(CancellationToken cancellationToken)
     {
+        var blender = await blenderLocator.LocateAsync(cancellationToken);
         var arguments = new List<string> { "run-stage", "--list" };
-        if (Checkout is { } checkout) { arguments.Add("--repo-root"); arguments.Add(checkout); }
-        if (Blender is { } blender) { arguments.Add("--blender"); arguments.Add(blender); }
-        if (StudioTree is { } studio) { arguments.Add("--legacy-root"); arguments.Add(studio); }
+        AddLocations(arguments, blender);
 
         var run = await RunAsync(arguments, TimeSpan.FromSeconds(60), cancellationToken);
         if (!run.Started)
             return CompilerCapabilities.Absent(
-                $"The Reference Asset Compiler was not found. Configure {Section}:Executable, or install it with pip.");
+                $"The Reference Asset Compiler was not found. Configure {Section}:Executable, or install it with pip.",
+                blender);
         if (run.ExitCode != 0)
         {
             // An installed compiler that predates run-stage is a version skew,
@@ -141,9 +145,10 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
                 && complaint.Contains("run-stage", StringComparison.OrdinalIgnoreCase))
                 return CompilerCapabilities.Absent(
                     "The installed Reference Asset Compiler is older than this studio needs: it has no "
-                    + "run-stage command. Update it from a checkout with pip install -e .");
+                    + "run-stage command. Update it from a checkout with pip install -e .", blender);
             return CompilerCapabilities.Absent(
-                $"The compiler refused to describe itself: {Tail(run.StandardError) ?? $"exit code {run.ExitCode}"}");
+                $"The compiler refused to describe itself: {Tail(run.StandardError) ?? $"exit code {run.ExitCode}"}",
+                blender);
         }
 
         try
@@ -179,12 +184,25 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
                 Checkout: Text(root, "checkout"),
                 Blender: Text(root, "blender"),
                 Stages: stages,
-                StudioTree: Text(root, "legacy_root"));
+                StudioTree: Text(root, "legacy_root"),
+                BlenderInstall: blender);
         }
         catch (JsonException)
         {
-            return CompilerCapabilities.Absent("The compiler's capability report could not be read as JSON.");
+            return CompilerCapabilities.Absent("The compiler's capability report could not be read as JSON.", blender);
         }
+    }
+
+    /// <summary>
+    /// Where the compiler's pieces are, told rather than left for it to find.
+    /// A Blender this studio found is passed exactly the way a configured one
+    /// always was, so the receipt names the executable either way.
+    /// </summary>
+    private void AddLocations(List<string> arguments, BlenderInstallSummary blender)
+    {
+        if (Checkout is { } checkout) { arguments.Add("--repo-root"); arguments.Add(checkout); }
+        if (blender.Executable is { } executable) { arguments.Add("--blender"); arguments.Add(executable); }
+        if (StudioTree is { } studio) { arguments.Add("--legacy-root"); arguments.Add(studio); }
     }
 
     public async Task<CompilerStageRun> RunStageAsync(
@@ -209,9 +227,7 @@ public sealed class CompilerGateway(IConfiguration configuration, TimeProvider t
             // one's value, which fails in a way that names the wrong option.
             if (value.Length > 0) arguments.Add(value);
         }
-        if (Checkout is { } checkout) { arguments.Add("--repo-root"); arguments.Add(checkout); }
-        if (Blender is { } blender) { arguments.Add("--blender"); arguments.Add(blender); }
-        if (StudioTree is { } studio) { arguments.Add("--legacy-root"); arguments.Add(studio); }
+        AddLocations(arguments, await blenderLocator.LocateAsync(cancellationToken));
 
         var started = timeProvider.GetTimestamp();
         var run = await RunAsync(arguments, Timeout, cancellationToken);

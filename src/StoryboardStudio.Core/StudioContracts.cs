@@ -396,6 +396,21 @@ public sealed record CreateModelPreparationRequest(
     Guid SourceAssetId, string? Name, int? TriangleBudget);
 
 /// <summary>
+/// Which Blender the compiler is handed, and how this studio came to choose it.
+/// </summary>
+/// <param name="Executable">The exact path passed as <c>--blender</c>, or null when none is passed.</param>
+/// <param name="Version">What it said to <c>--version</c>, such as "5.2.2 LTS"; null when it did not answer as Blender.</param>
+/// <param name="Source">
+/// Where it came from: setting, environment, path, program-files,
+/// microsoft-store, steam, applications, system, none or disabled.
+/// </param>
+/// <param name="FoundBy">The same thing in a sentence fragment a person reads, such as "found in your Steam library".</param>
+/// <param name="Override">How to choose a different one.</param>
+/// <param name="Problem">Why there is no usable Blender, or what is wrong with the one that was set.</param>
+public sealed record BlenderInstallSummary(
+    string? Executable, string? Version, string Source, string FoundBy, string Override, string? Problem);
+
+/// <summary>
 /// The artist's verdict on a prepared derivative, recorded where it belongs --
 /// on the derivative. Refusing one says so rather than deleting it, because
 /// the reason a derivative was refused is worth keeping.
@@ -418,12 +433,14 @@ public sealed record ModelPreparationViews(
 public sealed record ModelPreparationView(
     string View, string Pass, string Url, string Sha256);
 
+/// <param name="Blender">The Blender the compiler reports it used, in its own words.</param>
+/// <param name="BlenderInstall">The Blender this studio handed it, its version, and how it was found.</param>
 public sealed record ModelGenerationReadiness(
     bool Installed, bool Commissioned, bool CanRun,
     string? CompilerVersion, string? Checkout, string? Blender,
     string[] Missing, string Detail, ModelSizeChoice[]? Sizes = null,
     IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null,
-    ModelDetailChoice[]? Details = null);
+    ModelDetailChoice[]? Details = null, BlenderInstallSummary? BlenderInstall = null);
 
 /// <summary>
 /// How close the camera will get to a generated model, offered in those terms

@@ -304,6 +304,62 @@ public sealed class ModelPreparationApiTests
     }
 
     [Fact]
+    public async Task TheBlenderInUseIsReportedWithItsVersionAndHowItWasFound()
+    {
+        var compiler = new ControlledCompiler
+        {
+            Capabilities = ControlledCompiler.Ready with
+            {
+                BlenderInstall = new BlenderInstallSummary(
+                    @"D:\SteamLibrary\steamapps\common\Blender\blender.exe", "5.2.2 LTS", "steam",
+                    "found in your Steam library", BlenderLocator.OverrideAdvice, null),
+            },
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/preparation/readiness")
+            ?? throw new InvalidOperationException();
+
+        var blender = readiness.RootElement.GetProperty("blenderInstall");
+        Assert.Equal("5.2.2 LTS", blender.GetProperty("version").GetString());
+        Assert.Equal("found in your Steam library", blender.GetProperty("foundBy").GetString());
+        Assert.Contains("BlenderPath", blender.GetProperty("override").GetString(), StringComparison.Ordinal);
+        Assert.Equal(@"D:\SteamLibrary\steamapps\common\Blender\blender.exe",
+            blender.GetProperty("executable").GetString());
+    }
+
+    [Fact]
+    public async Task AMissingBlenderIsExplainedWithWhatWasLookedForAndHowToChooseOne()
+    {
+        var compiler = new ControlledCompiler
+        {
+            Capabilities = ControlledCompiler.Ready with
+            {
+                Stages = [ControlledCompiler.Stage("adopt-mesh"), ControlledCompiler.Stage("reduce-mesh"),
+                          ControlledCompiler.Stage("browser-payload"),
+                          ControlledCompiler.Stage("review-views") with { Available = false, Missing = ["blender"] }],
+                BlenderInstall = new BlenderInstallSummary(null, null, "none", "not found",
+                    BlenderLocator.OverrideAdvice,
+                    "No Blender was found: none is set, none is on PATH, and none is in the usual install places "
+                    + "for this system. Install Blender, or tell Framewright where it is."),
+            },
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/preparation/readiness")
+            ?? throw new InvalidOperationException();
+
+        Assert.False(readiness.RootElement.GetProperty("canRun").GetBoolean());
+        var detail = readiness.RootElement.GetProperty("detail").GetString();
+        // The compiler's gap, then what this studio looked for, then the fix.
+        Assert.Contains("review-views stage yet: blender missing", detail, StringComparison.Ordinal);
+        Assert.Contains("No Blender was found", detail, StringComparison.Ordinal);
+        Assert.Contains("BlenderPath", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BothSetsOfFixedViewsAreServedAndBoundToTheBytesTheyArePicturesOf()
     {
         var compiler = new ControlledCompiler();

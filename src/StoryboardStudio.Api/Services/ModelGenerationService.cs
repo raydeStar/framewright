@@ -458,7 +458,8 @@ public sealed class ModelGenerationService(
                 .FirstOrDefault(candidate => candidate.Stage == GlassStage)?.Colours
                 ?.Select(colour => new ModelColourChoice(colour.Colour, colour.Description))
                 .ToArray(),
-            Details: offerDetails ? DetailChoices(capabilities) : null);
+            Details: offerDetails ? DetailChoices(capabilities) : null,
+            BlenderInstall: capabilities.BlenderInstall);
     }
 
     /// <summary>
@@ -496,9 +497,14 @@ public sealed class ModelGenerationService(
                 .Select(name => (Name: name, Stage: capabilities.Stages.FirstOrDefault(s => s.Stage == name)))
                 .FirstOrDefault(step => step.Stage is null || !step.Stage.Available);
             if (blocked.Name is null) return "The compiler cannot run this route yet.";
-            return blocked.Stage is null
-                ? $"This compiler does not offer the {blocked.Name} stage."
-                : $"The compiler cannot run the {blocked.Name} stage yet: {string.Join(", ", blocked.Stage.Missing)} missing.";
+            if (blocked.Stage is null) return $"This compiler does not offer the {blocked.Name} stage.";
+            var sentence = $"The compiler cannot run the {blocked.Name} stage yet: {string.Join(", ", blocked.Stage.Missing)} missing.";
+            // "blender missing" names the gap; this studio looked for one, and
+            // what it found (or did not) is the next thing the artist needs.
+            return blocked.Stage.Missing.Contains("blender", StringComparer.OrdinalIgnoreCase)
+                   && capabilities.BlenderInstall is { } blender
+                ? $"{sentence} {blender.Problem ?? $"Framewright passed Blender at {blender.Executable}, and the compiler did not accept it."} {blender.Override}"
+                : sentence;
         }
         return capabilities.Commissioned
             ? $"Ready. {work} will run on this workstation."

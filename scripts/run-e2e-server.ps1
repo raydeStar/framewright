@@ -46,6 +46,10 @@ $env:Integrations__ReferenceAssetCompiler__SubmissionEnabled = 'true'
 # The old humanoid-a skeleton is explicitly a deterministic fixture. Product
 # runtime reads the compiler checkout's profiles instead of carrying this copy.
 $env:Integrations__ReferenceAssetCompiler__SkeletonProfilePath = (Join-Path $repoRoot 'tests\fixtures\rig-profiles')
+# A journey never looks for, or starts, a developer's real Blender: the stand-in
+# compiler needs none. Naming an absent one also exercises how a Blender that
+# was set but does not answer is reported, exactly as a mistyped path would be.
+$env:Integrations__ReferenceAssetCompiler__BlenderPath = (Join-Path $resolvedTestData 'blender-absent-for-e2e')
 
 $stopFile = $env:STUDIO_E2E_STOP_FILE
 if ([string]::IsNullOrWhiteSpace($stopFile)) {

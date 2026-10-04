@@ -76,6 +76,10 @@ builder.Services.AddScoped<SceneMotionService>();
 builder.Services.AddScoped<SceneShotService>();
 builder.Services.AddScoped<SceneRenderService>();
 builder.Services.AddSingleton<ISceneVideoEncoder, FfmpegSceneVideoEncoder>();
+// Blender is optional and found lazily, the first time the compiler is asked
+// anything, so a machine without it starts exactly as it did before.
+builder.Services.AddSingleton<IBlenderHost, SystemBlenderHost>();
+builder.Services.AddSingleton<IBlenderLocator, BlenderLocator>();
 builder.Services.AddSingleton<ICompilerGateway, CompilerGateway>();
 builder.Services.AddScoped<ModelGenerationService>();
 builder.Services.AddScoped<VisualConsistencyService>();

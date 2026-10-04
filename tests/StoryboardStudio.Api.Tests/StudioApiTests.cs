@@ -92,6 +92,11 @@ public class StudioApiFactory : WebApplicationFactory<Program>
             services.AddDbContext<StudioDbContext>(options => options.UseSqlite($"Data Source={Path.Combine(DataRoot, "test.db")};Pooling=False"));
             services.RemoveAll<ICodexRuntime>();
             services.AddSingleton<ICodexRuntime, UnavailableTestCodexRuntime>();
+            // An API test never looks for, or starts, the developer's Blender:
+            // a workstation's local settings may name one, and whether it is
+            // installed must not change what these tests observe.
+            services.RemoveAll<IBlenderLocator>();
+            services.AddSingleton<IBlenderLocator, AbsentTestBlenderLocator>();
             // Most API tests use tiny container-signature fixtures rather than
             // encoded movies. Keep those tests deterministic; focused probe
             // tests below exercise the real metadata parser and mismatch gate.
@@ -118,6 +123,13 @@ public class StudioApiFactory : WebApplicationFactory<Program>
         base.Dispose(disposing);
         if (deleteDataRoot && Directory.Exists(DataRoot)) Directory.Delete(DataRoot, recursive: true);
     }
+}
+
+internal sealed class AbsentTestBlenderLocator : IBlenderLocator
+{
+    public Task<BlenderInstallSummary> LocateAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(new BlenderInstallSummary(null, null, "none", "not looked for in tests",
+            BlenderLocator.OverrideAdvice, "API tests never look for Blender."));
 }
 
 internal sealed class AcceptingTestVideoMediaProbe : IVideoMediaProbe

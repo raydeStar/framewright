@@ -38,3 +38,13 @@ Local choices are written to ignored `.env` or `appsettings.Local.json`. The
 tracked defaults keep Codex ImageGen, local voice, and ComfyUI still, video, and
 music submission off. The app's Setup drawer shows what is ready, degraded, or
 still disabled after launch.
+
+## 3D models and Blender
+
+The 3D routes use the separately installed
+[Reference Asset Compiler](REFERENCE_ASSET_COMPILER.md#setting-it-up) and
+Blender. Blender does not need configuring: Framewright uses
+`Integrations:ReferenceAssetCompiler:BlenderPath` or the `BLENDER` environment
+variable if either is set, and otherwise finds it on `PATH`, in Program Files,
+in a Steam library, or in the usual places on macOS and Linux. The model panels
+show which Blender is in use and how it was found. Setup never installs Blender.

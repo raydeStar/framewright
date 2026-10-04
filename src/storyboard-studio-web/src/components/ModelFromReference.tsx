@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Boxes, LoaderCircle } from 'lucide-react'
 import { studioApi } from '../api'
+import BlenderInstallNote from './BlenderInstallNote'
 import type { AssetSummary, ModelGenerationReadiness } from '../types'
 
 /**
@@ -84,6 +85,7 @@ export default function ModelFromReference({ asset, onQueued }: {
           <p className="model-note" data-testid="model-generation-readiness" data-can-run={readiness.canRun ? 'true' : 'false'}>
             {readiness.detail}
           </p>
+          <BlenderInstallNote install={readiness.blenderInstall} />
           {readiness.canRun && readiness.sizes && <label className="model-size">
             <span>Roughly how big is it?</span>
             <select value={size} onChange={event => setSize(event.target.value)}

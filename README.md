@@ -134,7 +134,7 @@ Framewright's 3D path turns reference images into a small, editable scene you ca
 - **Animate.** Bind compatible clips to rigged characters with their own trim, speed, and loop, and give rigid parts pivot motion.
 - **Shoot it.** Frame a shot camera, render a delivery-sized still into shot review, and once it is approved, render an exact-frame animated take encoded with FFmpeg.
 
-Modelling, rigging, and texture work is done by the separate [Reference Asset Compiler](docs/REFERENCE_ASSET_COMPILER.md), which runs locally with Blender. Framewright owns the library, revisions, scenes, review, and shot binding.
+Modelling, rigging, and texture work is done by the separate [Reference Asset Compiler](docs/REFERENCE_ASSET_COMPILER.md), which runs locally with Blender. Framewright finds an installed Blender on its own (on PATH, in Program Files, in a Steam library, or the usual macOS and Linux places) unless you point it at one; see [Setting it up](docs/REFERENCE_ASSET_COMPILER.md#setting-it-up). Framewright owns the library, revisions, scenes, review, and shot binding.
 
 ## Generation routes
 
