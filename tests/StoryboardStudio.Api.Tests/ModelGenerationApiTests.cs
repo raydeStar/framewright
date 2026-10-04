@@ -68,6 +68,18 @@ public sealed class ModelGenerationApiTests
                      Stage("uv-unwrap"), Stage("texture"), Stage("glass"),
                      Stage("browser-payload"), Stage("paint-head"), Stage("compress-textures")]);
 
+        /// <summary>
+        /// A compiler whose remesh decides its own budget, as 9af58b3 and later
+        /// describe theirs: the asset's name, role and notes among its options.
+        /// </summary>
+        public static CompilerCapabilities DecidingRemesh => Ready with
+        {
+            Stages = [.. Ready.Stages.Select(stage => stage.Stage == "remesh"
+                ? stage with { Options = ["triangle_budget", "target_triangles", "voxel_resolution",
+                    "smooth_iterations", "smooth_lambda", "preserve_components", "asset_name", "role", "asset_notes"] }
+                : stage)],
+        };
+
         /// <summary>A compiler from before heads could be painted on their own.</summary>
         public static CompilerCapabilities WithoutHero => Ready with
         {
@@ -117,12 +129,26 @@ public sealed class ModelGenerationApiTests
 
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             await File.WriteAllBytesAsync(outputPath, Payload!, cancellationToken);
-            var receipt = JsonSerializer.Serialize(new
+            var fields = new Dictionary<string, object?>
             {
-                schema = $"reference-asset-compiler.{stage}.v1",
-                payload = outputPath,
-                payload_sha256 = "stand-in",
-            });
+                ["schema"] = $"reference-asset-compiler.{stage}.v1",
+                ["payload"] = outputPath,
+                ["payload_sha256"] = "stand-in",
+            };
+            // A remesh told to decide records what it decided, as the real one does.
+            if (stage == "remesh" && Options[stage].GetValueOrDefault("triangle-budget") == "auto")
+                fields["budget_decision"] = new
+                {
+                    schema = "reference-asset-compiler.triangle-budget.v1",
+                    name = Options[stage].GetValueOrDefault("asset-name"),
+                    role = Options[stage].GetValueOrDefault("role") ?? "prop",
+                    size_class = "medium",
+                    triangle_budget = Options[stage].ContainsKey("role") ? 25_000 : 10_000,
+                    summary = Options[stage].ContainsKey("role")
+                        ? "A medium hero piece: about 25,000 triangles."
+                        : "A medium prop: about 10,000 triangles.",
+                };
+            var receipt = JsonSerializer.Serialize(fields);
             await File.WriteAllTextAsync(reportPath, receipt, cancellationToken);
             return new CompilerStageRun(true, stage, 0, 0.5, outputPath, receipt, null, ["exported"]);
         }
@@ -596,6 +622,109 @@ public sealed class ModelGenerationApiTests
         // The delivered model says what it was made as.
         var delivered = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
         Assert.Contains("Made as a hero", delivered.Notes, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ACompilerThatDecidesIsAskedForTheBudgetBeforeAnythingIsPainted()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.DecidingRemesh };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "brazier-reference.png");
+
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/generation/readiness")
+            ?? throw new InvalidOperationException();
+        Assert.True(readiness.RootElement.GetProperty("remeshDecidesBudget").GetBoolean());
+        // The cost is offered as what it is: the compiler's decision, not 20,000.
+        var set = readiness.RootElement.GetProperty("details").EnumerateArray()
+            .Single(choice => choice.GetProperty("detail").GetString() == "set");
+        Assert.Contains("the compiler decides", set.GetProperty("cost").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("20,000", set.GetProperty("cost").GetString(), StringComparison.Ordinal);
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Floor brazier", size = "waist" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Completed, finished.State);
+
+        // Decided at the remesh, which comes before the paint: the painter
+        // then paints the final mesh instead of a reduction smearing it later.
+        var remesh = compiler.Options["remesh"];
+        Assert.Equal("auto", remesh["triangle-budget"]);
+        Assert.Equal("Floor brazier", remesh["asset-name"]);
+        Assert.False(remesh.ContainsKey("role"));
+        Assert.True(compiler.Calls.FindIndex(call => call.Stage == "remesh")
+                    < compiler.Calls.FindIndex(call => call.Stage == "texture"));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == finished.Id);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.Equal("auto", result.RootElement.GetProperty("triangleBudgetMode").GetString());
+        Assert.Equal(10_000, result.RootElement.GetProperty("budgetDecision").GetProperty("triangle_budget").GetInt32());
+        var delivered = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.Contains("Its triangle budget was the compiler's: A medium prop: about 10,000 triangles.",
+            delivered.RevisionPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AHeroOnACompilerThatDecidesIsBudgetedAsAHeroNotGivenANumber()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.DecidingRemesh };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "statue-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Guardian statue", size = "head", detail = "hero" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Completed, finished.State);
+
+        var remesh = compiler.Options["remesh"];
+        Assert.Equal("auto", remesh["triangle-budget"]);
+        Assert.Equal("hero", remesh["role"]);
+        Assert.Equal("Guardian statue", remesh["asset-name"]);
+        // The rest of the hero recipe still applies; only the number moved to
+        // the compiler, and the target that was tied to 80,000 went with it.
+        Assert.Equal("640", remesh["voxel-resolution"]);
+        Assert.Equal("2", remesh["smooth-iterations"]);
+        Assert.False(remesh.ContainsKey("target-triangles"));
+        Assert.Equal("384", compiler.Options["geometry"]["octree-resolution"]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var delivered = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.Contains("rebuilt at the compiler's hero budget", delivered.Notes, StringComparison.Ordinal);
+        Assert.DoesNotContain("80,000", delivered.Notes, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnOlderCompilerIsStillGivenTheDetailsNumberAndNoAuto()
+    {
+        // The stage lists no asset name, as every compiler before 9af58b3 did.
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "older-reference.png");
+
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/generation/readiness")
+            ?? throw new InvalidOperationException();
+        Assert.False(readiness.RootElement.GetProperty("remeshDecidesBudget").GetBoolean());
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Older", size = "knee" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.Equal("20000", compiler.Options["remesh"]["triangle-budget"]);
+        Assert.False(compiler.Options["remesh"].ContainsKey("asset-name"));
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == finished.Id);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.Equal("fixed", result.RootElement.GetProperty("triangleBudgetMode").GetString());
     }
 
     [Fact]

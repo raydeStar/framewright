@@ -84,13 +84,16 @@ public sealed class ModelGenerationService(
     /// Delivered as JPEG at 92 on a 4096 sheet with 2048 data maps: a lossless
     /// hero is sixty megabytes, and the whole route's masters stay on disk.
     ///
-    /// The triangle numbers here are kept explicit on purpose, unlike a
-    /// preparation's budget. The remesh stage that receives them has no Auto
-    /// in the compiler's contract -- only reduce-mesh decides a budget itself --
-    /// and these are not a guess about what the asset is: they are what the
-    /// artist's own answer ("seen from a distance" or "shot up close") stands
-    /// for, quoted back to them in <see cref="DetailChoices"/>, and coupled to
-    /// the grid, octree and sheet sizes of the same recipe.
+    /// The triangle count is the compiler's to decide wherever it can. A
+    /// compiler whose remesh stage takes an asset name decides the budget
+    /// itself, from what the thing is and its real size, before anything is
+    /// painted -- which is the whole point: a budget decided after paint drags
+    /// the UVs with every collapse. A hero is then told its role rather than a
+    /// number. <see cref="HeroTriangleBudget"/>, <see cref="HeroTargetTriangles"/>
+    /// and <see cref="RuntimeTriangleBudget"/> are only the fallback for a
+    /// compiler older than that, which has nowhere else to get a number; the
+    /// grid, smoothing, octree and sheet sizes stay part of the hero recipe
+    /// either way.
     /// </summary>
     private const string HeroOctreeResolution = "384";
     private const string HeroTriangleBudget = "80000";
@@ -336,12 +339,21 @@ public sealed class ModelGenerationService(
     private const string PaintResolution = "768";
 
     /// <summary>
-    /// The V1 cohort contract's ceiling, which the library also enforces. A
-    /// fixed contract rather than a decision about the asset: the remesh stage
-    /// takes no Auto, and "set dressing" is promised as this number in the
-    /// detail choice the artist picks from (see <see cref="HeroOctreeResolution"/>).
+    /// The V1 cohort contract's ceiling, which the library also enforces. Sent
+    /// only to a compiler too old to decide a remesh budget itself, where it is
+    /// what "set dressing" has always meant (see <see cref="HeroOctreeResolution"/>).
     /// </summary>
     private const string RuntimeTriangleBudget = "20000";
+
+    /// <summary>
+    /// The option a remesh stage lists once it can decide its own budget. The
+    /// compiler added the asset's name, role and notes to remesh together with
+    /// Auto, so a stage that names one of them is a stage that takes "auto".
+    /// </summary>
+    private const string RemeshDecidesBudgetOption = "asset_name";
+
+    /// <summary>The role a hero is budgeted as, in the compiler's vocabulary.</summary>
+    private const string HeroRole = "hero";
 
     // Version 2 carries a route where version 1 carried one stage name. A
     // version 1 packet is not migrated, because the single stage it names is
@@ -484,8 +496,17 @@ public sealed class ModelGenerationService(
                 ?.Select(colour => new ModelColourChoice(colour.Colour, colour.Description))
                 .ToArray(),
             Details: offerDetails ? DetailChoices(capabilities) : null,
-            BlenderInstall: capabilities.BlenderInstall);
+            BlenderInstall: capabilities.BlenderInstall,
+            RemeshDecidesBudget: RemeshDecidesBudget(capabilities));
     }
+
+    /// <summary>
+    /// Whether this compiler's remesh stage decides a generated model's budget
+    /// itself, read from the options the stage says it takes.
+    /// </summary>
+    private static bool RemeshDecidesBudget(CompilerCapabilities capabilities) =>
+        capabilities.Stages.FirstOrDefault(stage => stage.Stage == RemeshStage)?.Options
+            ?.Contains(RemeshDecidesBudgetOption, StringComparer.Ordinal) ?? false;
 
     /// <summary>
     /// Set dressing is always offered. A hero needs the compiler to paint a
@@ -494,15 +515,22 @@ public sealed class ModelGenerationService(
     /// </summary>
     private static ModelDetailChoice[] DetailChoices(CompilerCapabilities capabilities)
     {
+        // The cost is said the way it will be decided: by the compiler from the
+        // model's name and size where it can, as a fixed number where it cannot.
+        var decides = RemeshDecidesBudget(capabilities);
         var choices = new List<ModelDetailChoice>
         {
             new(SetDetail, "Seen from a distance: set dressing, background props",
-                "20,000 triangles, a 2048 sheet"),
+                decides
+                    ? "A triangle budget the compiler decides from its name and real size, before painting; a 2048 sheet"
+                    : "20,000 triangles, a 2048 sheet"),
         };
         if (HeroExtraStages.All(capabilities.CanRun))
             choices.Add(new(HeroDetail, "Shot up close: a character, a held prop",
-                "80,000 triangles, a 4096 sheet, the head painted a second time on its own; "
-                + "several minutes longer"));
+                (decides
+                    ? "A hero budget the compiler decides from its real size, before painting; "
+                    : "80,000 triangles, ")
+                + "a 4096 sheet, the head painted a second time on its own; several minutes longer"));
         return [.. choices];
     }
 
@@ -610,6 +638,9 @@ public sealed class ModelGenerationService(
                 readiness.Suffixes?.GetValueOrDefault(stage) ?? ".glb"))],
             readiness.CompilerVersion, now, size, request.SizeAdjust ?? 1.0, glassColour,
             GenerateWork, Detail: detail, HeadEnd: headEnd,
+            // Frozen, so a restart asks the remesh the same question the
+            // artist was shown: the compiler's budget, or the detail's number.
+            AutoTriangleBudget: readiness.RemeshDecidesBudget,
             // The hero's delivery encoding, frozen with the rest: a lossless
             // 4096 hero is sixty megabytes, and the masters stay on disk.
             ColourSize: hero ? HeroColourSize : 0, DataSize: hero ? HeroDataSize : 0,
@@ -876,13 +907,14 @@ public sealed class ModelGenerationService(
             ? found.GetDouble() : null;
 
     /// <summary>
-    /// The budget the compiler chose, as its reduction receipt records it:
-    /// role, size, the number, its reasons and every rung it tried. Absent when
-    /// the artist chose the number, or the compiler wrote no decision.
+    /// The budget the compiler chose, as the receipt of the stage that chose it
+    /// records it -- the reduction of a preparation, or the remesh of a
+    /// generated model: role, size, the number, its reasons and every rung it
+    /// tried. Absent when a number was given, or the compiler wrote no decision.
     /// </summary>
     private static JsonElement? BudgetDecision(IEnumerable<StepOutcome> steps)
     {
-        var receipt = steps.LastOrDefault(step => step.Stage == ReduceMeshStage)?.ReceiptJson;
+        var receipt = steps.LastOrDefault(step => step.Stage is ReduceMeshStage or RemeshStage)?.ReceiptJson;
         if (string.IsNullOrWhiteSpace(receipt)) return null;
         try
         {
@@ -1470,7 +1502,7 @@ public sealed class ModelGenerationService(
                 return await RefuseDeliveryAsync(stacked.Error ?? "The derivative could not be recorded against its source.");
             topologyChanged = stacked.Value;
         }
-        await RecordLineageAsync(imported.Value.Id, packet, source, stale, cancellationToken);
+        await RecordLineageAsync(imported.Value.Id, packet, source, stale, cancellationToken, budgetDecision);
 
         job.OutputAssetId = imported.Value.Id;
         job.DeliveryCount += 1;
@@ -1492,7 +1524,14 @@ public sealed class ModelGenerationService(
             // Whether the artist chose the number or left it to the compiler,
             // and, when the compiler chose, its own record of what and why --
             // copied from the reduction's receipt, not restated.
-            triangleBudgetMode = packet.Work == PrepareWork ? (packet.AutoTriangleBudget ? "auto" : "chosen") : null,
+            triangleBudgetMode = packet.Work switch
+            {
+                PrepareWork => packet.AutoTriangleBudget ? "auto" : "chosen",
+                // A generated model's number is the compiler's, or the fixed
+                // one its detail choice stands for on an older compiler.
+                GenerateWork => packet.AutoTriangleBudget ? "auto" : "fixed",
+                _ => null,
+            },
             budgetDecision,
             topologyChanged = preparing ? topologyChanged : (bool?)null,
             rerunAfterIncompleteAnswer = rerunAfterPartial,
@@ -1546,6 +1585,26 @@ public sealed class ModelGenerationService(
         // Rebuilt on a uniform grid rather than collapsed: a generator's
         // surface has no topology worth preserving, and collapsing it keeps
         // the noise as slivers and spikes.
+        //
+        // The budget is decided here, before anything is painted, so the
+        // painter paints the final mesh. A compiler that can decide is told
+        // "auto" and the name the model was given (a hero also its role, so a
+        // close-up is budgeted as one); only an older compiler is given the
+        // detail choice's fixed number.
+        RemeshStage when packet.AutoTriangleBudget => packet.Detail == HeroDetail
+            ? new Dictionary<string, string>
+            {
+                ["triangle-budget"] = AutoBudgetArgument,
+                ["asset-name"] = job.ShotCode,
+                ["role"] = HeroRole,
+                ["voxel-resolution"] = HeroVoxelResolution,
+                ["smooth-iterations"] = HeroSmoothIterations,
+            }
+            : new Dictionary<string, string>
+            {
+                ["triangle-budget"] = AutoBudgetArgument,
+                ["asset-name"] = job.ShotCode,
+            },
         RemeshStage => packet.Detail == HeroDetail
             ? new Dictionary<string, string>
             {
@@ -1768,7 +1827,8 @@ public sealed class ModelGenerationService(
     /// than only in a job row.
     /// </summary>
     private async Task RecordLineageAsync(
-        Guid assetId, FrozenModelRequest packet, AssetRecord source, bool stale, CancellationToken cancellationToken)
+        Guid assetId, FrozenModelRequest packet, AssetRecord source, bool stale, CancellationToken cancellationToken,
+        JsonElement? budgetDecision = null)
     {
         var asset = await db.Assets.SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
         if (asset is null) return;
@@ -1793,8 +1853,15 @@ public sealed class ModelGenerationService(
             lineage.Append(" That reference has changed since; this model is a candidate from the older source (now ")
                 .Append(source.ContentHash[..12]).Append("…).");
         if (packet.Work == GenerateWork && packet.Detail == HeroDetail)
-            lineage.Append(" Made as a hero: rebuilt at 80,000 triangles, painted onto a 4096 sheet, "
-                           + "the head painted a second time on its own.");
+            lineage.Append(packet.AutoTriangleBudget
+                ? " Made as a hero: rebuilt at the compiler's hero budget, painted onto a 4096 sheet, "
+                  + "the head painted a second time on its own."
+                : " Made as a hero: rebuilt at 80,000 triangles, painted onto a 4096 sheet, "
+                  + "the head painted a second time on its own.");
+        // Who chose the triangle count, in the compiler's own sentence.
+        if (packet.Work == GenerateWork && packet.AutoTriangleBudget)
+            lineage.Append(" Its triangle budget was the compiler's")
+                .Append(DecisionSummary(budgetDecision) is { } said ? $": {said}" : ".");
         asset.Notes = string.IsNullOrWhiteSpace(asset.Notes) ? lineage.ToString() : asset.Notes + "\n" + lineage;
         // A generated model's revision note is this sentence, because nothing
         // else has written one. A prepared derivative already has a better one --

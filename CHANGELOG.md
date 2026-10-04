@@ -20,6 +20,10 @@
   panel shows the budget beside the triangle count. A typed number is still one
   step away. With a compiler that cannot decide, there is no suggestion and the
   artist types a number; the old fixed 10,000 default is gone.
+- **Generated models are budgeted before they are painted.** With a compiler
+  whose remesh decides budgets (9af58b3 and later), generation sends
+  `--triangle-budget auto` and the model's name (a hero also `--role hero`), so
+  the painter paints the final mesh. Older compilers still get 20,000 / 80,000.
 
 ## 0.1.0 — 2026-09-24, first release
 

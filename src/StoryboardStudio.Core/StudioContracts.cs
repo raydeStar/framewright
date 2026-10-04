@@ -467,12 +467,18 @@ public sealed record ModelPreparationView(
 
 /// <param name="Blender">The Blender the compiler reports it used, in its own words.</param>
 /// <param name="BlenderInstall">The Blender this studio handed it, its version, and how it was found.</param>
+/// <param name="RemeshDecidesBudget">
+/// True when the compiler's remesh stage decides a generated model's triangle
+/// budget itself, from its name and real size; false for an older compiler,
+/// which is given the detail choice's fixed number instead.
+/// </param>
 public sealed record ModelGenerationReadiness(
     bool Installed, bool Commissioned, bool CanRun,
     string? CompilerVersion, string? Checkout, string? Blender,
     string[] Missing, string Detail, ModelSizeChoice[]? Sizes = null,
     IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null,
-    ModelDetailChoice[]? Details = null, BlenderInstallSummary? BlenderInstall = null);
+    ModelDetailChoice[]? Details = null, BlenderInstallSummary? BlenderInstall = null,
+    bool RemeshDecidesBudget = false);
 
 /// <summary>
 /// How close the camera will get to a generated model, offered in those terms

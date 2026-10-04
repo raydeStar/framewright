@@ -187,9 +187,14 @@ size.
   (argparse's "invalid choice"), or a compiler that refuses the model, there is
   no suggestion and no Auto: the panel says why and asks for a number.
   Framewright never fills in a budget of its own.
-
-Generation keeps two fixed numbers on purpose: set dressing is remeshed to
-20,000 triangles and a hero to 80,000. The remesh stage has no Auto in the
-compiler's contract, and those numbers are what the artist's own answer to "how
-close will the camera get?" stands for, together with the grid, octree and
-texture sizes of the same recipe.
+- **Generating.** A generated model's budget is decided at the remesh, before
+  anything is painted, so the painter paints the final mesh (a mesh reduced
+  after painting drags its UVs with every collapse). When the compiler's
+  `run-stage --list` shows a remesh stage that takes `asset_name` (compiler
+  `9af58b3` and later), generation sends `--triangle-budget auto` and
+  `--asset-name <name>`, and a hero also `--role hero`; the hero keeps its finer
+  grid and lighter smoothing. The decision is recorded from the remesh receipt
+  and quoted in the model's revision note. An older compiler, whose remesh takes
+  only a number, is still sent the detail choice's fixed number: 20,000
+  triangles for set dressing, 80,000 for a hero. The generation panel says
+  which of the two will happen before anything is queued.

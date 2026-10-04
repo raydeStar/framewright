@@ -256,6 +256,8 @@ export interface ModelGenerationReadiness {
   details: ModelDetailChoice[] | null
   /** The Blender Framewright hands the compiler, its version, and how it was found. */
   blenderInstall?: BlenderInstallSummary | null
+  /** True when the compiler decides a generated model's triangle budget itself, before painting. */
+  remeshDecidesBudget?: boolean
 }
 /**
  * Which Blender the compiler is given. An explicit setting or environment

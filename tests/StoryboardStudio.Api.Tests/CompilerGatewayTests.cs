@@ -266,6 +266,27 @@ public sealed class CompilerGatewayTests
     /// --blender with the exact path, on describing and on running alike.
     /// </summary>
     [Fact]
+    public async Task TheOptionsAStageTakesAreReadFromTheCompilersOwnAnswer()
+    {
+        // How generation tells a compiler that decides remesh budgets from one
+        // that does not: the stage says which options it takes.
+        using var listing = Stub(
+            "echo {\"ok\":true,\"stages\":[" +
+            "{\"stage\":\"remesh\",\"runner\":\"powershell\",\"summary\":\"s\",\"produces\":\"p\"," +
+            "\"options\":[\"triangle_budget\",\"asset_name\",\"role\",\"asset_notes\"]," +
+            "\"available\":true,\"missing\":[]}," +
+            "{\"stage\":\"uv-unwrap\",\"runner\":\"powershell\",\"summary\":\"s\",\"produces\":\"p\"," +
+            "\"available\":true,\"missing\":[]}]}");
+
+        var capabilities = await Gateway(("Executable", listing.Path)).DescribeAsync(CancellationToken.None);
+
+        var remesh = capabilities.Stages.Single(stage => stage.Stage == "remesh");
+        Assert.Equal(["triangle_budget", "asset_name", "role", "asset_notes"], remesh.Options!);
+        // A stage that says nothing about its options has none recorded.
+        Assert.Null(capabilities.Stages.Single(stage => stage.Stage == "uv-unwrap").Options);
+    }
+
+    [Fact]
     public async Task AFoundBlenderIsPassedExactlyAsAConfiguredOneWouldBe()
     {
         using var recording = Stub(

@@ -39,10 +39,15 @@ public sealed record CompilerBudgetSuggestion(
     public const string Schema = "reference-asset-compiler.triangle-budget.v1";
 }
 
+/// <param name="Options">
+/// The options the stage says it takes, in the compiler's own spelling
+/// (<c>asset_name</c>, <c>role</c>). What a stage accepts is the compiler's to
+/// say, so a newer behaviour is detected from its answer rather than assumed.
+/// </param>
 public sealed record CompilerStage(
     string Stage, string Runner, string Summary, string Produces, bool Available, string[] Missing,
     CompilerSize[]? Sizes = null, string OutputSuffix = ".glb",
-    CompilerColour[]? Colours = null);
+    CompilerColour[]? Colours = null, string[]? Options = null);
 
 /// <summary>One colour a stage will accept, as the compiler describes it.</summary>
 public sealed record CompilerColour(string Colour, string Description);
@@ -196,6 +201,11 @@ public sealed class CompilerGateway(
                     stage.TryGetProperty("colours", out var colours) && colours.ValueKind == JsonValueKind.Array
                         ? [.. colours.EnumerateArray().Select(colour => new CompilerColour(
                             Text(colour, "colour") ?? "", Text(colour, "description") ?? ""))]
+                        : null,
+                    stage.TryGetProperty("options", out var options) && options.ValueKind == JsonValueKind.Array
+                        ? [.. options.EnumerateArray()
+                            .Where(option => option.ValueKind == JsonValueKind.String)
+                            .Select(option => option.GetString() ?? "")]
                         : null)).ToArray()
                 : [];
 
