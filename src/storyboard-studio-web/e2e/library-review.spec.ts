@@ -81,6 +81,12 @@ test('an image is sent back with a reason, and its next revision says what it an
   await panel.getByTestId('asset-review-send-back').click()
   await expect(panel.getByTestId('asset-review-send-back-confirm')).toBeDisabled()
   await panel.getByTestId('asset-review-reason').fill('Warmer light on the left pane.')
+  // The library refresh that announces the send-back is held until the next
+  // revision has been announced, so it lands last, as a slow one once did and
+  // replaced "Imported v2" with the send-back.
+  let releaseSendBack = () => {}
+  const sendBackHeld = new Promise<void>(resolve => { releaseSendBack = resolve })
+  await page.route('**/api/asset-placements', async route => { await sendBackHeld; await route.continue() }, { times: 1 })
   await panel.getByTestId('asset-review-send-back-confirm').click()
   await expect(panel).toHaveAttribute('data-decision', 'ChangesRequested')
   await expect(panel.getByTestId('asset-review-reason-shown')).toContainText('Warmer light on the left pane.')
@@ -88,6 +94,12 @@ test('an image is sent back with a reason, and its next revision says what it an
   // The answer arrives as a new revision: pending, and saying what it answers.
   await page.getByLabel('Import image revision').setInputFiles({ name: `${name}-v2.png`, mimeType: 'image/png', buffer: png(`${name}-v2`) })
   await expect(page.getByText(/Imported v2/)).toBeVisible()
+  // The older announcement, arriving late, does not replace the newer one.
+  const sendBackRefreshed = page.waitForResponse('**/api/asset-placements')
+  releaseSendBack()
+  await (await sendBackRefreshed).finished()
+  await page.waitForTimeout(500)
+  await expect(page.locator('.toast.success')).toContainText('Imported v2')
   await expect(panel).toHaveAttribute('data-decision', 'Pending')
   await expect(panel.getByTestId('asset-review-answers')).toContainText('Warmer light on the left pane.')
 

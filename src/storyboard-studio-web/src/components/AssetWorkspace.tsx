@@ -74,6 +74,16 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     setUsage(new Map(nextUsage.map(entry => [entry.assetId, entry])))
     setPostered(new Set(nextPosters))
   }, [])
+  // A change is announced once the library shows it, and those refreshes
+  // overlap the same way. A message overtaken by a newer one is dropped, not
+  // shown last: an image sent back and then answered with a new revision
+  // announced "Imported v2" and, a moment later, the send-back again.
+  const announceSequence = useRef(0)
+  const announce = useCallback(async (message: string) => {
+    const ticket = ++announceSequence.current
+    await refresh()
+    if (ticket === announceSequence.current) onToast(message)
+  }, [onToast, refresh])
   useEffect(() => { void refresh().catch(reason => setError(reason instanceof Error ? reason.message : 'Could not open the asset library.')).finally(() => setLoading(false)) }, [refresh])
   useEffect(() => {
     const finished = studio.jobs.filter(job =>
@@ -142,7 +152,7 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
         else throw new Error(`${file.name} is not a supported image, audio, video, or GLB model file.`)
         imported++
       }
-      await refresh(); onToast(`${imported} asset${imported === 1 ? '' : 's'} imported into the library.`)
+      await announce(`${imported} asset${imported === 1 ? '' : 's'} imported into the library.`)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not import that media.') }
     finally { setBusy(false); if (fileRef.current) fileRef.current.value = '' }
   }
@@ -183,8 +193,8 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   }, [rawGenerationReferences])
 
   const closeAsset = () => { director.onDirectorMode(false); setSelectedId(undefined) }
-  if (selected?.kind === 'Model') return <ModelInspectionWorkspace {...director} asset={selected} onBack={closeAsset} onError={setError} onChanged={async message => { await refresh(); onToast(message) }} />
-  if (selected?.kind === 'Image') return <ImageRevisionWorkspace {...director} asset={selected} collections={collections} shots={studio.shots} references={generationReferences} onBack={closeAsset} onOpenGeneration={onOpenGeneration} onChanged={async message => { await refresh(); onToast(message) }} onEditAuthority={onEditAuthority} />
+  if (selected?.kind === 'Model') return <ModelInspectionWorkspace {...director} asset={selected} onBack={closeAsset} onError={setError} onChanged={announce} />
+  if (selected?.kind === 'Image') return <ImageRevisionWorkspace {...director} asset={selected} collections={collections} shots={studio.shots} references={generationReferences} onBack={closeAsset} onOpenGeneration={onOpenGeneration} onChanged={announce} onEditAuthority={onEditAuthority} />
 
   return <main className={`workspace asset-workspace${director.directorMode && selected ? ' director-mode' : ''}`} aria-busy={loading}>
     <header className="asset-hero">
@@ -202,7 +212,7 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
           <button className={view === 'collection:unfiled' ? 'active' : ''} onDragOver={event => event.preventDefault()} onDrop={event => void moveToCollection(event.dataTransfer.getData('text/asset-id'), undefined)} onClick={() => { setView('collection:unfiled'); setSelectedId(undefined) }}><FolderOpen /><span>Unfiled</span><small>{assets.filter(x => !x.isArchived && !x.collectionId).length}</small></button>
           {collections.map(collection => <button key={collection.id} className={view === `collection:${collection.id}` ? 'active' : ''} onDragOver={event => event.preventDefault()} onDrop={event => void moveToCollection(event.dataTransfer.getData('text/asset-id'), collection.id)} onClick={() => { setView(`collection:${collection.id}`); setSelectedId(undefined) }}><i style={{ background: collection.color }} /><span>{collection.name}</span><small>{collection.assetCount}</small></button>)}
         </section>
-        {activeCollection && <div className="asset-collection-actions"><button onClick={() => setCollectionEditor(activeCollection)}>Rename</button><button className="danger-text" onClick={async () => { if (!window.confirm(`Delete the ${activeCollection.name} collection? Its assets will move to Unfiled.`)) return; await studioApi.deleteAssetCollection(activeCollection.id); setView('all'); await refresh(); onToast('Collection removed; its assets are still safe in Unfiled.') }}>Delete</button></div>}
+        {activeCollection && <div className="asset-collection-actions"><button onClick={() => setCollectionEditor(activeCollection)}>Rename</button><button className="danger-text" onClick={async () => { if (!window.confirm(`Delete the ${activeCollection.name} collection? Its assets will move to Unfiled.`)) return; await studioApi.deleteAssetCollection(activeCollection.id); setView('all'); await announce('Collection removed; its assets are still safe in Unfiled.') }}>Delete</button></div>}
       </aside>
       <section className="asset-browser">
         {missingPosters.length > 0 && <div className="asset-thumbnail-prompt">
@@ -235,7 +245,7 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
           {visible.map(asset => <AssetCard key={asset.id} asset={asset} usage={usage.get(asset.id)} hasPoster={postered.has(asset.id)} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} onDirect={() => { setSelectedId(asset.id); director.onDirectorMode(true) }} pickable={selecting} picked={picked.has(asset.id)} onPick={() => togglePicked(asset.id)} />)}
         </div>}
       </section>
-      {selected && <AssetInspector {...director} asset={selected} collections={collections} onReviewed={async (updated, message) => { setAssets(current => current.map(item => item.id === updated.id ? updated : item)); await refresh(); onToast(message) }} placements={placements.filter(item => item.assetId === selected.id)} originJob={studio.jobs.find(job => job.outputAssetId === selected.id && job.workType === 'Shot')} shots={studio.shots} onClose={closeAsset} onSaved={updated => { setAssets(current => current.map(item => item.id === updated.id ? updated : item)); void refresh(); onToast(`${updated.displayName} metadata saved.`) }} onPlacementsChanged={() => void refresh()} onOpenGeneration={() => onOpenGeneration({ id: crypto.randomUUID(), name: `${selected.displayName} variation`, initialPrompt: `Create a new reusable variation of ${selected.displayName}. Preserve its defining identity and design while following my composition notes.`, route: 'fast', underlayAssetId: selected.id, references: generationReferences, revisionFamilyId: selected.revisionFamilyId, parentAssetId: selected.id })} onOpenSequence={onOpenSequence} />}
+      {selected && <AssetInspector {...director} asset={selected} collections={collections} onReviewed={async (updated, message) => { setAssets(current => current.map(item => item.id === updated.id ? updated : item)); await announce(message) }} placements={placements.filter(item => item.assetId === selected.id)} originJob={studio.jobs.find(job => job.outputAssetId === selected.id && job.workType === 'Shot')} shots={studio.shots} onClose={closeAsset} onSaved={updated => { setAssets(current => current.map(item => item.id === updated.id ? updated : item)); void refresh(); onToast(`${updated.displayName} metadata saved.`) }} onPlacementsChanged={() => void refresh()} onOpenGeneration={() => onOpenGeneration({ id: crypto.randomUUID(), name: `${selected.displayName} variation`, initialPrompt: `Create a new reusable variation of ${selected.displayName}. Preserve its defining identity and design while following my composition notes.`, route: 'fast', underlayAssetId: selected.id, references: generationReferences, revisionFamilyId: selected.revisionFamilyId, parentAssetId: selected.id })} onOpenSequence={onOpenSequence} />}
     </div>
     {createOpen && <CreateAssetLauncher references={generationReferences} onOpenMusic={studio.shots.length > 0 ? () => { setCreateOpen(false); onOpenSequence() } : undefined} onClose={() => setCreateOpen(false)} onImport={() => { setCreateOpen(false); fileRef.current?.click() }} onOpenGeneration={draft => { setCreateOpen(false); onOpenGeneration(draft) }} onJobQueued={onJobQueued} />}
     {shipping && <ShipDialog source={shipping} onClose={() => setShipping(undefined)} onShipped={message => { onToast(message); void refresh() }} />}
