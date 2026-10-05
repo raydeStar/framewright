@@ -418,8 +418,12 @@ test('an unrigged humanoid is rigged as a candidate, shown bending, and accepted
   await expect(suite).toBeVisible({ timeout: 45_000 })
   await expect(suite.getByRole('img', { name: 'elbows bent front' })).toBeVisible()
   await expect(suite.getByRole('img', { name: 'Landmarks front' })).toBeVisible()
-  const decodes = await suite.getByRole('img').first().evaluate(image => (image as HTMLImageElement).naturalWidth > 0)
-  expect(decodes).toBe(true)
+  // The pictures load after the suite appears, and lazily: bring the first
+  // into view, as a person would, and wait for it to decode. A broken image
+  // never gets a width, so this still fails on one.
+  const firstPose = suite.getByRole('img').first()
+  await firstPose.scrollIntoViewIfNeeded()
+  await expect.poll(() => firstPose.evaluate(image => (image as HTMLImageElement).naturalWidth > 0)).toBe(true)
 
   // Unaccepted until a person says so; accepting makes the rig current.
   const assets = await (await page.request.get('/api/assets')).json() as Array<{ id: string; displayName: string; revisionPrompt: string; isCurrentRevision: boolean; preparationAcceptedAt: string | null }>
