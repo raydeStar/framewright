@@ -46,6 +46,15 @@
   ships unless pending work is included; sent-back work never does. See
   [Shipping to a game](docs/GAME_BUNDLE.md).
 
+### Fixes
+- **Confirmations are no longer lost.** A message that arrived just as the
+  previous one expired could be cleared with it and never appear, such as
+  "... queued. It keeps going if you leave this screen." right after an
+  import. And when two library changes overlapped, the older one's message
+  could land last and replace the newer one, so sending an image back and
+  then importing its next revision ended on the send-back. Each message now
+  stays its full time, and the latest change is the one announced.
+
 ## 0.1.0 — 2026-09-24, first release
 
 The first Framewright release: a local-first production workspace for a trusted
