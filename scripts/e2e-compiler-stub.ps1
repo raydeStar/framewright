@@ -23,6 +23,30 @@ param(
 $arguments = @($Arguments)
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
+# Stop at the first failure, the way the real compiler does. A stand-in that
+# carried on past one answered "ok" with a receipt it had only half written --
+# no views, no hashes -- and the studio delivered that as a finished candidate,
+# so the journey timed out a minute later, far from the cause. Every failure
+# leaves the way the compiler refuses: RAC_ERROR on stderr, exit 2.
+$ErrorActionPreference = 'Stop'
+trap {
+    $message = "$_"
+    if (-not $message.StartsWith('RAC_ERROR')) { $message = "RAC_ERROR the e2e stand-in failed: $message" }
+    [Console]::Error.WriteLine($message)
+    exit 2
+}
+
+# SHA-256 by .NET rather than Get-FileHash. Get-FileHash is a script function
+# Windows PowerShell loads from its module path on first use, and a journey
+# launched from PowerShell 7 hands that path to every child process: Windows
+# PowerShell then finds PowerShell 7's Microsoft.PowerShell.Utility first,
+# cannot load it, and has no Get-FileHash at all.
+function Get-Sha256([string] $Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path))) -replace '-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+
 function Read-Option {
     param([string] $Name)
     for ($index = 0; $index -lt $arguments.Count; $index++) {
@@ -291,7 +315,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
             [IO.File]::WriteAllBytes((Join-Path $Directory "$name.png"), $pixel)
             $parts = $name -split '-', 2
             $views += [ordered]@{ view = $parts[1]; pass = $parts[0]; file = "$name.png"
-                sha256 = (Get-FileHash -LiteralPath (Join-Path $Directory "$name.png") -Algorithm SHA256).Hash.ToLowerInvariant() }
+                sha256 = (Get-Sha256 (Join-Path $Directory "$name.png")) }
         }
         $manifest = [ordered]@{ schema = $Schema; source_sha256 = $Of; views = $views }
         Set-Content -LiteralPath (Join-Path $Directory 'views.json') -Value ($manifest | ConvertTo-Json -Depth 6) -Encoding utf8
@@ -299,7 +323,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     if ($stage -eq 'review-views') {
-        $of = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+        $of = (Get-Sha256 $source)
         $manifest = Write-Views $output @('beauty-front', 'beauty-side', 'matcap-front', 'matcap-side') $of 'reference-asset-compiler.review-views.v1'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $receipt) | Out-Null
         Set-Content -LiteralPath $receipt -Value ($manifest | ConvertTo-Json -Depth 6) -Encoding utf8
@@ -314,7 +338,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         # match and only the skeleton is new, exactly as the real stage does.
         $rigged = Join-Path $repoRoot 'fixtures/glb/rigged-figure.glb'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
-        $of = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+        $of = (Get-Sha256 $source)
         # A real rig of a different source is different bytes. Name the scene
         # after the source, so two journeys never deliver one content-addressed
         # file into two revision stacks.
@@ -341,7 +365,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         $rigReceipt = [ordered]@{
             schema = 'reference-asset-compiler.rig-candidate.v1'
             source_sha256 = $of
-            payload_sha256 = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
+            payload_sha256 = (Get-Sha256 $output)
             skeleton_profile = 'ue5_manny_browser'
             gate = [ordered]@{ passed = $true; warnings = @() }
             deformation = [ordered]@{ passed = $true }
@@ -366,8 +390,8 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
 
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
     Copy-Item -LiteralPath $fixture -Destination $output -Force
-    $payloadHash = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
-    $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+    $payloadHash = (Get-Sha256 $output)
+    $sourceHash = (Get-Sha256 $source)
 
     # Each step answers with its own schema, so a journey reading a receipt
     # sees which step produced it rather than one shape for the whole route.
