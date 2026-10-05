@@ -135,7 +135,10 @@ export default function App() {
       observedJobStates.current.set(job.id, job.state)
     }
   }, [studio])
-  useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 3200); return () => window.clearTimeout(timer) }, [toast])
+  // A timer clears only the toast it was started for. A message that arrived
+  // as the previous one expired was otherwise erased by the old timer before
+  // its own effect could cancel it, and never appeared at all.
+  useEffect(() => { if (!toast) return; const shown = toast; const timer = window.setTimeout(() => setToast(current => current === shown ? null : current), 3200); return () => window.clearTimeout(timer) }, [toast])
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
