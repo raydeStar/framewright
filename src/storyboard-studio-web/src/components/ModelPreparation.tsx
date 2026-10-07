@@ -230,6 +230,12 @@ export default function ModelPreparation({ asset, profile, budget, onQueued, onD
           <p className="model-note" data-testid="model-preparation-readiness"
             data-can-run={readiness.canRun ? 'true' : 'false'}>{readiness.detail}</p>
           <BlenderInstallNote install={readiness.blenderInstall} />
+          {readiness.canRun && readiness.preparationKeepsPaint && <p className="model-note"
+            data-testid="model-preparation-keeps-paint">
+            A painted model keeps its paint: after the reduction it is baked back from this
+            original and compared with it in four fixed views. If no budget keeps the look,
+            the preparation stops rather than deliver a smear.
+          </p>}
 
           {readiness.canRun && <div className="model-budget" data-testid="model-preparation-budget-choice"
             data-mode={typing ? 'manual' : 'auto'} data-offer={offer.kind}>

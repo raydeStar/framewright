@@ -213,9 +213,19 @@ public static class ModelFixtures
         throw new FileNotFoundException($"The {fileName} fixture was not found above the test output directory.");
     }
 
-    public static byte[] Mutate(Action<JsonObject> edit)
+    /// <summary>
+    /// The dense prop as somebody painted it: one image, embedded in its own
+    /// binary chunk. The image's bytes are the mesh's own -- the inspector
+    /// counts what a model embeds and never decodes a picture -- which is all
+    /// a route that only re-bakes painted models needs to tell the two apart.
+    /// </summary>
+    public static byte[] TexturedDenseProp() => Mutate(DenseProp(), document =>
+        document["images"] = new JsonArray(new JsonObject { ["bufferView"] = 0, ["mimeType"] = "image/png" }));
+
+    public static byte[] Mutate(Action<JsonObject> edit) => Mutate(AsymmetricBlock(), edit);
+
+    public static byte[] Mutate(byte[] bytes, Action<JsonObject> edit)
     {
-        var bytes = AsymmetricBlock();
         var jsonLength = (int)BitConverter.ToUInt32(bytes, 12);
         var chunkType = BitConverter.ToUInt32(bytes, 16);
         if (chunkType != JsonChunk) throw new InvalidOperationException("The fixture's first chunk is not JSON.");

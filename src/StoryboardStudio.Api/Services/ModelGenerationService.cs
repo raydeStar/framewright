@@ -38,6 +38,7 @@ public sealed class ModelGenerationService(
     public const string BrowserPayloadStage = "browser-payload";
     public const string AdoptMeshStage = "adopt-mesh";
     public const string ReduceMeshStage = "reduce-mesh";
+    public const string RebakeMapsStage = "rebake-maps";
     public const string ReviewViewsStage = "review-views";
     public const string SurveySurfacesStage = "survey-surfaces";
     public const string BakeDetailStage = "bake-detail";
@@ -259,6 +260,27 @@ public sealed class ModelGenerationService(
     private sealed record RouteStepPlan(string Stage, bool ReadsOriginal = false);
 
     /// <summary>
+    /// The preparation route for one model.
+    ///
+    /// A painted model is re-baked after its reduction when the compiler can:
+    /// the collapse moves the UVs with every vertex it keeps, the paint slides
+    /// with them, and no deviation threshold sees it -- a floor brazier kept its
+    /// silhouette within millimetres and lost its iron bands and rivets. The
+    /// compiler bakes the paint back from the adopted original and holds the
+    /// result to the original's fixed views, climbing its budget ladder until a
+    /// rung looks like the original or refusing if none does. A model with no
+    /// textures has nothing to slide, and an older compiler has no such stage;
+    /// both keep the route they always had.
+    /// </summary>
+    private static RouteStepPlan[] PreparationPlanFor(bool rebake)
+    {
+        if (!rebake) return PreparationPlan;
+        var reduction = Array.FindIndex(PreparationPlan, step => step.Stage == ReduceMeshStage);
+        return [.. PreparationPlan.Take(reduction + 1), new(RebakeMapsStage),
+                .. PreparationPlan.Skip(reduction + 1)];
+    }
+
+    /// <summary>
     /// The route for one request. Glazing is only in it when the artist said
     /// this thing has glass, because most props have none and a stage that ran
     /// anyway would have to guess which colour was a window -- turning an
@@ -294,6 +316,7 @@ public sealed class ModelGenerationService(
         [BrowserPayloadStage] = "Preparing the mesh for the browser",
         [AdoptMeshStage] = "Taking the reviewed mesh in, unchanged",
         [ReduceMeshStage] = "Collapsing it to a runtime budget",
+        [RebakeMapsStage] = "Baking its paint back from the original, and comparing the two",
         [ReviewViewsStage] = "Rendering the views a person judges it by",
         [BakeDetailStage] = "Baking the detail its own shape already implies",
         [AssignSurfacesStage] = "Giving each part the surface it should be",
@@ -497,7 +520,8 @@ public sealed class ModelGenerationService(
                 .ToArray(),
             Details: offerDetails ? DetailChoices(capabilities) : null,
             BlenderInstall: capabilities.BlenderInstall,
-            RemeshDecidesBudget: RemeshDecidesBudget(capabilities));
+            RemeshDecidesBudget: RemeshDecidesBudget(capabilities),
+            PreparationKeepsPaint: capabilities.CanRun(RebakeMapsStage));
     }
 
     /// <summary>
@@ -730,11 +754,15 @@ public sealed class ModelGenerationService(
         if (auto && await RefuseAutoAsync(source.DisplayName, inspection.Profile, cancellationToken) is { } refusal)
             return refusal;
 
+        // Re-baked only where there is paint to keep and a compiler that can
+        // keep it. The route is frozen with the request, so a job queued now
+        // runs the same steps after a restart whatever the compiler says then.
+        var plan = PreparationPlanFor(readiness.PreparationKeepsPaint && inspection.Profile.ImageCount > 0);
         var now = timeProvider.GetUtcNow();
         var packet = new FrozenModelRequest(
             FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
             source.RevisionNumber ?? 1,
-            [.. PreparationPlan.Select(step => new RouteStep(
+            [.. plan.Select(step => new RouteStep(
                 step.Stage,
                 readiness.Suffixes?.GetValueOrDefault(step.Stage) ?? ".glb",
                 step.ReadsOriginal))],
@@ -757,7 +785,7 @@ public sealed class ModelGenerationService(
             Progress = 0,
             Phase = "Frozen model queued",
             Backend = "Reference Asset Compiler",
-            AdapterId = string.Join(" then ", PreparationPlan.Select(step => step.Stage)),
+            AdapterId = string.Join(" then ", plan.Select(step => step.Stage)),
             RequestJson = requestJson,
             IdempotencyKey = IdempotencyKey(requestJson, jobId),
             CreatedAt = now,
@@ -905,6 +933,62 @@ public sealed class ModelGenerationService(
     private static double? Number(JsonElement element, string name) =>
         element.TryGetProperty(name, out var found) && found.ValueKind == JsonValueKind.Number
             ? found.GetDouble() : null;
+
+    /// <summary>
+    /// What a re-bake pairs, named by the steps that wrote them: the adoption is
+    /// the dense original the reduction was made from, the reduction's receipt
+    /// binds the two by hash (the compiler refuses a pair it does not name) and
+    /// carries the budget ladder to climb, and the library model is what the
+    /// result has to look like. Every file is one this job wrote or froze.
+    /// </summary>
+    private static Dictionary<string, string> RebakeOptions(IReadOnlyList<StepOutcome> earlier, string original)
+    {
+        var adopted = earlier.LastOrDefault(step => step.Stage == AdoptMeshStage)
+            ?? throw new InvalidOperationException("A re-bake is routed after an adoption.");
+        var reduced = earlier.LastOrDefault(step => step.Stage == ReduceMeshStage)
+            ?? throw new InvalidOperationException("A re-bake is routed after a reduction.");
+        return new Dictionary<string, string>
+        {
+            ["dense"] = adopted.OutputPath,
+            ["reduction-report"] = ReceiptBeside(reduced.OutputPath),
+            ["appearance-reference"] = original,
+        };
+    }
+
+    /// <summary>A step's receipt is named after its output: step-N-stage.json.</summary>
+    private static string ReceiptBeside(string outputPath) =>
+        Path.Combine(Path.GetDirectoryName(outputPath)!, Path.GetFileNameWithoutExtension(outputPath) + ".json");
+
+    /// <summary>
+    /// What the re-bake concluded, in the words a person judging the result
+    /// needs: that the paint was baked back, at what count, and how close the
+    /// fixed views came. Absent when the route did not re-bake.
+    /// </summary>
+    private static string? RebakeSummary(IEnumerable<StepOutcome> steps)
+    {
+        var receipt = steps.LastOrDefault(step => step.Stage == RebakeMapsStage)?.ReceiptJson;
+        if (string.IsNullOrWhiteSpace(receipt)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(receipt);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || Text(root, "status") != "accepted"
+                || !root.TryGetProperty("attempts", out var attempts) || attempts.ValueKind != JsonValueKind.Array
+                || attempts.GetArrayLength() == 0)
+                return null;
+            var last = attempts[attempts.GetArrayLength() - 1];
+            if (!last.TryGetProperty("appearance", out var appearance)
+                || !appearance.TryGetProperty("summary", out var summary)
+                || !summary.TryGetProperty("beauty", out var lit) || !summary.TryGetProperty("albedo", out var unlit))
+                return "its paint baked back from the original";
+            return string.Create(CultureInfo.InvariantCulture,
+                $"its paint baked back from the original and matched to it in four fixed views (lit {Number(lit, "minimum_ssim"):0.000}, unlit {Number(unlit, "minimum_ssim"):0.000})");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// The budget the compiler chose, as the receipt of the stage that chose it
@@ -1432,7 +1516,7 @@ public sealed class ModelGenerationService(
                 run = await compiler.RunStageAsync(
                     stage, steps[index].ReadsOriginal ? sourcePath : stepSource,
                     outputPath, receiptPath, cancellationToken,
-                    StageOptions(stage, packet, job, sourcePath));
+                    StageOptions(stage, packet, job, sourcePath, completed));
                 if (!run.Ok)
                     return await FailAsync(job,
                         run.Error ?? $"The {stage} stage did not produce a result.", cancellationToken);
@@ -1497,7 +1581,8 @@ public sealed class ModelGenerationService(
             // it, rather than arriving as an unrelated model that happens to
             // look similar.
             var stacked = await StackDerivativeAsync(
-                source, imported.Value, packet, payloadPath, sourcePath, cancellationToken, budgetDecision);
+                source, imported.Value, packet, payloadPath, sourcePath, cancellationToken, budgetDecision,
+                RebakeSummary(completed));
             if (stacked.Kind != RepositoryResultKind.Ok)
                 return await RefuseDeliveryAsync(stacked.Error ?? "The derivative could not be recorded against its source.");
             topologyChanged = stacked.Value;
@@ -1568,8 +1653,10 @@ public sealed class ModelGenerationService(
     /// cannot: that it is a browser studio, and what the artist said.
     /// </summary>
     private static IEnumerable<KeyValuePair<string, string>> StageOptions(
-        string stage, FrozenModelRequest packet, JobRecord job, string referencePath) => stage switch
+        string stage, FrozenModelRequest packet, JobRecord job, string referencePath,
+        IReadOnlyList<StepOutcome> earlier) => stage switch
     {
+        RebakeMapsStage => RebakeOptions(earlier, referencePath),
         GeometryStage => new Dictionary<string, string>()
         {
             ["octree-resolution"] = packet.Detail == HeroDetail ? HeroOctreeResolution : BrowserOctreeResolution,
@@ -1720,7 +1807,7 @@ public sealed class ModelGenerationService(
     private async Task<RepositoryResult<bool>> StackDerivativeAsync(
         AssetRecord source, AssetSummary derivative, FrozenModelRequest packet,
         string derivativePath, string sourcePath, CancellationToken cancellationToken,
-        JsonElement? budgetDecision = null)
+        JsonElement? budgetDecision = null, string? rebake = null)
     {
         var before = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(sourcePath, cancellationToken));
         var after = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(derivativePath, cancellationToken));
@@ -1790,6 +1877,9 @@ public sealed class ModelGenerationService(
             if (packet.AutoTriangleBudget)
                 note.Append(", on the compiler's own budget")
                     .Append(DecisionSummary(budgetDecision) is { } said ? $" ({said.TrimEnd('.')})" : "");
+            // A reduction of something painted is only half the story without
+            // this: whether the paint came along, and how closely.
+            if (rebake is not null) note.Append("; ").Append(rebake);
         }
         note.Append('.');
 

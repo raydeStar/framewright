@@ -472,13 +472,19 @@ public sealed record ModelPreparationView(
 /// budget itself, from its name and real size; false for an older compiler,
 /// which is given the detail choice's fixed number instead.
 /// </param>
+/// <param name="PreparationKeepsPaint">
+/// True when the compiler can re-bake a reduced painted model's maps from its
+/// original and hold the result to the original's fixed views. A preparation of
+/// a textured model then routes through it; false for an older compiler, whose
+/// reduction slides painted detail with the UVs.
+/// </param>
 public sealed record ModelGenerationReadiness(
     bool Installed, bool Commissioned, bool CanRun,
     string? CompilerVersion, string? Checkout, string? Blender,
     string[] Missing, string Detail, ModelSizeChoice[]? Sizes = null,
     IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null,
     ModelDetailChoice[]? Details = null, BlenderInstallSummary? BlenderInstall = null,
-    bool RemeshDecidesBudget = false);
+    bool RemeshDecidesBudget = false, bool PreparationKeepsPaint = false);
 
 /// <summary>
 /// How close the camera will get to a generated model, offered in those terms
