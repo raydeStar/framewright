@@ -686,8 +686,6 @@ export default function SceneViewport({ instances, camera, environment, selected
       }
     }
 
-    // A still or a take frame is only true to the scene once every clip it
-    // plays has arrived; until then the rig would be drawn in its rest pose.
     // A still is only true to the scene once every card's picture has arrived;
     // until then the card would render blank.
     const picturesReady = async (next: SceneInstanceSummary[]) => {
@@ -701,6 +699,8 @@ export default function SceneViewport({ instances, camera, environment, selected
       if (disposed) throw new Error('The scene closed before it could be rendered.')
     }
 
+    // A still or a take frame is only true to the scene once every clip it
+    // plays has arrived; until then the rig would be drawn in its rest pose.
     const clipsReady = async (next: SceneInstanceSummary[]) => {
       loadClips(next)
       const bound = next.filter(instance => instance.clip)

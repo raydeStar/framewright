@@ -25,6 +25,28 @@
   `--triangle-budget auto` and the model's name (a hero also `--role hero`), so
   the painter paints the final mesh. Older compilers still get 20,000 / 80,000.
 
+### Scene setup
+- **Stand-ins by hand.** The scene inspector has a stand-in kit: a person, a
+  box, a cylinder, a sphere, a floor, and a wall, placed on the floor where
+  the camera is looking. A stand-in's size is edited in metres. Stand-ins
+  previously came only from an agent's blockout plan.
+- **A posable person.** The person stand-in is a simple jointed figure at a
+  chosen height, in one of nine poses named like the Sketch blocking kit's.
+  Every pose rests on the floor. The pose is saved with the scene, carried
+  in working packages, and frozen into scene stills.
+- **Image cards.** Any library picture can stand in the scene as an upright
+  card in the picture's own shape, unlit, with transparency kept for
+  cutouts. A card cites the picture by id and content hash, a still waits
+  for the picture before capturing, and the library counts the card as a use.
+- **Handles in the view.** A selected object shows move, rotate, and scale
+  handles, with snapping, Drop to floor, and Focus. Handles edit the working
+  scene; Save is still the only write. Dragging empty space still orbits.
+- **Look through the shot camera.** Shot setup can show the view from the
+  shot camera with the delivery frame outlined. Orbiting there moves only the
+  shot camera, and a narrow stage widens its view so the whole frame fits.
+- Two schema migrations (v22 and v23) add one nullable column each to scene
+  objects. Both back up the database first.
+
 ### Library review
 - **Approve or send back any asset.** Images, models, video and audio each
   carry a per-revision decision (Pending, Approved, Changes requested) with a
@@ -47,6 +69,11 @@
   [Shipping to a game](docs/GAME_BUNDLE.md).
 
 ### Fixes
+- **Stand-ins of one kind no longer share a colour.** Stand-in colours came
+  from a running sum of the name, which put "Box 1" and "Box 2" a degree
+  apart. A mixed hash now spreads them across the wheel.
+- **The scene toolbar no longer covers the stage on a tablet.** On narrow
+  screens the toolbar sat 12 pixels over the bottom of the 3D view.
 - **Confirmations are no longer lost.** A message that arrived just as the
   previous one expired could be cleared with it and never appear, such as
   "... queued. It keeps going if you leave this screen." right after an

@@ -721,6 +721,8 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                       aria-label={`Stand-in size ${['width', 'height', 'depth'][index]}`}
                       value={selected.placeholder!.size[index]}
                       onChange={event => {
+                        // An emptied field is mid-edit, not a request for the smallest size.
+                        if (event.target.value.trim() === '') return
                         const value = Number(event.target.value)
                         editInstance(selected.id, item => {
                           if (!item.placeholder) return item

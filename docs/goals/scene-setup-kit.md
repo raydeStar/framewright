@@ -3,7 +3,7 @@
 **Project:** Framewright
 **Created:** 2026-10-08
 **Branch:** `feat/scene-setup-kit` from `main` at `94145b20abf510c056acf61607056c7ecd66e638`
-**Overall status:** IN_PROGRESS (K00-K05 verified; full gate pending)
+**Overall status:** VERIFIED for K00-K05 on the branch; not pushed, not released, no human visual acceptance recorded
 
 ## 1. Outcome
 
@@ -105,3 +105,29 @@ and render-path evidence before it is called verified.
 | K03 | VERIFIED | D: `unit/sceneFraming.test.ts` proves the stage and a render cover the same picture, including when a 16:9 frame is wider than a portrait stage. A: look-through journey on desktop and tablet shows a delivery-shaped frame that fits the stage's long side, orbits only the shot camera with the scene left saved and its inspection camera unchanged, returns to the inspection view, and renders a still whose stored camera equals the framed one. Shot-camera fields are rounded to field precision. Sabotage: routing orbit to the inspection camera fails the journey. Not proven: a pixel comparison between the framed stage and the rendered still; the shared geometry is unit-tested instead. |
 | K04 | VERIFIED | Schema: migration `20261008-person-stand-in-pose-v22` adds nullable `SceneInstances.PlaceholderPose`. D: `SceneStandInTests` (pose survives restart and a working-package import with fresh IDs, unknown poses and poses on other shapes refused with the version unchanged, a still freezes the pose it was rendered with after the pose changes), `SchemaMigrationTests.PersonStandInV22...` (an isolated v21 database upgrades, keeps its box stand-in, writes a pre-migration backup, records v22, and takes a posed person), `unit/scenePoses.test.ts` (front-end pose list matches `SceneService.SupportedPoses`). A: person journey on desktop and tablet drops every pose to the same resting height, saves height and pose, reloads three posed figures. Full backend suite 379/379. Non-person stand-ins serialise without a `pose` field, so their snapshots are byte-identical to before. Sabotage: not storing the pose fails three backend tests; not sending it fails the journey. Also fixed: stand-in colours came from a hash that put `Box 1` and `Box 2` a degree apart. Not done: the agent blockout tool's shape list still omits Person, and blockout plans cannot carry a pose; agent-built people stand in Neutral. |
 | K05 | VERIFIED | Schema: migration `20261008-image-card-stand-in-v23` adds nullable `SceneInstances.PlaceholderImageAssetId`. A Card stand-in cites a project Image asset by id; the service describes it with URL and content hash, so stills freeze the exact picture. D: `SceneImageCardTests` (card survives restart; working-package import remaps the picture to the new project's copy with the same hash; library usage counts the card; a missing picture, a model, another project's image, an unknown id, or a picture on a box is refused with the version unchanged), `SchemaMigrationTests.ImageCardV23...`, unit tests for card shape and aspect-keeping resize. A: image-card journey on desktop and tablet adds a 2:1 half-transparent picture, keeps its shape on resize, samples canvas pixels showing the opaque half red and unlit and the clear half not filled, saves and reopens it, and proves a still waits for a held picture instead of freezing a blank card. Full backend suite 382/382. Sabotage: dropping the package remap fails the package test; skipping the picture wait fails the journey. Not done: background removal for cutouts needs a provider route and stays deferred; cards are unlit by design. |
+
+### Full gate record - 2026-10-08
+
+`scripts/verify.ps1` passed in one invocation on Windows at `e42409e` plus the
+README, changelog, and handoff edits: npm ci and audit (0 vulnerabilities),
+frontend checks (40 unit tests) and build, public release audit, locked
+restore, warning-free Release rebuild, 382 backend tests, backup, launcher,
+Docker, setup, voice-PID, and release-candidate script tests, voice and YuE2
+contract tests, NuGet vulnerability inspection (none), and 198 Playwright
+journeys with 6 intentional tablet exclusions. The known Three.js chunk-size
+advisory remains. Two follow-ups landed after the gate and were checked with
+frontend `check` and the ten scene-setup journeys: a comment moved back above
+the clip wait, and an emptied size field no longer snaps a stand-in to 0.01 m.
+
+Not run or not claimed: no provider, GPU, or compiler work; no push or
+release; no packaged-runtime smoke (no runtime dependency changed); no
+physical touch, stylus, or real-iPad check; no human acceptance of how the
+figure, cards, or handles look. AI screenshot inspection is not artistic
+acceptance.
+
+### Next candidates
+
+- Let the agent blockout tool propose people with poses and image cards.
+- Background removal for cutouts, as a separately gated provider route.
+- A pixel comparison between the framed stage and a rendered still.
+

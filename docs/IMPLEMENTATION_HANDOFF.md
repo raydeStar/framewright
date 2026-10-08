@@ -56,6 +56,24 @@ first hour usable without a harness:
 - The SPA fallback sends `Cache-Control: no-cache`, so an update no longer
   opens on a stale `index.html`.
 
+## Scene setup kit (2026-10-08)
+
+Scenes can now be staged by hand before anything is generated. The inspector
+has a stand-in kit (person, box, cylinder, sphere, floor, wall) and an image
+card picker. A person stand-in is a jointed figure with nine pose presets; a
+card shows one project image, unlit, with transparency kept for cutouts.
+Selected objects get move, rotate, and scale handles that edit working state
+only, plus snap, Drop to floor, and Focus. Shot setup can look through the shot
+camera with the delivery frame outlined; orbiting there moves only the shot
+camera. Migrations v22 and v23 add `SceneInstances.PlaceholderPose` and
+`SceneInstances.PlaceholderImageAssetId`; package import remaps the card's
+image. Non-person, non-card stand-ins serialise without the new fields, so
+their frozen snapshots are unchanged. The ideas were borrowed from ArtCraft's
+scene tools; no ArtCraft code is used, because its licence forbids that use.
+Evidence, sabotage checks, and limits are in
+[the goal ledger](goals/scene-setup-kit.md). Not covered: background removal,
+agent-proposed poses or cards, and human acceptance of how the figure looks.
+
 ## Scene local lighting (2026-09-22)
 
 Saved scenes now support named local lights, lighting colors, exposure, filmic
@@ -156,7 +174,7 @@ The UI uses five persistent rail workspaces plus a focused authority workspace:
 - **Assets:** one searchable media pool for images, music/audio, video takes, 3D models, and authority canon; manual collections, smart views, editable metadata, non-destructive archive, and explicit shot placements; image creation enters the existing sketch/approval route and music enters the existing separate audio workflow. A self-contained GLB imports through its own validated route and opens an isolated model inspection surface with an orbiting camera, geometry and material statistics, and scene-space dimensions measured from the stored bytes; the supported subset and its resource ceilings are recorded in `docs/3D_CONVENTIONS.md`. A model is a reusable library record: it carries a revision stack where each revision keeps its own file, measurements, and materials, plus editable name, tags, notes, provenance, and a non-destructive archive, all of which survive a restart. A revision must be the same kind of asset it revises. Models are not shot placements yet.
 - **Authority:** focused image/version stack and inspector entered from Board or Assets; it reuses the same image lab as shots and assets, but opens with the selected immutable revision as the explicit source. The source image is full-strength and always included; drawing is an optional edit layer rather than a blank prerequisite.
 - **Shot:** image/sketch canvas, poseable blocking layer, shot inspector, exact authority packet, comments, markup, generation actions.
-- **Scene:** small editable scenes of distinct instances, each pinned to an exact model revision, with an orbit camera and basic key/ambient lighting. Two instances of one model move independently; placement is numeric and explicit, and dragging orbits the camera rather than moving anything. A scene saves as one unit against the version it was read at, so a stale save is refused instead of overwriting newer work. An instance whose model is unavailable draws as a placeholder and keeps its identity, and removing an instance never touches the library asset.
+- **Scene:** small editable scenes of distinct instances, each pinned to an exact model revision or drawn as explicit stand-in geometry (including a posable person and image cards), with an orbit camera and basic key/ambient lighting. Two instances of one model move independently; placement is numeric or by handles on the selected object, and dragging empty space orbits the camera rather than moving anything. A scene saves as one unit against the version it was read at, so a stale save is refused instead of overwriting newer work. An instance whose model is unavailable draws as a placeholder and keeps its identity, and removing an instance never touches the library asset.
 - **Model generation:** a reference image can be frozen into a model-generation request and queued as durable owned work that survives leaving the screen. The Reference Asset Compiler does the work behind one typed gateway; a missing capability blocks before submission, an uncommissioned route refuses while still reporting what it could do, an interrupted run is reconciled or rerun out loud, a stale source is labelled rather than rejected, and a duplicate delivery produces no second model. Generated models enter the library through the same validated gate imported ones do.
 - **Motion:** a clip is read from a model's own file and bound to a scene object, with that object's own trim, speed, loop, playback position, and root-motion policy, so two characters can share one clip and play it differently. A mismatched skeleton or an impossible trim is refused before anything plays, and root motion reaches the scene exactly once. A rigid part turns about a pivot declared in its own space, with no skeleton. Playback draws; only a save writes.
 - **Rigs:** a model's skeleton, bind data, and skin weights are read from the stored bytes. A rig is called animation-ready only when it matches the one documented humanoid profile and passes every check; a skeleton named anything else is an unknown skeleton, and a static prop simply has no skeleton. A rig can be posed for inspection, which is calculated from the file and stored nowhere.
