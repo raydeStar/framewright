@@ -776,6 +776,8 @@ public sealed class SceneInstanceRecord
     public double PlaceholderSizeZ { get; set; }
     /// <summary>A Person stand-in's pose preset. Null for every other shape.</summary>
     public string? PlaceholderPose { get; set; }
+    /// <summary>The library image a Card stand-in shows. Null for every other shape.</summary>
+    public Guid? PlaceholderImageAssetId { get; set; }
     /// <summary>What this object is for, when a blockout plan put it here.</summary>
     public string? Role { get; set; }
     /// <summary>The construction plan this object came from, so its reasoning stays inspectable.</summary>

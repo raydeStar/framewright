@@ -3,7 +3,7 @@ import { Box, Check, Copy, Image, LoaderCircle, Maximize2, MessageCirclePlus, Mi
 import { studioApi } from '../api'
 import SceneLightingControls from './SceneLightingControls'
 import ConfirmDialog from './ConfirmDialog'
-import { STAND_IN_KIT, STAND_IN_MAX_SIZE, STAND_IN_MIN_SIZE, createStandIn, resizeStandIn, type StandInKind } from '../sceneStandIns'
+import { STAND_IN_KIT, STAND_IN_MAX_SIZE, STAND_IN_MIN_SIZE, createImageCard, createStandIn, resizeStandIn, type StandInKind } from '../sceneStandIns'
 import { PERSON_POSES } from '../scenePoses'
 import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
@@ -223,6 +223,15 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   const addStandIn = (kind: StandInKind) => {
     if (!scene) return
     const instance = createStandIn(kind, scene.instances, scene.camera.target)
+    edit(current => ({ ...current, instances: [...current.instances, instance] }))
+    setSelectedId(instance.id)
+  }
+
+  // A library picture as an upright card: a backdrop, or a cutout when the
+  // picture has transparency. It cites the image; nothing is copied.
+  const addImageCard = (image: AssetSummary) => {
+    if (!scene) return
+    const instance = createImageCard(image, scene.camera.target)
     edit(current => ({ ...current, instances: [...current.instances, instance] }))
     setSelectedId(instance.id)
   }
@@ -643,7 +652,9 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                     className={instance.id === selectedId ? 'active' : ''}
                     onClick={() => setSelectedId(instance.id)}>
                     <strong>{instance.name}</strong>
-                    <small>{instance.placeholder
+                    <small>{instance.placeholder?.shape === 'Card'
+                      ? 'Image card'
+                      : instance.placeholder
                       ? `${instance.placeholder.shape} stand-in`
                       : `${instance.assetName} · v${instance.revisionNumber}${instance.available ? '' : ' · unavailable'}`}
                       {instance.clip ? ` · ${instance.clip.clipName}` : instance.motion ? ' · turns on a pivot' : ''}</small>
@@ -661,6 +672,13 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                 </div>
               </div>
               <div className="scene-add">
+                <label>Add image card<select aria-label="Add image card" value="" disabled={busy || references.length === 0}
+                  onChange={event => { const image = references.find(item => item.id === event.target.value); if (image) addImageCard(image) }}>
+                  <option value="">{references.length === 0 ? 'No pictures in the library yet' : 'Choose a picture…'}</option>
+                  {references.map(image => <option key={image.id} value={image.id}>{image.displayName}</option>)}
+                </select></label>
+              </div>
+              <div className="scene-add">
                 {/* Editing the scene on screen while another is being opened or
                     created would be editing one that is about to be replaced. */}
                 <label>Add model<select aria-label="Add model to scene" value="" disabled={busy || models.length === 0}
@@ -675,7 +693,9 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
               <h2>Placement</h2>
               <label>Name<input aria-label="Object name" value={selected.name} maxLength={120}
                 onChange={event => editInstance(selected.id, item => ({ ...item, name: event.target.value }))} /></label>
-              <p className="model-note">{selected.placeholder
+              <p className="model-note">{selected.placeholder?.shape === 'Card'
+                ? `Image card · ${references.find(image => image.id === selected.placeholder!.imageAssetId)?.displayName ?? 'picture not in the library list'}${selected.placeholder.imageUrl ? '' : ' · picture unavailable, shown blank'}`
+                : selected.placeholder
                 ? `${selected.placeholder.shape} stand-in · ${selected.placeholder.size.map(value => value.toFixed(2)).join(' × ')} m${selected.role ? ` · planned as ${selected.role}` : ''}`
                 : `${selected.assetName} · revision ${selected.revisionNumber}${selected.available ? '' : ' · model unavailable, shown as a placeholder'}`}</p>
 
@@ -693,9 +713,9 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
               </div>}
 
               {selected.placeholder && <div className="scene-vector" data-testid="scene-standin-size">
-                <span>{selected.placeholder.shape === 'Sphere' ? 'Diameter (metres)' : selected.placeholder.shape === 'Cylinder' ? 'Diameter and height (metres)' : selected.placeholder.shape === 'Person' ? 'Height (metres)' : 'Size (metres)'}</span>
+                <span>{selected.placeholder.shape === 'Sphere' ? 'Diameter (metres)' : selected.placeholder.shape === 'Cylinder' ? 'Diameter and height (metres)' : selected.placeholder.shape === 'Person' ? 'Height (metres)' : selected.placeholder.shape === 'Card' ? 'Width and height, keeping the picture\'s shape (metres)' : 'Size (metres)'}</span>
                 <div>
-                  {(selected.placeholder.shape === 'Sphere' ? [0] : selected.placeholder.shape === 'Cylinder' ? [0, 1] : selected.placeholder.shape === 'Person' ? [1] : [0, 1, 2]).map(index => <label key={index}>
+                  {(selected.placeholder.shape === 'Sphere' ? [0] : selected.placeholder.shape === 'Cylinder' ? [0, 1] : selected.placeholder.shape === 'Person' ? [1] : selected.placeholder.shape === 'Card' ? [0, 1] : [0, 1, 2]).map(index => <label key={index}>
                     {selected.placeholder!.shape === 'Sphere' ? 'Ø' : selected.placeholder!.shape === 'Cylinder' ? (index === 0 ? 'Ø' : 'H') : ['W', 'H', 'D'][index]}
                     <input type="number" step={0.05} min={STAND_IN_MIN_SIZE} max={STAND_IN_MAX_SIZE}
                       aria-label={`Stand-in size ${['width', 'height', 'depth'][index]}`}

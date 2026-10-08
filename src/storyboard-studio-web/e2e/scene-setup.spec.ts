@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { deflateSync } from 'node:zlib'
 
 /**
  * Scene setup kit (docs/goals/scene-setup-kit.md): blocking a scene out by hand
@@ -337,6 +338,107 @@ test('a person stand-in takes every pose on the floor, keeps its pose and height
   await page.screenshot({ path: testInfo.outputPath('scene-people.png'), fullPage: true })
   verifyConsole()
 })
+
+test('an image card shows a library picture as a cutout, survives a reload, and a still waits for its picture', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  const label = testInfo.project.name
+  await page.goto('/')
+  const uploaded = await page.request.post('/api/assets/images', {
+    headers: { 'X-Storyboard-Studio': '1' },
+    multipart: { file: { name: `cutout-${label}.png`, mimeType: 'image/png', buffer: halfCutoutPng(64, 32, label) } },
+  })
+  expect(uploaded.ok()).toBe(true)
+  const picture = await uploaded.json() as { id: string; displayName: string; contentHash: string }
+  const studio = await (await page.request.get('/api/studio')).json() as { shots: { id: string }[] }
+
+  const scene = await newScene(page)
+  const objects = page.getByTestId('scene-objects')
+  await objects.getByLabel('Add image card').selectOption({ label: picture.displayName })
+  const placement = page.getByTestId('scene-placement')
+  await expect(placement.getByLabel('Object name')).toHaveValue(picture.displayName)
+  await expect(objects.getByRole('button', { name: new RegExp(picture.displayName) })).toContainText('Image card')
+  // The card takes the picture's 2:1 shape and keeps it when resized.
+  await expect(placement.getByLabel('Stand-in size width')).toHaveValue('4')
+  await placement.getByLabel('Stand-in size height').fill('3')
+  await expect(placement.getByLabel('Stand-in size width')).toHaveValue('6')
+  const stage = page.getByTestId('scene-stage')
+  await expect(stage).toHaveAttribute('data-cards-ready', '1')
+
+  // Frame the card, then let go of it so the handles are out of the way.
+  await page.getByRole('group', { name: 'Object handles' }).getByRole('button', { name: 'Focus' }).click()
+  const box = (await stage.boundingBox())!
+  await page.mouse.click(box.x + 8, box.y + 8)
+  await expect(page.getByTestId('scene-placement')).toHaveCount(0)
+  const pixel = (x: number, y: number) => page.evaluate(([fx, fy]) => {
+    const canvas = document.querySelector('.scene-stage canvas') as HTMLCanvasElement
+    const copy = document.createElement('canvas'); copy.width = canvas.width; copy.height = canvas.height
+    const context = copy.getContext('2d')!; context.drawImage(canvas, 0, 0)
+    return [...context.getImageData(Math.floor(canvas.width * fx), Math.floor(canvas.height * fy), 1, 1).data]
+  }, [x, y])
+  // The opaque half shows the picture's red, unlit; the clear half shows the
+  // scene behind it, not a filled card.
+  await expect.poll(async () => (await pixel(0.56, 0.5)).slice(0, 3)).toEqual([255, 0, 0])
+  const clear = await pixel(0.44, 0.5)
+  expect(clear[0]).toBeLessThan(100)
+  await page.screenshot({ path: testInfo.outputPath('scene-image-card.png'), fullPage: true })
+
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+  const saved = await readScene(page, scene.id)
+  const placeholder = saved.instances[0].placeholder as { shape: string; size: number[]; imageAssetId: string; imageUrl: string; imageContentHash: string }
+  expect(placeholder).toMatchObject({ shape: 'Card', size: [6, 3, 0.01], imageAssetId: picture.id, imageContentHash: picture.contentHash })
+
+  // Reopen with the picture held back. A still asked for now waits for it
+  // rather than freezing a blank card.
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route(`**/api/assets/${picture.id}/content`, async route => { const response = await route.fetch(); await held; await route.fulfill({ response }) })
+  const stills: string[] = []
+  page.on('request', request => { if (request.method() === 'POST' && request.url().includes('/shot-stills')) stills.push(request.url()) })
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await expect(page.getByLabel('Scene name', { exact: true })).toHaveValue(scene.name)
+  await expect(stage).toHaveAttribute('data-cards-ready', '0')
+  const shotSetup = page.getByTestId('scene-shot')
+  await shotSetup.getByLabel('Scene shot').selectOption(studio.shots[0].id)
+  await shotSetup.getByRole('button', { name: 'Render still for review' }).click()
+  await page.waitForTimeout(1000)
+  expect(stills).toEqual([])
+  release()
+  await expect(page.getByTestId('review-workspace')).toBeVisible()
+  expect(stills).toHaveLength(1)
+  await page.unroute(`**/api/assets/${picture.id}/content`)
+  verifyConsole()
+})
+
+/** A PNG whose left half is fully transparent and right half opaque red, unique to this run. */
+function halfCutoutPng(width: number, height: number, label: string) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0 })
+  const crc = (bytes: Buffer) => { let c = 0xffffffff; for (const byte of bytes) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0 }
+  const chunk = (type: string, data: Buffer) => {
+    const length = Buffer.alloc(4); length.writeUInt32BE(data.length)
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+    const check = Buffer.alloc(4); check.writeUInt32BE(crc(body))
+    return Buffer.concat([length, body, check])
+  }
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4)
+  header[8] = 8; header[9] = 6 // 8-bit RGBA
+  const rows = Buffer.alloc((width * 4 + 1) * height)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = y * (width * 4 + 1) + 1 + x * 4
+      if (x >= width / 2) { rows[at] = 255; rows[at + 3] = 255 }
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk('IHDR', header),
+    chunk('tEXt', Buffer.from(`Comment\0scene-setup-${label}`, 'latin1')),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+}
 
 async function newScene(page: Page) {
   await page.getByRole('button', { name: 'Scene', exact: true }).click()

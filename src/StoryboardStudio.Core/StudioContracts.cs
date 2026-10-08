@@ -113,14 +113,18 @@ public sealed record SceneEnvironmentSummary(double KeyIntensity, double KeyYaw,
 /// transform, so replacing it later does not disturb anything around it.
 /// </summary>
 /// <summary>
-/// Simple stand-in geometry. A Person stand-in also carries a pose preset;
-/// every other shape has none.
-/// The pose is left out of JSON when absent, so every other shape serialises
-/// exactly as it did before people existed and frozen snapshots of those
-/// scenes are unchanged.
+/// Simple stand-in geometry. A Person stand-in also carries a pose preset,
+/// and a Card shows one library image; every other shape has neither.
+/// Absent fields are left out of JSON, so every other shape serialises exactly
+/// as it did before people and cards existed and frozen snapshots of those
+/// scenes are unchanged. A card's picture URL and content hash are the
+/// service's description of the image; a save sends only its asset id.
 /// </summary>
 public sealed record ScenePlaceholderSummary(string Shape, double[] Size,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Pose = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Pose = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ImageAssetId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ImageUrl = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ImageContentHash = null);
 
 /// <summary>
 /// One placed object. It is either pinned to an exact model revision or drawn

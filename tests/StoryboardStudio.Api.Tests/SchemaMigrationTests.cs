@@ -381,4 +381,76 @@ public sealed class SchemaMigrationTests
             if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task ImageCardV23UpgradesAWorkstationWhoseScenesCannotHoldCards()
+    {
+        var dataRoot = Path.Combine(Path.GetTempPath(), "framewright-schema-card", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataRoot);
+        var databasePath = Path.Combine(dataRoot, "test.db");
+        var camera = new SceneCameraSummary(0.9, 0.42, 6, [0, 0.5, 0], 38);
+        var lighting = new SceneEnvironmentSummary(2.2, 0.8, 0.9, 1.4);
+        var porter = new ScenePlaceholderSummary("Person", [0.5, 1.75, 0.3], "Seated");
+
+        try
+        {
+            Guid sceneId;
+            var personId = Guid.NewGuid();
+            using (var baselineFactory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var baselineClient = baselineFactory.CreateClient())
+            {
+                var created = await baselineClient.PostAsJsonAsync("/api/scenes", new { name = "Before cards" });
+                created.EnsureSuccessStatusCode();
+                sceneId = (await created.Content.ReadFromJsonAsync<SceneSummary>())!.Id;
+                (await baselineClient.PutAsJsonAsync($"/api/scenes/{sceneId}", new SaveSceneRequest(1, "Before cards", camera, lighting,
+                    [new SaveSceneInstanceRequest(personId, null, "Porter", [0, 0.875, 0], [0, 0, 0], [1, 1, 1], porter)])))
+                    .EnsureSuccessStatusCode();
+            }
+
+            // Reproduce a workstation that recorded v22 and never saw v23.
+            await using (var legacy = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+            {
+                await legacy.OpenAsync();
+                await using var downgrade = legacy.CreateCommand();
+                downgrade.CommandText = """
+                    DELETE FROM "SchemaMigrations" WHERE "Id" = '20261008-image-card-stand-in-v23';
+                    ALTER TABLE "SceneInstances" DROP COLUMN "PlaceholderImageAssetId";
+                    """;
+                await downgrade.ExecuteNonQueryAsync();
+            }
+
+            using (var upgradedFactory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var upgradedClient = upgradedFactory.CreateClient())
+            {
+                Assert.Equal(HttpStatusCode.OK, (await upgradedClient.GetAsync("/health/ready")).StatusCode);
+                // The person from before keeps its pose and shows no picture.
+                var scene = (await upgradedClient.GetFromJsonAsync<SceneSummary>($"/api/scenes/{sceneId}"))!;
+                var existing = Assert.Single(scene.Instances);
+                Assert.Equal("Seated", existing.Placeholder!.Pose);
+                Assert.Null(existing.Placeholder.ImageAssetId);
+                // And the upgraded scene takes a card at once.
+                var image = await AssetUploads.ImageAsync(upgradedClient, "after-cards.png");
+                var saved = await upgradedClient.PutAsJsonAsync($"/api/scenes/{sceneId}", new SaveSceneRequest(scene.Version, scene.Name, camera, lighting,
+                [
+                    new SaveSceneInstanceRequest(personId, null, "Porter", [0, 0.875, 0], [0, 0, 0], [1, 1, 1], porter),
+                    new SaveSceneInstanceRequest(Guid.NewGuid(), null, "Backdrop", [0, 1, -3], [0, 0, 0], [1, 1, 1],
+                        new ScenePlaceholderSummary("Card", [4, 2, 0.01], ImageAssetId: image.Id)),
+                ]));
+                Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+                var reopened = (await saved.Content.ReadFromJsonAsync<SceneSummary>())!;
+                Assert.Equal(image.Id, Assert.Single(reopened.Instances, x => x.Name == "Backdrop").Placeholder!.ImageAssetId);
+            }
+
+            await using var verified = new SqliteConnection($"Data Source={databasePath};Mode=ReadOnly;Pooling=False");
+            await verified.OpenAsync();
+            await using var ledger = verified.CreateCommand();
+            ledger.CommandText = "SELECT COUNT(*) FROM \"SchemaMigrations\" WHERE \"Id\" = '20261008-image-card-stand-in-v23';";
+            Assert.Equal(1L, (long)(await ledger.ExecuteScalarAsync() ?? 0L));
+            Assert.NotEmpty(Directory.EnumerateFiles(dataRoot, "*image-card-stand-in-v23*", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
+        }
+    }
 }

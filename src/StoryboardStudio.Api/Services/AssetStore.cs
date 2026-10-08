@@ -605,6 +605,12 @@ public sealed class AssetStore
             .Join(db.Scenes.AsNoTracking(), instance => instance.SceneId, scene => scene.Id,
                 (instance, scene) => new { AssetId = instance.AssetId!.Value, Name = scene.Name })
             .ToArrayAsync(cancellationToken);
+        // A picture is used by an image card in a scene, the same way a model is.
+        var cards = await db.SceneInstances.AsNoTracking()
+            .Where(instance => instance.PlaceholderImageAssetId != null)
+            .Join(db.Scenes.AsNoTracking(), instance => instance.SceneId, scene => scene.Id,
+                (instance, scene) => new { AssetId = instance.PlaceholderImageAssetId!.Value, Name = scene.Name })
+            .ToArrayAsync(cancellationToken);
         var clips = await db.SceneInstances.AsNoTracking()
             .Where(instance => instance.ClipAssetId != null)
             .Join(db.Scenes.AsNoTracking(), instance => instance.SceneId, scene => scene.Id,
@@ -619,7 +625,7 @@ public sealed class AssetStore
         }
 
         foreach (var row in placements) { var tally = For(row.AssetId); tally.Shots++; tally.Where.Add(row.Name); }
-        foreach (var row in instances) { var tally = For(row.AssetId); tally.Scenes++; tally.Where.Add(row.Name); }
+        foreach (var row in instances.Concat(cards)) { var tally = For(row.AssetId); tally.Scenes++; tally.Where.Add(row.Name); }
         foreach (var row in clips) { var tally = For(row.AssetId); tally.Clips++; tally.Where.Add(row.Name); }
 
         return [.. used.Select(entry => new AssetUsageSummary(

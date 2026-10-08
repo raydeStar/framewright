@@ -31,6 +31,46 @@ export const STAND_IN_KIT: readonly StandInKind[] = [
 export const STAND_IN_MIN_SIZE = 0.01
 export const STAND_IN_MAX_SIZE = 1000
 
+/** A card's default height: a backdrop reads at room scale, and a cutout is resized from there. */
+export const IMAGE_CARD_HEIGHT = 2
+
+/**
+ * A library picture as an upright card, the picture's own shape, standing on
+ * the floor a little behind where the camera is looking. Unknown picture
+ * dimensions give a square card rather than a guess.
+ */
+export function createImageCard(
+  image: { id: string; displayName: string; contentUrl: string; width?: number; height?: number },
+  lookingAt: readonly number[],
+  id: string = crypto.randomUUID(),
+): SceneInstanceSummary {
+  const aspect = image.width && image.height ? image.width / image.height : 1
+  const height = IMAGE_CARD_HEIGHT
+  const width = round(Math.min(STAND_IN_MAX_SIZE, Math.max(STAND_IN_MIN_SIZE, height * aspect)))
+  const size = [width, height, 0.01]
+  const x = Number.isFinite(lookingAt[0]) ? round(lookingAt[0]) : 0
+  const z = Number.isFinite(lookingAt[2]) ? round(lookingAt[2]) : 0
+  return {
+    id,
+    assetId: null,
+    name: image.displayName.slice(0, 120) || 'Image card',
+    position: [x, height / 2, round(z - 1.5)],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    assetName: 'Placeholder',
+    revisionNumber: 1,
+    contentUrl: null,
+    available: true,
+    archived: false,
+    dimensions: size,
+    placeholder: { shape: 'Card', size, imageAssetId: image.id, imageUrl: image.contentUrl },
+    role: null,
+    planId: null,
+    clip: null,
+    motion: null,
+  }
+}
+
 /** The next unused "Box 3"-style name, so two stand-ins are never confused in the object list. */
 export function nextStandInName(label: string, instances: readonly Pick<SceneInstanceSummary, 'name'>[]) {
   const pattern = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (\\d+)$`)
@@ -93,6 +133,13 @@ export function resizeStandIn(placeholder: ScenePlaceholderSummary, axis: 0 | 1 
   const clamped = Math.min(STAND_IN_MAX_SIZE, Math.max(STAND_IN_MIN_SIZE, value))
   // A sphere has one size; the viewport draws its largest axis, so all three move together.
   if (placeholder.shape === 'Sphere') return { ...placeholder, size: [clamped, clamped, clamped] }
+  // A card keeps its picture's shape: changing one side changes the other.
+  if (placeholder.shape === 'Card' && axis !== 2) {
+    const [width, height] = placeholder.size
+    const ratio = width > 0 && height > 0 ? width / height : 1
+    const fit = (value: number) => Math.min(STAND_IN_MAX_SIZE, Math.max(STAND_IN_MIN_SIZE, value))
+    return { ...placeholder, size: axis === 0 ? [clamped, fit(clamped / ratio), placeholder.size[2]] : [fit(clamped * ratio), clamped, placeholder.size[2]] }
+  }
   return { ...placeholder, size: placeholder.size.map((existing, index) => index === axis ? clamped : existing) }
 }
 

@@ -155,6 +155,7 @@ public sealed class SceneDirectionService(StudioDbContext db, IProjectScope proj
                         shape = selected.PlaceholderShape,
                         size = new[] { selected.PlaceholderSizeX, selected.PlaceholderSizeY, selected.PlaceholderSizeZ },
                         pose = selected.PlaceholderShape == "Person" ? selected.PlaceholderPose ?? "Neutral" : null,
+                        imageAssetId = selected.PlaceholderShape == "Card" ? selected.PlaceholderImageAssetId : null,
                     },
                     role = selected.Role,
                     revisionNumber = assetNames.FirstOrDefault(x => x.Id == selected.AssetId)?.RevisionNumber ?? 1,

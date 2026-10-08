@@ -31,6 +31,7 @@ public static class StudioDatabaseInitializer
     private const string SampleProjectMigration = "20260923-sample-project-flag-v20";
     private const string AssetReviewMigration = "20261004-asset-review-decisions-v21";
     private const string PersonStandInMigration = "20261008-person-stand-in-pose-v22";
+    private const string ImageCardMigration = "20261008-image-card-stand-in-v23";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -319,6 +320,16 @@ public static class StudioDatabaseInitializer
                 () => EnsureColumnAsync(db, "SceneInstances", "PlaceholderPose", "TEXT NULL", cancellationToken), cancellationToken);
         }
 
+        // Image cards: a stand-in that shows a library picture. No existing
+        // object is a card, so the new reference starts empty everywhere.
+        if (!await HasMigrationAsync(db, ImageCardMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, ImageCardMigration, cancellationToken);
+            await RunMigrationAsync(db, ImageCardMigration,
+                () => EnsureColumnAsync(db, "SceneInstances", "PlaceholderImageAssetId", "TEXT NULL", cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -469,6 +480,7 @@ public static class StudioDatabaseInitializer
             SampleProjectMigration => "project-sample-flag-set-only-when-a-new-database-seeds-the-demo",
             AssetReviewMigration => "per-revision-review-decision-with-answered-send-back-and-review-notes-on-every-asset-kind",
             PersonStandInMigration => "person-stand-in-pose-preset-on-scene-instances",
+            ImageCardMigration => "card-stand-in-showing-a-project-image-asset-on-scene-instances",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

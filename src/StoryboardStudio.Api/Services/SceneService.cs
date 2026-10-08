@@ -17,7 +17,7 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
 {
     private const int MaxInstances = 200;
     /// <summary>Stand-in geometry the viewport can draw without loading anything.</summary>
-    internal static readonly string[] SupportedShapes = ["Box", "Cylinder", "Sphere", "Plane", "Person"];
+    internal static readonly string[] SupportedShapes = ["Box", "Cylinder", "Sphere", "Plane", "Person", "Card"];
     /// <summary>
     /// The poses a Person stand-in can hold. The names match the Sketch blocking
     /// kit's, so a pose means the same thing in 2D and 3D. A Person saved with
@@ -123,6 +123,16 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
         if (models.Length != assetIds.Length)
             return RepositoryResult<SceneSummary>.Invalid("Every modelled scene instance must reference a model in this project.");
 
+        // A card shows a picture this project holds, never another project's
+        // and never a model or a video.
+        var cardImageIds = instances.Where(x => x.Placeholder?.ImageAssetId is not null)
+            .Select(x => x.Placeholder!.ImageAssetId!.Value).Distinct().ToArray();
+        var images = await db.Assets.AsNoTracking()
+            .Where(x => cardImageIds.Contains(x.Id) && x.Kind == nameof(AssetKind.Image))
+            .Select(x => x.Id).ToArrayAsync(cancellationToken);
+        if (images.Length != cardImageIds.Length)
+            return RepositoryResult<SceneSummary>.Invalid("Every image card must show an image in this project.");
+
         var existing = await db.SceneInstances.Where(x => x.SceneId == scene.Id).ToListAsync(cancellationToken);
 
         // A clip binding is checked against the clip's own file and against the
@@ -164,6 +174,7 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             record.PlaceholderSizeY = instance.Placeholder?.Size[1] ?? 0;
             record.PlaceholderSizeZ = instance.Placeholder?.Size[2] ?? 0;
             record.PlaceholderPose = instance.Placeholder?.Shape == "Person" ? instance.Placeholder.Pose ?? "Neutral" : null;
+            record.PlaceholderImageAssetId = instance.Placeholder?.Shape == "Card" ? instance.Placeholder.ImageAssetId : null;
             record.Name = instance.Name.Trim();
             record.SortOrder = order++;
             record.PositionX = instance.Position[0]; record.PositionY = instance.Position[1]; record.PositionZ = instance.Position[2];
@@ -227,7 +238,9 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
     {
         var rows = await db.SceneInstances.AsNoTracking()
             .Where(x => x.SceneId == scene.Id).OrderBy(x => x.SortOrder).Take(MaxInstances).ToArrayAsync(cancellationToken);
-        var assetIds = rows.Where(x => x.AssetId is not null).Select(x => x.AssetId!.Value).Distinct().ToArray();
+        var assetIds = rows.Where(x => x.AssetId is not null).Select(x => x.AssetId!.Value)
+            .Concat(rows.Where(x => x.PlaceholderImageAssetId is not null).Select(x => x.PlaceholderImageAssetId!.Value))
+            .Distinct().ToArray();
         var models = await db.Assets.AsNoTracking().Where(x => assetIds.Contains(x.Id)).ToArrayAsync(cancellationToken);
         var clipAssetIds = rows.Where(x => x.ClipAssetId is not null).Select(x => x.ClipAssetId!.Value).Distinct().ToArray();
         var clipNames = (await db.Assets.AsNoTracking()
@@ -248,7 +261,7 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
                     [row.RotationX, row.RotationY, row.RotationZ],
                     [row.ScaleX, row.ScaleY, row.ScaleZ],
                     "Placeholder", 1, null, true, false, size,
-                    new ScenePlaceholderSummary(shape, size, shape == "Person" ? row.PlaceholderPose ?? "Neutral" : null), row.Role, row.SourcePlanId,
+                    DescribePlaceholder(row, shape, size, models), row.Role, row.SourcePlanId,
                     null, DescribeMotion(row)));
                 continue;
             }
@@ -279,6 +292,22 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
                 ? System.Text.Json.JsonSerializer.Deserialize<SceneEnvironmentSummary>(lighting)!
                 : new SceneEnvironmentSummary(scene.KeyLightIntensity, scene.KeyLightYaw, scene.KeyLightPitch, scene.AmbientLightIntensity),
             [.. instances], scene.UpdatedAt);
+    }
+
+    /// <summary>
+    /// A stand-in as the viewport needs it. A card names its picture by id and
+    /// content hash, so a snapshot cites the exact image; the picture's URL is
+    /// left out when its file is gone, and the card draws blank rather than the
+    /// scene losing the object.
+    /// </summary>
+    private ScenePlaceholderSummary DescribePlaceholder(SceneInstanceRecord row, string shape, double[] size, AssetRecord[] assetRecords)
+    {
+        if (shape == "Person") return new ScenePlaceholderSummary(shape, size, row.PlaceholderPose ?? "Neutral");
+        if (shape != "Card" || row.PlaceholderImageAssetId is not { } imageId) return new ScenePlaceholderSummary(shape, size);
+        var image = assetRecords.FirstOrDefault(x => x.Id == imageId);
+        var present = image is not null && assets.StoredFileExists(image.StoragePath);
+        return new ScenePlaceholderSummary(shape, size, null, imageId,
+            present ? $"/api/assets/{imageId}/content" : null, image?.ContentHash);
     }
 
     private static SceneClipBindingSummary? DescribeClip(SceneInstanceRecord row, IReadOnlyDictionary<Guid, string> clipNames)
@@ -399,6 +428,10 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             return "Placeholder size must be three finite values between 0.01 and 1000 metres.";
         if (placeholder.Shape != "Person" && placeholder.Pose is not null)
             return "Only a Person stand-in has a pose.";
+        if (placeholder.Shape == "Card" && placeholder.ImageAssetId is null)
+            return "An image card needs the library image it shows.";
+        if (placeholder.Shape != "Card" && placeholder.ImageAssetId is not null)
+            return "Only an image card shows a picture.";
         if (placeholder.Pose is { } pose && !SupportedPoses.Contains(pose))
             return "A Person stand-in's pose must be one of " + string.Join(", ", SupportedPoses) + ".";
         return null;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, LoopOnce, LoopRepeat, MathUtils, Matrix4, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Raycaster, Scene, SkinnedMesh, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type BufferGeometry } from 'three'
+import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, DoubleSide, GridHelper, LoopOnce, LoopRepeat, MathUtils, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, PlaneGeometry, Raycaster, Scene, SkinnedMesh, SphereGeometry, SRGBColorSpace, TextureLoader, Vector2, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type BufferGeometry, type Texture } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { settleTransform, type HandleMode, type SceneInstanceTransform } from '../sceneTransforms'
@@ -61,7 +61,7 @@ export interface SceneViewportProps {
 type ViewportState = 'loading' | 'ready' | 'unsupported'
 
 /** Identifies one stand-in's geometry, so a resized placeholder is rebuilt. */
-const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}:${shape.pose ?? ''}`
+const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}:${shape.pose ?? ''}:${shape.imageUrl ?? ''}`
 
 export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote, onCaptureReady, onTransform, framing }: SceneViewportProps) {
   const host = useRef<HTMLDivElement>(null)
@@ -128,6 +128,13 @@ export default function SceneViewport({ instances, camera, environment, selected
     const practicalLights = new Map<string, PointLight>()
     const grid = new GridHelper(40, 40, new Color('#3c4a44'), new Color('#232c29'))
     scene.add(grid)
+
+    // How many cards are showing their picture, so a journey can wait for it.
+    const publishCards = () => {
+      const cards = [...placed.values()].filter(object => object.userData.card)
+      container.dataset.cards = String(cards.length)
+      container.dataset.cardsReady = String(cards.filter(object => object.userData.pictureReady).length)
+    }
 
     const draw = () => {
       if (disposed) return
@@ -280,8 +287,57 @@ export default function SceneViewport({ instances, camera, environment, selected
       return Math.floor(((hash >>> 0) / 0x100000000) * 360)
     }
 
+    // One load per picture. A card draws its picture unlit, so a backdrop or
+    // cutout reads exactly as the image does whatever the scene's lighting.
+    const pictures = new Map<string, { texture?: Texture; ready: Promise<Texture> }>()
+    const picture = (url: string) => {
+      let entry = pictures.get(url)
+      if (entry) return entry
+      const created: { texture?: Texture; ready: Promise<Texture> } = {
+        ready: new TextureLoader().loadAsync(url).then(texture => {
+          texture.colorSpace = SRGBColorSpace
+          if (disposed) { texture.dispose(); return texture }
+          created.texture = texture
+          return texture
+        }),
+      }
+      created.ready.catch(() => { if (!disposed) pictures.delete(url) })
+      pictures.set(url, created)
+      entry = created
+      return entry
+    }
+
+    const card = (shape: ScenePlaceholderSummary) => {
+      const [width, height] = shape.size
+      const material = new MeshBasicMaterial({ color: '#ffffff', side: DoubleSide, transparent: true, alphaTest: 0.02, toneMapped: false })
+      const mesh = new Mesh(new PlaneGeometry(width, height), material)
+      mesh.userData.card = true
+      if (!shape.imageUrl) {
+        // The picture's file is gone: a blank grey card keeps the object, not a gap.
+        material.color.set('#5b605d')
+        return mesh
+      }
+      const source = picture(shape.imageUrl)
+      const apply = (texture: Texture) => {
+        material.map = texture
+        material.needsUpdate = true
+        mesh.userData.pictureReady = true
+        publishCards()
+        draw()
+      }
+      if (source.texture) apply(source.texture)
+      else void source.ready.then(texture => { if (!disposed) apply(texture) }).catch(() => undefined)
+      return mesh
+    }
+
     const blockout = (shape: ScenePlaceholderSummary, name: string): Object3D => {
       const [width, height, depth] = shape.size
+      if (shape.shape === 'Card') {
+        const shown = card(shape)
+        shown.userData.placeholder = true
+        shown.userData.blockout = shapeKey(shape)
+        return shown
+      }
       // A person is a posed figure rather than one solid, at the stand-in's height.
       if (shape.shape === 'Person') {
         const figure = buildMannequin(height, shape.pose, new MeshStandardMaterial({
@@ -459,6 +515,7 @@ export default function SceneViewport({ instances, camera, environment, selected
       }
       container.dataset.objects = String(placed.size)
       container.dataset.blockouts = String([...placed.values()].filter(object => object.userData.blockout).length)
+      publishCards()
       setState('ready')
       draw()
     }
@@ -570,6 +627,7 @@ export default function SceneViewport({ instances, camera, environment, selected
       if (request.width > maxTexture || request.height > maxTexture)
         throw new Error(`This graphics device supports stills up to ${maxTexture} pixels on either side.`)
       await clipsReady(currentInstances)
+      await picturesReady(currentInstances)
       if (disposed) throw new Error('The scene closed before it could be rendered.')
 
       const originalView = { ...view.current, target: [...view.current.target] }
@@ -630,6 +688,19 @@ export default function SceneViewport({ instances, camera, environment, selected
 
     // A still or a take frame is only true to the scene once every clip it
     // plays has arrived; until then the rig would be drawn in its rest pose.
+    // A still is only true to the scene once every card's picture has arrived;
+    // until then the card would render blank.
+    const picturesReady = async (next: SceneInstanceSummary[]) => {
+      const cards = next.filter(instance => instance.placeholder?.shape === 'Card' && instance.placeholder.imageUrl)
+      for (const instance of cards) {
+        try { await picture(instance.placeholder!.imageUrl!).ready }
+        catch { throw new Error(`${instance.name}'s picture could not be loaded, so the render would show a blank card. Render again.`) }
+      }
+      // Each card's own handler was attached before this wait, so its picture
+      // is already applied by the time the wait returns.
+      if (disposed) throw new Error('The scene closed before it could be rendered.')
+    }
+
     const clipsReady = async (next: SceneInstanceSummary[]) => {
       loadClips(next)
       const bound = next.filter(instance => instance.clip)
@@ -761,6 +832,8 @@ export default function SceneViewport({ instances, camera, environment, selected
       for (const [, template] of loaded) release(template)
       loaded.clear()
       for (const practical of practicalLights.values()) practical.dispose()
+      for (const entry of pictures.values()) entry.texture?.dispose()
+      pictures.clear()
       practicalLights.clear()
       renderer.domElement.remove()
       renderer.dispose()
