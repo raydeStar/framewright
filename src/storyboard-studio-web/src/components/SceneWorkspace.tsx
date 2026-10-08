@@ -604,6 +604,7 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                 playing={playing}
                 onSelect={setSelectedId}
                 onPlaceNote={placeNote}
+                onTransform={(instanceId, transform) => editInstance(instanceId, item => ({ ...item, ...transform }))}
                 onCaptureReady={capture => setCaptureStill(() => capture)}
                 onCameraChange={(camera: SceneCameraSummary) => edit(current => ({ ...current, camera }))}
               />

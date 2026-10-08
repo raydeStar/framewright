@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, LoopOnce, LoopRepeat, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SkinnedMesh, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type BufferGeometry, type Object3D } from 'three'
+import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometry, DirectionalLight, GridHelper, LoopOnce, LoopRepeat, MathUtils, Matrix4, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Raycaster, Scene, SkinnedMesh, SphereGeometry, SRGBColorSpace, Vector2, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type BufferGeometry } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
+import { settleTransform, type HandleMode, type SceneInstanceTransform } from '../sceneTransforms'
 import { ACESFilmicToneMapping, NoToneMapping, PCFShadowMap, PointLight } from 'three'
 import { sharpenTextures } from './textureQuality'
 // A skinned mesh cannot be cloned with Object3D.clone: the copies would share
@@ -39,6 +41,11 @@ export interface SceneViewportProps {
   onSelect: (instanceId: string | undefined) => void
   onCameraChange: (camera: SceneCameraSummary) => void
   onPlaceNote?: (instanceId: string, localAnchor: [number, number, number]) => void
+  /**
+   * A handle drag, drop to floor, or other direct edit of one object's saved
+   * transform. Reported into working state only; Save is still the only write.
+   */
+  onTransform?: (instanceId: string, transform: SceneInstanceTransform) => void
   /** Supplies the real renderer's exact-canvas still capture while it is mounted. */
   onCaptureReady?: (capture: ((request: { camera: SceneCameraSummary; time: number; width: number; height: number }) => Promise<Blob>) | undefined) => void
 }
@@ -48,17 +55,24 @@ type ViewportState = 'loading' | 'ready' | 'unsupported'
 /** Identifies one stand-in's geometry, so a resized placeholder is rebuilt. */
 const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}`
 
-export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote, onCaptureReady }: SceneViewportProps) {
+export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote, onCaptureReady, onTransform }: SceneViewportProps) {
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewportState>('loading')
+  const [handleMode, setHandleMode] = useState<HandleMode>('move')
+  const [snap, setSnap] = useState(false)
   const surface = useRef<{
     place: () => void
     sync: (instances: SceneInstanceSummary[], selectedId?: string) => void
     animate: (instances: SceneInstanceSummary[], playhead: number) => void
     light: (environment: SceneEnvironmentSummary) => void
     pick: (clientX: number, clientY: number) => void
-    frame: () => void
+    frame: (instanceId?: string) => void
+    handles: (mode: HandleMode, snap: boolean, enabled: boolean) => void
+    handleDragging: () => boolean
+    floorDrop: (instanceId: string) => SceneInstanceTransform | undefined
   } | undefined>(undefined)
+  const transformed = useRef(onTransform)
+  transformed.current = onTransform
   const view = useRef({ ...camera })
   const drag = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | undefined>(undefined)
   const report = useRef(onCameraChange)
@@ -104,7 +118,73 @@ export default function SceneViewport({ instances, camera, environment, selected
     const grid = new GridHelper(40, 40, new Color('#3c4a44'), new Color('#232c29'))
     scene.add(grid)
 
-    const draw = () => { if (!disposed) renderer.render(scene, perspective) }
+    const draw = () => {
+      if (disposed) return
+      renderer.render(scene, perspective)
+      // Where the selected object's handle sits on screen, in stage pixels, so
+      // a journey can grab it the way an artist would.
+      if (handleSelection && handles.object) {
+        const at = proxy.getWorldPosition(new Vector3()).project(perspective)
+        container.dataset.handle = JSON.stringify([
+          Math.round((at.x + 1) / 2 * container.clientWidth),
+          Math.round((1 - at.y) / 2 * container.clientHeight)])
+      } else delete container.dataset.handle
+    }
+
+    // Handles move an invisible proxy that sits at the selected object's saved
+    // transform, never the drawn object itself. A clip or a pivot swing may be
+    // moving what is drawn; the handle always edits what will be saved.
+    const proxy = new Object3D()
+    scene.add(proxy)
+    const handles = new TransformControls(perspective, renderer.domElement)
+    const handleHelper = handles.getHelper()
+    scene.add(handleHelper)
+    let handleSelection: string | undefined
+    let handlesEnabled = false
+    handles.addEventListener('change', () => draw())
+    // Three's centre handle scales by the ratio of the pointer's distance from
+    // the object's centre, which starts near zero when the artist grabs the
+    // centre, so a short drag jumped an object to fifty times its size. The
+    // centre scales from screen travel instead: twice as big per 150 pixels
+    // right or up. Pointer positions are read in the capture phase so they are
+    // current before the controls handle the same event.
+    const pointer = { x: 0, y: 0 }
+    const uniformStart = { x: 0, y: 0, scale: new Vector3(1, 1, 1) }
+    const notePointer = (event: PointerEvent) => { pointer.x = event.clientX; pointer.y = event.clientY }
+    container.addEventListener('pointerdown', notePointer, { capture: true })
+    container.addEventListener('pointermove', notePointer, { capture: true })
+    handles.addEventListener('mouseDown', () => {
+      uniformStart.x = pointer.x; uniformStart.y = pointer.y
+      uniformStart.scale.copy(proxy.scale)
+    })
+    handles.addEventListener('objectChange', () => {
+      if (!handleSelection) return
+      if (handles.mode === 'scale' && handles.axis === 'XYZ') {
+        const travel = (pointer.x - uniformStart.x) - (pointer.y - uniformStart.y)
+        proxy.scale.copy(uniformStart.scale).multiplyScalar(Math.pow(2, travel / 150))
+        proxy.updateMatrixWorld(true)
+      }
+      transformed.current?.(handleSelection, settleTransform(
+        proxy.position.toArray(), [proxy.rotation.x, proxy.rotation.y, proxy.rotation.z], proxy.scale.toArray()))
+    })
+    const attachHandles = () => {
+      const instance = currentInstances.find(candidate => candidate.id === currentSelection)
+      if (!handlesEnabled || !instance) {
+        handleSelection = undefined
+        if (handles.object) handles.detach()
+        return
+      }
+      // Mid-drag the controls own the proxy; writing the reported value back
+      // would only fight them.
+      if (!handles.dragging || handleSelection !== instance.id) {
+        proxy.position.fromArray(instance.position)
+        proxy.rotation.set(instance.rotation[0], instance.rotation[1], instance.rotation[2])
+        proxy.scale.fromArray(instance.scale)
+        proxy.updateMatrixWorld(true)
+      }
+      handleSelection = instance.id
+      if (handles.object !== proxy) handles.attach(proxy)
+    }
 
     const place = () => {
       const { yaw, pitch, distance, target } = view.current
@@ -222,6 +302,7 @@ export default function SceneViewport({ instances, camera, environment, selected
     const sync = (next: SceneInstanceSummary[], selected?: string) => {
       currentInstances = next
       currentSelection = selected
+      attachHandles()
       for (const [id, object] of placed) {
         if (next.some(instance => instance.id === id)) continue
         scene.remove(object)
@@ -469,6 +550,7 @@ export default function SceneViewport({ instances, camera, environment, selected
       const restoreHeight = Math.max(1, container.clientHeight)
       try {
         grid.visible = false
+        handleHelper.visible = false
         renderer.setPixelRatio(1)
         renderer.setSize(request.width, request.height, false)
         perspective.aspect = request.width / request.height
@@ -483,6 +565,7 @@ export default function SceneViewport({ instances, camera, environment, selected
           'image/png'))
       } finally {
         grid.visible = true
+        handleHelper.visible = true
         renderer.setPixelRatio(originalRatio)
         renderer.setSize(restoreWidth, restoreHeight, false)
         perspective.aspect = restoreWidth / restoreHeight
@@ -527,10 +610,11 @@ export default function SceneViewport({ instances, camera, environment, selected
 
     // Pull every placed object into view. Without this an object parked away
     // from the origin is simply off screen with no way back to it.
-    const frame = () => {
-      if (placed.size === 0) return
+    const frame = (instanceId?: string) => {
+      const framed = instanceId ? [placed.get(instanceId)].filter((object): object is Object3D => !!object) : [...placed.values()]
+      if (framed.length === 0) return
       const bounds = new Box3()
-      for (const [, object] of placed) bounds.expandByObject(object)
+      for (const object of framed) bounds.expandByObject(object)
       if (bounds.isEmpty()) return
       const centre = bounds.getCenter(new Vector3())
       const size = bounds.getSize(new Vector3())
@@ -590,7 +674,36 @@ export default function SceneViewport({ instances, camera, environment, selected
       if (!placing.current) select.current(undefined)
     }
 
-    surface.current = { place, sync, light, pick, frame, animate }
+    // Rest an object's lowest point on the floor, measured at its saved
+    // transform rather than wherever playback has it right now.
+    const floorDrop = (instanceId: string) => {
+      const object = placed.get(instanceId)
+      const instance = currentInstances.find(candidate => candidate.id === instanceId)
+      if (!object || !instance) return undefined
+      applyTransform(object, instance)
+      object.updateMatrixWorld(true)
+      const bounds = new Box3().setFromObject(object)
+      animate(currentInstances, latestPlayhead.current)
+      if (bounds.isEmpty() || !Number.isFinite(bounds.min.y)) return undefined
+      return settleTransform(
+        [instance.position[0], instance.position[1] - bounds.min.y, instance.position[2]],
+        instance.rotation, instance.scale)
+    }
+
+    const setHandles = (mode: HandleMode, snapping: boolean, enabled: boolean) => {
+      handles.setMode(mode === 'move' ? 'translate' : mode)
+      // Moving reads naturally against the floor; turning and stretching read
+      // against the object's own axes.
+      handles.setSpace(mode === 'move' ? 'world' : 'local')
+      handles.setTranslationSnap(snapping ? 0.25 : null)
+      handles.setRotationSnap(snapping ? MathUtils.degToRad(15) : null)
+      handles.setScaleSnap(snapping ? 0.1 : null)
+      handlesEnabled = enabled
+      attachHandles()
+      draw()
+    }
+
+    surface.current = { place, sync, light, pick, frame, animate, handles: setHandles, handleDragging: () => handles.dragging, floorDrop }
     onCaptureReady?.(capture)
     resize()
     place()
@@ -602,6 +715,11 @@ export default function SceneViewport({ instances, camera, environment, selected
       surface.current = undefined
       observer.disconnect()
       renderer.domElement.removeEventListener('wheel', wheel)
+      container.removeEventListener('pointerdown', notePointer, { capture: true })
+      container.removeEventListener('pointermove', notePointer, { capture: true })
+      handles.detach()
+      handles.dispose()
+      scene.remove(handleHelper, proxy)
       for (const [, player] of players) player.mixer.stopAllAction()
       players.clear()
       clipFiles.clear()
@@ -623,6 +741,10 @@ export default function SceneViewport({ instances, camera, environment, selected
   latestPlayhead.current = playhead ?? 0
 
   useEffect(() => { surface.current?.sync(instances, selectedId) }, [instances, selectedId])
+  // Handles exist only for a selected object and never while a note is being
+  // placed, when a click means "this spot", not "grab this".
+  const handlesOn = !!selectedId && !noteMode && !!onTransform && state === 'ready'
+  useEffect(() => { surface.current?.handles(handleMode, snap, handlesOn) }, [handleMode, snap, handlesOn])
   // Scrubbing and playing are the same thing: a playhead, read by every object
   // through its own settings.
   useEffect(() => { surface.current?.animate(instances, playhead ?? 0) }, [instances, playhead])
@@ -650,6 +772,11 @@ export default function SceneViewport({ instances, camera, environment, selected
   }
 
   const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    // The handles listen on the canvas itself, which hears the press first. A
+    // press that grabbed a handle is theirs: orbiting too would move the
+    // camera under the object being dragged, and capturing here would steal
+    // the rest of the drag from them.
+    if (surface.current?.handleDragging()) return
     event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false }
   }
@@ -689,7 +816,7 @@ export default function SceneViewport({ instances, camera, environment, selected
       role="img"
       aria-label={noteMode
         ? 'Scene view. Placing a note: click the exact spot on an object.'
-        : 'Scene view. Drag or use the arrow keys to orbit the inspection camera; objects are moved with the placement controls.'}
+        : "Scene view. Drag empty space or use the arrow keys to orbit the inspection camera. Drag a selected object's handles to move, rotate, or scale it; the placement fields do the same from the keyboard."}
       tabIndex={0}
       onKeyDown={nudge}
       onPointerDown={pointerDown}
@@ -699,6 +826,20 @@ export default function SceneViewport({ instances, camera, environment, selected
     />
     <div className="scene-viewport-bar">
       <span data-testid="scene-object-count">{instances.length} {instances.length === 1 ? 'object' : 'objects'}</span>
+      {onTransform && <div className="scene-handle-tools" role="group" aria-label="Object handles">
+        {(['move', 'rotate', 'scale'] as const).map(mode => <button type="button" key={mode} aria-pressed={handleMode === mode}
+          className={handleMode === mode ? 'active' : ''} disabled={!handlesOn} onClick={() => setHandleMode(mode)}>
+          {mode === 'move' ? 'Move' : mode === 'rotate' ? 'Rotate' : 'Scale'}
+        </button>)}
+        <label className="scene-handle-snap"><input type="checkbox" checked={snap} disabled={!handlesOn}
+          onChange={event => setSnap(event.target.checked)} />Snap</label>
+        <button type="button" disabled={!handlesOn} onClick={() => {
+          if (!selectedId) return
+          const dropped = surface.current?.floorDrop(selectedId)
+          if (dropped) onTransform(selectedId, dropped)
+        }}>Drop to floor</button>
+        <button type="button" disabled={!selectedId || state !== 'ready'} onClick={() => surface.current?.frame(selectedId)}>Focus</button>
+      </div>}
       <button type="button" disabled={state !== 'ready' || instances.length === 0} onClick={() => surface.current?.frame()}>Frame all</button>
     </div>
     {state === 'unsupported' && <p className="scene-fallback" role="status">

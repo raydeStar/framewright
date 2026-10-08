@@ -2066,12 +2066,25 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .scene-placement-actions{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px}
 .scene-placement-actions button{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:var(--text-xs);font-weight:650;cursor:pointer}
 @media (pointer: coarse), (max-width: 860px) {
-  .scene-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(260px,1fr) auto}
+  /* The stage has its own height here and the row fits the stage plus the
+     toolbar, however many lines it wraps to, so the toolbar never sits over
+     the stage. Director Mode below still gives the stage the whole screen. */
+  .scene-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto}
+  .scene-stage-shell,.scene-viewport{min-height:auto}
+  .scene-viewport{grid-template-rows:auto auto}
   .scene-inspector{border-left:0;border-top:1px solid var(--line)}
-  .scene-stage{min-height:200px}
+  .scene-stage{height:clamp(240px,42vh,560px);min-height:0}
+  .scene-workspace.director-mode .scene-layout{grid-template-rows:minmax(0,1fr)}
+  .scene-workspace.director-mode .scene-stage-shell,.scene-workspace.director-mode .scene-viewport{min-height:0}
+  .scene-workspace.director-mode .scene-viewport{grid-template-rows:minmax(0,1fr) auto}
+  .scene-workspace.director-mode .scene-stage{height:auto;min-height:200px}
 }
-.scene-viewport-bar{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:var(--text-xs)}
+.scene-viewport-bar{position:relative;z-index:1;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;color:var(--muted);font-size:var(--text-xs)}
 .scene-viewport-bar button{min-height:40px;padding:0 13px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font-weight:650;cursor:pointer}
+.scene-viewport-bar button:disabled{opacity:.5;cursor:default}
+.scene-viewport-bar button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent-strong)}
+.scene-handle-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-right:auto}
+.scene-handle-snap{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 6px;color:var(--text);font-weight:650}
 .scene-note-composer{display:grid;gap:7px;margin:8px 0}
 .scene-note-composer textarea{width:100%;box-sizing:border-box;min-height:64px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);color:var(--text);font-family:inherit;font-size:var(--text-xs);resize:vertical}
 .scene-note-composer>div{display:flex;gap:7px;justify-content:flex-end}
