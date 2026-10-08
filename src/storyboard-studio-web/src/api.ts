@@ -55,6 +55,7 @@ export const studioApi = {
   webMcpDirectorObservation: (view: DirectorShotView, stateToken: string, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/director/observation?${directorQuery(view)}&stateToken=${encodeURIComponent(stateToken)}`, { signal }),
   webMcpShots: (offset = 0, limit = 10, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/shots?offset=${offset}&limit=${limit}`, { signal }),
   webMcpSceneAssets: (search = '', offset = 0, limit = 10, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/scene-assets?search=${encodeURIComponent(search)}&offset=${offset}&limit=${limit}`, { signal }),
+  webMcpProjectImages: (search = '', offset = 0, limit = 10, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/images?search=${encodeURIComponent(search)}&offset=${offset}&limit=${limit}`, { signal }),
   webMcpShot: (shotId: string, signal?: AbortSignal) => request<WebMcpEnvelope<Record<string, unknown>>>(`/api/webmcp/shots/${shotId}`, { signal }),
   webMcpContinuity: (shotId: string, signal?: AbortSignal) => request<WebMcpEnvelope<ShotContinuityReport>>(`/api/webmcp/shots/${shotId}/continuity`, { signal }),
   webMcpProposals: (shotId?: string, signal?: AbortSignal) => request<WebMcpEnvelope<ShotRevisionProposalSummary[]>>(`/api/webmcp/proposals${shotId ? `?shotId=${encodeURIComponent(shotId)}` : ''}`, { signal }),
