@@ -148,6 +148,18 @@ physical touch, stylus, or real-iPad check; no human acceptance of how the
 figure, cards, or handles look. AI screenshot inspection is not artistic
 acceptance.
 
+### K06 gate record - 2026-10-08
+
+`scripts/verify.ps1` passed in one invocation on Windows at `be37a55` on
+`feat/blockout-person-card`: npm ci and audit (0 vulnerabilities), frontend
+checks (40 unit tests) and build, public release audit, locked restore,
+Release rebuild, 386 backend tests, the backup, launcher, Docker, setup,
+voice-PID, and release-candidate script tests, NuGet vulnerability inspection
+(none), and 200 Playwright journeys with 6 intentional tablet exclusions. The
+known Three.js chunk-size advisory remains. Not run: an actual WebMCP host, any
+provider or GPU work, a packaged-runtime smoke (no runtime dependency changed),
+and human review of the plan text or the figures.
+
 ### Next candidates
 
 - A bounded, read-only image search for agents, so a card can cite a library
