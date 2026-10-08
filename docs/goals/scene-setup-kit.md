@@ -184,6 +184,19 @@ known Three.js chunk-size advisory remains. Not run: an actual WebMCP host, any
 provider or GPU work, a packaged-runtime smoke (no runtime dependency changed),
 and human review of the plan text or the figures.
 
+### K07 gate record - 2026-10-08
+
+`scripts/verify.ps1` passed in one invocation on Windows at `46f3179` on
+`feat/blockout-image-search`: npm ci and audit (0 vulnerabilities), frontend
+checks (40 unit tests) and build, public release audit, locked restore,
+warning-free Release rebuild, 387 backend tests, the backup, launcher, Docker,
+setup, voice-PID, and release-candidate script tests, voice contract tests,
+NuGet vulnerability inspection (none), and 202 Playwright journeys with 6
+intentional tablet exclusions. The known Three.js chunk-size advisory remains.
+Not run: an actual WebMCP host, any provider or GPU work, a packaged-runtime
+smoke (no runtime dependency changed), and human review of the search results
+or the plan text.
+
 ### Next candidates
 
 - Exercise the widened blockout schema and the twelve-tool registry, including
