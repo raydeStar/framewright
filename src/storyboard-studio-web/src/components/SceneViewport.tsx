@@ -3,6 +3,7 @@ import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometr
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { settleTransform, type HandleMode, type SceneInstanceTransform } from '../sceneTransforms'
+import { buildMannequin } from './sceneMannequin'
 import { frameGuide, framedFieldOfView } from '../sceneFraming'
 import { ACESFilmicToneMapping, NoToneMapping, PCFShadowMap, PointLight } from 'three'
 import { sharpenTextures } from './textureQuality'
@@ -60,7 +61,7 @@ export interface SceneViewportProps {
 type ViewportState = 'loading' | 'ready' | 'unsupported'
 
 /** Identifies one stand-in's geometry, so a resized placeholder is rebuilt. */
-const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}`
+const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}:${shape.pose ?? ''}`
 
 export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote, onCaptureReady, onTransform, framing }: SceneViewportProps) {
   const host = useRef<HTMLDivElement>(null)
@@ -269,14 +270,27 @@ export default function SceneViewport({ instances, camera, environment, selected
 
     // Distinct stand-ins, so a blockout reads as separate objects rather than a
     // pile of identical boxes. The hue comes from the object's own name.
+    // FNV-1a spreads names that differ only in their last character ("Box 1",
+    // "Box 2") across the wheel; a plain running sum put them a degree apart.
     const hue = (name: string) => {
-      let total = 0
-      for (let index = 0; index < name.length; index += 1) total = (total * 31 + name.charCodeAt(index)) % 360
-      return total
+      let hash = 0x811c9dc5
+      for (let index = 0; index < name.length; index += 1) hash = Math.imul(hash ^ name.charCodeAt(index), 0x01000193)
+      // A final mix, so the last character reaches the high bits the hue reads.
+      hash ^= hash >>> 16; hash = Math.imul(hash, 0x85ebca6b); hash ^= hash >>> 13; hash = Math.imul(hash, 0xc2b2ae35); hash ^= hash >>> 16
+      return Math.floor(((hash >>> 0) / 0x100000000) * 360)
     }
 
-    const blockout = (shape: ScenePlaceholderSummary, name: string) => {
+    const blockout = (shape: ScenePlaceholderSummary, name: string): Object3D => {
       const [width, height, depth] = shape.size
+      // A person is a posed figure rather than one solid, at the stand-in's height.
+      if (shape.shape === 'Person') {
+        const figure = buildMannequin(height, shape.pose, new MeshStandardMaterial({
+          color: new Color(`hsl(${hue(name)}, 42%, 52%)`), roughness: 0.85, transparent: true, opacity: 0.92,
+        }))
+        figure.userData.placeholder = true
+        figure.userData.blockout = shapeKey(shape)
+        return figure
+      }
       let geometry: BufferGeometry
       if (shape.shape === 'Cylinder') geometry = new CylinderGeometry(width / 2, width / 2, height, 24)
       else if (shape.shape === 'Sphere') geometry = new SphereGeometry(Math.max(width, height, depth) / 2, 24, 16)

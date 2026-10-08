@@ -10,13 +10,16 @@ import type { SceneInstanceSummary, ScenePlaceholderSummary } from './types'
  * Sizes are in metres, +Y up, matching docs/3D_CONVENTIONS.md.
  */
 export interface StandInKind {
-  key: 'box' | 'cylinder' | 'sphere' | 'floor' | 'wall'
+  key: 'person' | 'box' | 'cylinder' | 'sphere' | 'floor' | 'wall'
   label: string
   shape: ScenePlaceholderSummary['shape']
   size: [number, number, number]
 }
 
 export const STAND_IN_KIT: readonly StandInKind[] = [
+  // A person first: most shots are about one, and a figure gives every other
+  // stand-in its scale.
+  { key: 'person', label: 'Person', shape: 'Person', size: [0.5, 1.75, 0.3] },
   { key: 'box', label: 'Box', shape: 'Box', size: [1, 1, 1] },
   { key: 'cylinder', label: 'Cylinder', shape: 'Cylinder', size: [0.6, 1.2, 0.6] },
   { key: 'sphere', label: 'Sphere', shape: 'Sphere', size: [0.8, 0.8, 0.8] },
@@ -65,7 +68,7 @@ export function createStandIn(
     available: true,
     archived: false,
     dimensions: size,
-    placeholder: { shape: kind.shape, size },
+    placeholder: kind.shape === 'Person' ? { shape: kind.shape, size, pose: 'Neutral' } : { shape: kind.shape, size },
     role: null,
     planId: null,
     clip: null,

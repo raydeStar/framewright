@@ -112,7 +112,15 @@ public sealed record SceneEnvironmentSummary(double KeyIntensity, double KeyYaw,
 /// placeholder is a real object in the scene with its own identity and
 /// transform, so replacing it later does not disturb anything around it.
 /// </summary>
-public sealed record ScenePlaceholderSummary(string Shape, double[] Size);
+/// <summary>
+/// Simple stand-in geometry. A Person stand-in also carries a pose preset;
+/// every other shape has none.
+/// The pose is left out of JSON when absent, so every other shape serialises
+/// exactly as it did before people existed and frozen snapshots of those
+/// scenes are unchanged.
+/// </summary>
+public sealed record ScenePlaceholderSummary(string Shape, double[] Size,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Pose = null);
 
 /// <summary>
 /// One placed object. It is either pinned to an exact model revision or drawn

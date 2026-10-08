@@ -30,6 +30,7 @@ public static class StudioDatabaseInitializer
     private const string SceneLightingMigration = "20260922-scene-local-lighting-v19";
     private const string SampleProjectMigration = "20260923-sample-project-flag-v20";
     private const string AssetReviewMigration = "20261004-asset-review-decisions-v21";
+    private const string PersonStandInMigration = "20261008-person-stand-in-pose-v22";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -308,6 +309,16 @@ public static class StudioDatabaseInitializer
             }, cancellationToken);
         }
 
+        // A posable person stand-in. Every existing object is some other shape,
+        // which has no pose, so the new column starts empty everywhere.
+        if (!await HasMigrationAsync(db, PersonStandInMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, PersonStandInMigration, cancellationToken);
+            await RunMigrationAsync(db, PersonStandInMigration,
+                () => EnsureColumnAsync(db, "SceneInstances", "PlaceholderPose", "TEXT NULL", cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -457,6 +468,7 @@ public static class StudioDatabaseInitializer
             SceneLightingMigration => "scene-environment-json-with-local-lights-color-exposure-and-grid",
             SampleProjectMigration => "project-sample-flag-set-only-when-a-new-database-seeds-the-demo",
             AssetReviewMigration => "per-revision-review-decision-with-answered-send-back-and-review-notes-on-every-asset-kind",
+            PersonStandInMigration => "person-stand-in-pose-preset-on-scene-instances",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

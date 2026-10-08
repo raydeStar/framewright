@@ -4,6 +4,7 @@ import { studioApi } from '../api'
 import SceneLightingControls from './SceneLightingControls'
 import ConfirmDialog from './ConfirmDialog'
 import { STAND_IN_KIT, STAND_IN_MAX_SIZE, STAND_IN_MIN_SIZE, createStandIn, resizeStandIn, type StandInKind } from '../sceneStandIns'
+import { PERSON_POSES } from '../scenePoses'
 import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
 // three.js loads only when a scene is actually opened.
@@ -692,9 +693,9 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
               </div>}
 
               {selected.placeholder && <div className="scene-vector" data-testid="scene-standin-size">
-                <span>{selected.placeholder.shape === 'Sphere' ? 'Diameter (metres)' : selected.placeholder.shape === 'Cylinder' ? 'Diameter and height (metres)' : 'Size (metres)'}</span>
+                <span>{selected.placeholder.shape === 'Sphere' ? 'Diameter (metres)' : selected.placeholder.shape === 'Cylinder' ? 'Diameter and height (metres)' : selected.placeholder.shape === 'Person' ? 'Height (metres)' : 'Size (metres)'}</span>
                 <div>
-                  {(selected.placeholder.shape === 'Sphere' ? [0] : selected.placeholder.shape === 'Cylinder' ? [0, 1] : [0, 1, 2]).map(index => <label key={index}>
+                  {(selected.placeholder.shape === 'Sphere' ? [0] : selected.placeholder.shape === 'Cylinder' ? [0, 1] : selected.placeholder.shape === 'Person' ? [1] : [0, 1, 2]).map(index => <label key={index}>
                     {selected.placeholder!.shape === 'Sphere' ? 'Ø' : selected.placeholder!.shape === 'Cylinder' ? (index === 0 ? 'Ø' : 'H') : ['W', 'H', 'D'][index]}
                     <input type="number" step={0.05} min={STAND_IN_MIN_SIZE} max={STAND_IN_MAX_SIZE}
                       aria-label={`Stand-in size ${['width', 'height', 'depth'][index]}`}
@@ -710,6 +711,15 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                   </label>)}
                 </div>
               </div>}
+
+              {selected.placeholder?.shape === 'Person' && <label>Pose<select aria-label="Stand-in pose"
+                value={selected.placeholder.pose ?? 'Neutral'}
+                onChange={event => {
+                  const pose = event.target.value
+                  editInstance(selected.id, item => item.placeholder ? { ...item, placeholder: { ...item.placeholder, pose } } : item)
+                }}>
+                {PERSON_POSES.map(pose => <option key={pose} value={pose}>{pose}</option>)}
+              </select></label>}
 
               {(['position', 'rotation', 'scale'] as const).map(field => <div className="scene-vector" key={field}>
                 <span>{field === 'rotation' ? 'Rotation (radians)' : field === 'scale' ? 'Scale' : 'Position (metres)'}</span>

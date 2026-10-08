@@ -17,7 +17,13 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
 {
     private const int MaxInstances = 200;
     /// <summary>Stand-in geometry the viewport can draw without loading anything.</summary>
-    internal static readonly string[] SupportedShapes = ["Box", "Cylinder", "Sphere", "Plane"];
+    internal static readonly string[] SupportedShapes = ["Box", "Cylinder", "Sphere", "Plane", "Person"];
+    /// <summary>
+    /// The poses a Person stand-in can hold. The names match the Sketch blocking
+    /// kit's, so a pose means the same thing in 2D and 3D. A Person saved with
+    /// no pose stands in Neutral.
+    /// </summary>
+    internal static readonly string[] SupportedPoses = ["Neutral", "Walking", "Running", "Seated", "Kneeling", "Pointing", "Reaching", "Conversation", "Prone"];
     private const double MaxDistanceFromOrigin = 10_000;
 
     public async Task<IReadOnlyList<SceneListItem>> ListAsync(CancellationToken cancellationToken)
@@ -157,6 +163,7 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             record.PlaceholderSizeX = instance.Placeholder?.Size[0] ?? 0;
             record.PlaceholderSizeY = instance.Placeholder?.Size[1] ?? 0;
             record.PlaceholderSizeZ = instance.Placeholder?.Size[2] ?? 0;
+            record.PlaceholderPose = instance.Placeholder?.Shape == "Person" ? instance.Placeholder.Pose ?? "Neutral" : null;
             record.Name = instance.Name.Trim();
             record.SortOrder = order++;
             record.PositionX = instance.Position[0]; record.PositionY = instance.Position[1]; record.PositionZ = instance.Position[2];
@@ -241,7 +248,7 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
                     [row.RotationX, row.RotationY, row.RotationZ],
                     [row.ScaleX, row.ScaleY, row.ScaleZ],
                     "Placeholder", 1, null, true, false, size,
-                    new ScenePlaceholderSummary(shape, size), row.Role, row.SourcePlanId,
+                    new ScenePlaceholderSummary(shape, size, shape == "Person" ? row.PlaceholderPose ?? "Neutral" : null), row.Role, row.SourcePlanId,
                     null, DescribeMotion(row)));
                 continue;
             }
@@ -390,6 +397,10 @@ public sealed class SceneService(StudioDbContext db, AssetStore assets, IProject
             return "Placeholder geometry must be one of " + string.Join(", ", SupportedShapes) + ".";
         if (placeholder.Size is not { Length: 3 } || placeholder.Size.Any(value => !double.IsFinite(value) || value is < 0.01 or > 1000))
             return "Placeholder size must be three finite values between 0.01 and 1000 metres.";
+        if (placeholder.Shape != "Person" && placeholder.Pose is not null)
+            return "Only a Person stand-in has a pose.";
+        if (placeholder.Pose is { } pose && !SupportedPoses.Contains(pose))
+            return "A Person stand-in's pose must be one of " + string.Join(", ", SupportedPoses) + ".";
         return null;
     }
 

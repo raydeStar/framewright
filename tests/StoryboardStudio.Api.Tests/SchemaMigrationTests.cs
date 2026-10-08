@@ -310,4 +310,75 @@ public sealed class SchemaMigrationTests
             if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task PersonStandInV22UpgradesAWorkstationWhoseScenesHaveNoPoseColumn()
+    {
+        var dataRoot = Path.Combine(Path.GetTempPath(), "framewright-schema-person", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataRoot);
+        var databasePath = Path.Combine(dataRoot, "test.db");
+        var camera = new SceneCameraSummary(0.9, 0.42, 6, [0, 0.5, 0], 38);
+        var lighting = new SceneEnvironmentSummary(2.2, 0.8, 0.9, 1.4);
+
+        try
+        {
+            Guid sceneId;
+            var boxId = Guid.NewGuid();
+            using (var baselineFactory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var baselineClient = baselineFactory.CreateClient())
+            {
+                var created = await baselineClient.PostAsJsonAsync("/api/scenes", new { name = "Before people" });
+                created.EnsureSuccessStatusCode();
+                sceneId = (await created.Content.ReadFromJsonAsync<SceneSummary>())!.Id;
+                (await baselineClient.PutAsJsonAsync($"/api/scenes/{sceneId}", new SaveSceneRequest(1, "Before people", camera, lighting,
+                    [new SaveSceneInstanceRequest(boxId, null, "Crate", [0, 0.5, 0], [0, 0, 0], [1, 1, 1], new ScenePlaceholderSummary("Box", [1, 1, 1]))])))
+                    .EnsureSuccessStatusCode();
+            }
+
+            // Reproduce a workstation that recorded v21 and never saw v22.
+            await using (var legacy = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+            {
+                await legacy.OpenAsync();
+                await using var downgrade = legacy.CreateCommand();
+                downgrade.CommandText = """
+                    DELETE FROM "SchemaMigrations" WHERE "Id" = '20261008-person-stand-in-pose-v22';
+                    ALTER TABLE "SceneInstances" DROP COLUMN "PlaceholderPose";
+                    """;
+                await downgrade.ExecuteNonQueryAsync();
+            }
+
+            using (var upgradedFactory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var upgradedClient = upgradedFactory.CreateClient())
+            {
+                Assert.Equal(HttpStatusCode.OK, (await upgradedClient.GetAsync("/health/ready")).StatusCode);
+                // The existing stand-in is untouched and has no pose.
+                var scene = (await upgradedClient.GetFromJsonAsync<SceneSummary>($"/api/scenes/{sceneId}"))!;
+                var crate = Assert.Single(scene.Instances);
+                Assert.Equal(boxId, crate.Id);
+                Assert.Equal("Box", crate.Placeholder!.Shape);
+                Assert.Null(crate.Placeholder.Pose);
+                // And the upgraded scene takes a posed person at once.
+                var saved = await upgradedClient.PutAsJsonAsync($"/api/scenes/{sceneId}", new SaveSceneRequest(scene.Version, scene.Name, camera, lighting,
+                [
+                    new SaveSceneInstanceRequest(boxId, null, "Crate", [0, 0.5, 0], [0, 0, 0], [1, 1, 1], new ScenePlaceholderSummary("Box", [1, 1, 1])),
+                    new SaveSceneInstanceRequest(Guid.NewGuid(), null, "Porter", [1, 0.875, 0], [0, 0, 0], [1, 1, 1], new ScenePlaceholderSummary("Person", [0.5, 1.75, 0.3], "Kneeling")),
+                ]));
+                Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+                var reopened = (await saved.Content.ReadFromJsonAsync<SceneSummary>())!;
+                Assert.Equal("Kneeling", Assert.Single(reopened.Instances, x => x.Name == "Porter").Placeholder!.Pose);
+            }
+
+            await using var verified = new SqliteConnection($"Data Source={databasePath};Mode=ReadOnly;Pooling=False");
+            await verified.OpenAsync();
+            await using var ledger = verified.CreateCommand();
+            ledger.CommandText = "SELECT COUNT(*) FROM \"SchemaMigrations\" WHERE \"Id\" = '20261008-person-stand-in-pose-v22';";
+            Assert.Equal(1L, (long)(await ledger.ExecuteScalarAsync() ?? 0L));
+            // The upgrade kept a recoverable copy of the database it changed.
+            Assert.NotEmpty(Directory.EnumerateFiles(dataRoot, "*person-stand-in-pose-v22*", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
+        }
+    }
 }

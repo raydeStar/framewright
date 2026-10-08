@@ -162,7 +162,8 @@ export interface SceneEnvironmentSummary {
   cinematic?: boolean; showGrid?: boolean; pointLights?: ScenePointLightSummary[] | null
 }
 /** Simple geometry standing in for an object that has no library model yet. */
-export interface ScenePlaceholderSummary { shape: 'Box' | 'Cylinder' | 'Sphere' | 'Plane'; size: number[] }
+/** Stand-in geometry. Only a Person has a pose, one of the presets in scenePoses.ts. */
+export interface ScenePlaceholderSummary { shape: 'Box' | 'Cylinder' | 'Sphere' | 'Plane' | 'Person'; size: number[]; pose?: string | null }
 /** One placed object: either pinned to an exact model revision or drawn as a placeholder, never both. */
 export interface SceneInstanceSummary {
   id: string; assetId: string | null; name: string

@@ -289,6 +289,55 @@ test('looking through the shot camera frames the delivery picture and moves only
   verifyConsole()
 })
 
+test('a person stand-in takes every pose on the floor, keeps its pose and height, and reopens', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  await page.goto('/')
+  const scene = await newScene(page)
+  const objects = page.getByTestId('scene-objects')
+  const placement = page.getByTestId('scene-placement')
+  const handles = page.getByRole('group', { name: 'Object handles' })
+  await objects.getByRole('button', { name: 'Add person stand-in' }).click()
+  await expect(placement.getByLabel('Object name')).toHaveValue('Person 1')
+  await expect(placement.getByLabel('Stand-in pose')).toHaveValue('Neutral')
+  await expect(page.getByTestId('scene-stage')).toHaveAttribute('data-blockouts', '1')
+
+  // Standing, seated, kneeling, or lying, the figure's lowest point is on the
+  // floor at the same resting height, so dropping it moves nothing.
+  const poses = await placement.getByLabel('Stand-in pose').locator('option').allTextContents()
+  expect(poses).toEqual(['Neutral', 'Walking', 'Running', 'Seated', 'Kneeling', 'Pointing', 'Reaching', 'Conversation', 'Prone'])
+  for (const pose of poses) {
+    await placement.getByLabel('Stand-in pose').selectOption(pose)
+    await placement.getByLabel('position Y', { exact: true }).fill('2')
+    await handles.getByRole('button', { name: 'Drop to floor' }).click()
+    await expect(placement.getByLabel('position Y', { exact: true }), pose).toHaveValue('0.875')
+  }
+
+  await placement.getByLabel('Stand-in pose').selectOption('Seated')
+  await placement.getByLabel('Stand-in size height').fill('1.6')
+  await objects.getByRole('button', { name: 'Add person stand-in' }).click()
+  await placement.getByLabel('Stand-in pose').selectOption('Walking')
+  await placement.getByLabel('position X', { exact: true }).fill('1.2')
+  await objects.getByRole('button', { name: 'Add person stand-in' }).click()
+  await placement.getByLabel('Stand-in pose').selectOption('Pointing')
+  await placement.getByLabel('position X', { exact: true }).fill('-1.2')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await expect(page.getByLabel('Scene name', { exact: true })).toHaveValue(scene.name)
+  await expect(page.getByTestId('scene-stage')).toHaveAttribute('data-blockouts', '3')
+  const saved = await readScene(page, scene.id)
+  const person = saved.instances.find(instance => instance.name === 'Person 1')!
+  expect(person.placeholder).toEqual({ shape: 'Person', size: [0.5, 1.6, 0.3], pose: 'Seated' })
+  expect(saved.instances.map(instance => (instance.placeholder as { pose?: string }).pose)).toEqual(['Seated', 'Walking', 'Pointing'])
+  await page.getByTestId('scene-objects').getByRole('button', { name: /Person 1/ }).click()
+  await expect(page.getByTestId('scene-placement').getByLabel('Stand-in pose')).toHaveValue('Seated')
+  await page.getByRole('button', { name: 'Frame all' }).click()
+  await page.screenshot({ path: testInfo.outputPath('scene-people.png'), fullPage: true })
+  verifyConsole()
+})
+
 async function newScene(page: Page) {
   await page.getByRole('button', { name: 'Scene', exact: true }).click()
   const createdResponse = page.waitForResponse(response => response.url().endsWith('/api/scenes') && response.request().method() === 'POST')
