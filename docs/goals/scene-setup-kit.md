@@ -2,8 +2,8 @@
 
 **Project:** Framewright
 **Created:** 2026-10-08
-**Branch:** `feat/scene-setup-kit` from `main` at `94145b20abf510c056acf61607056c7ecd66e638`
-**Overall status:** VERIFIED for K00-K05 on the branch; not pushed, not released, no human visual acceptance recorded
+**Branch:** `feat/scene-setup-kit` from `main` at `94145b20abf510c056acf61607056c7ecd66e638`; K06 on `feat/blockout-person-card` from `feat/scene-setup-kit` at `e913ed9`
+**Overall status:** VERIFIED for K00-K05 and CONTRACT_VERIFIED for K06 on the branches; not pushed, not released, no human visual acceptance recorded
 
 ## 1. Outcome
 
@@ -55,6 +55,7 @@ implementation is written against Framewright's own contracts.
 | K03 | Look through the shot camera with delivery-aspect guides; orbiting there edits the shot camera only | K00 | D, A, desktop + tablet |
 | K04 | A posable 3D stand-in person with pose presets, saved and reopened | K01 | D, A, migration, package |
 | K05 | Image cards: a library image as a backdrop or cutout plane | K01 | D, A, migration, package |
+| K06 | An agent's blockout plan can propose a posed person and an image card | K04, K05, director-mode M11 | D, A (shim agent), migration, package |
 
 ### K01. Hand-placed stand-ins
 
@@ -95,6 +96,27 @@ Specified in detail when K01 to K03 are proven. Each adds a column to scene
 instances, so each needs an old-schema migration check, package export/import,
 and render-path evidence before it is called verified.
 
+### K06. Agent-proposed people and cards
+
+**Deliver:** The M11 blockout tool (`propose_scene_blockout`) offers the same
+stand-ins the artist can place by hand. Its object schema gains `Person` and
+`Card` shapes, an optional `pose` (the nine names in `scenePoses.ts`, equal to
+`SceneService.SupportedPoses`), and an optional `imageAssetId`. A plan item
+stores its pose and card picture, the plan review names both, and Build makes
+ordinary scene objects carrying them.
+
+**Prove:** A shim agent stages a plan with a seated person and a card; staging
+builds nothing; the artist builds it; the result saves, reopens, and has the
+same stand-in description as the hand-placed equivalents. A card must cite an
+Image in the active project, and every refusal leaves no plan or item behind.
+Build refuses a plan whose card picture has gone. Old-schema migration with a
+pre-migration backup, and a working package that remaps a planned card's
+picture.
+
+**Defer:** An image search tool for agents (a card can cite the selected
+reference, whose id the director context already gives, or an id the agent
+learned elsewhere), and actual-host evidence for the widened schema.
+
 ## 4. Progress and evidence ledger
 
 | ID | Status | Notes |
@@ -105,6 +127,7 @@ and render-path evidence before it is called verified.
 | K03 | VERIFIED | D: `unit/sceneFraming.test.ts` proves the stage and a render cover the same picture, including when a 16:9 frame is wider than a portrait stage. A: look-through journey on desktop and tablet shows a delivery-shaped frame that fits the stage's long side, orbits only the shot camera with the scene left saved and its inspection camera unchanged, returns to the inspection view, and renders a still whose stored camera equals the framed one. Shot-camera fields are rounded to field precision. Sabotage: routing orbit to the inspection camera fails the journey. Not proven: a pixel comparison between the framed stage and the rendered still; the shared geometry is unit-tested instead. |
 | K04 | VERIFIED | Schema: migration `20261008-person-stand-in-pose-v22` adds nullable `SceneInstances.PlaceholderPose`. D: `SceneStandInTests` (pose survives restart and a working-package import with fresh IDs, unknown poses and poses on other shapes refused with the version unchanged, a still freezes the pose it was rendered with after the pose changes), `SchemaMigrationTests.PersonStandInV22...` (an isolated v21 database upgrades, keeps its box stand-in, writes a pre-migration backup, records v22, and takes a posed person), `unit/scenePoses.test.ts` (front-end pose list matches `SceneService.SupportedPoses`). A: person journey on desktop and tablet drops every pose to the same resting height, saves height and pose, reloads three posed figures. Full backend suite 379/379. Non-person stand-ins serialise without a `pose` field, so their snapshots are byte-identical to before. Sabotage: not storing the pose fails three backend tests; not sending it fails the journey. Also fixed: stand-in colours came from a hash that put `Box 1` and `Box 2` a degree apart. Not done: the agent blockout tool's shape list still omits Person, and blockout plans cannot carry a pose; agent-built people stand in Neutral. |
 | K05 | VERIFIED | Schema: migration `20261008-image-card-stand-in-v23` adds nullable `SceneInstances.PlaceholderImageAssetId`. A Card stand-in cites a project Image asset by id; the service describes it with URL and content hash, so stills freeze the exact picture. D: `SceneImageCardTests` (card survives restart; working-package import remaps the picture to the new project's copy with the same hash; library usage counts the card; a missing picture, a model, another project's image, an unknown id, or a picture on a box is refused with the version unchanged), `SchemaMigrationTests.ImageCardV23...`, unit tests for card shape and aspect-keeping resize. A: image-card journey on desktop and tablet adds a 2:1 half-transparent picture, keeps its shape on resize, samples canvas pixels showing the opaque half red and unlit and the clear half not filled, saves and reopens it, and proves a still waits for a held picture instead of freezing a blank card. Full backend suite 382/382. Sabotage: dropping the package remap fails the package test; skipping the picture wait fails the journey. Not done: background removal for cutouts needs a provider route and stays deferred; cards are unlit by design. |
+| K06 | CONTRACT_VERIFIED | Schema: migration `20261008-blockout-person-and-card-v24` adds nullable `SceneBlockoutItems.PlaceholderPose` and `SceneBlockoutItems.PlaceholderImageAssetId`. Staging validates through `SceneService.ValidatePlaceholder`, so a plan accepts exactly what a hand save accepts; a planned person with no pose is stored as Neutral, as a hand-placed one is. D: `SceneBlockoutStandInTests` (a seated person and a card build into objects whose placeholder JSON equals the hand-placed equivalents' through a restart; the plan describes pose, picture id, URL, and hash; a working package remaps the planned card to the new project's copy, the same one the built card shows; nine refusals including a card with no picture, a model, an unknown id, another project's image, a picture on a box, a pose on a box or a match, and an unknown pose leave zero plans and items; Build refuses a plan whose picture row has gone and leaves it Pending), `SchemaMigrationTests.BlockoutPersonCardV24...`. A: the shim agent's refused ghost card stages nothing; the staged plan shows the pose and the picture's name; Build makes a seated person and a ready card; the artist hand-places the same pair; after save and reload all four reopen and the planned and hand-placed placeholders are equal; desktop Chromium and iPad-sized WebKit. The WebMCP registration test now pins the blockout object schema (closed, field list, both enums, `imageAssetId` shape). Sabotage: Build not copying pose and picture fails two backend tests and the journey (card never ready); Build not copying only the pose fails the journey (`Neutral`, not `Seated`); dropping the package remap fails the package test; dropping `Person` from the tool enum fails the registration test. Not proven: an actual WebMCP host seeing the widened schema (the 2026-09-22 host check saw the old one), so this is CONTRACT_VERIFIED, not VERIFIED. Agents still have no image search; see the K06 Defer note. |
 
 ### Full gate record - 2026-10-08
 
@@ -127,7 +150,9 @@ acceptance.
 
 ### Next candidates
 
-- Let the agent blockout tool propose people with poses and image cards.
+- A bounded, read-only image search for agents, so a card can cite a library
+  picture other than the selected reference without the artist naming it.
+- Exercise the widened blockout schema in an actual WebMCP host.
 - Background removal for cutouts, as a separately gated provider route.
 - A pixel comparison between the framed stage and a rendered still.
 

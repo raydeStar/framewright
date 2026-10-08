@@ -44,8 +44,14 @@
 - **Look through the shot camera.** Shot setup can show the view from the
   shot camera with the delivery frame outlined. Orbiting there moves only the
   shot camera, and a narrow stage widens its view so the whole frame fits.
-- Two schema migrations (v22 and v23) add one nullable column each to scene
-  objects. Both back up the database first.
+- **Agents can plan people and cards.** A browser agent's blockout plan can
+  propose a person stand-in in any of the nine poses and an image card showing
+  a picture from the active project. The plan names both for review, and Build
+  makes the same objects the artist would place by hand. A card citing anything
+  but this project's image is refused and nothing is staged.
+- Three schema migrations back up the database first: v22 and v23 add one
+  nullable column each to scene objects, and v24 adds a pose and a card picture
+  to blockout plan objects.
 
 ### Library review
 - **Approve or send back any asset.** Images, models, video and audio each
