@@ -3,6 +3,7 @@ import { Box, Check, Copy, Image, LoaderCircle, Maximize2, MessageCirclePlus, Mi
 import { studioApi } from '../api'
 import SceneLightingControls from './SceneLightingControls'
 import ConfirmDialog from './ConfirmDialog'
+import { STAND_IN_KIT, STAND_IN_MAX_SIZE, STAND_IN_MIN_SIZE, createStandIn, resizeStandIn, type StandInKind } from '../sceneStandIns'
 import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
 // three.js loads only when a scene is actually opened.
@@ -198,6 +199,15 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
       assetName: model.displayName, revisionNumber: model.revisionNumber ?? 1,
       contentUrl: model.contentUrl, available: true, archived: model.isArchived, dimensions: [1, 1, 1],
     }
+    edit(current => ({ ...current, instances: [...current.instances, instance] }))
+    setSelectedId(instance.id)
+  }
+
+  // A stand-in is drawn by the viewport itself, so it needs no model and no
+  // generation. It lands on the floor where the inspection camera is looking.
+  const addStandIn = (kind: StandInKind) => {
+    if (!scene) return
+    const instance = createStandIn(kind, scene.instances, scene.camera.target)
     edit(current => ({ ...current, instances: [...current.instances, instance] }))
     setSelectedId(instance.id)
   }
@@ -617,6 +627,15 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                 </li>)}
               </ul>
               {scene.instances.length === 0 && <p className="model-note">No objects yet. Add a model below.</p>}
+              <div className="scene-standin-kit" data-testid="scene-standin-kit" role="group" aria-label="Stand-in kit">
+                <span>Block out with stand-ins</span>
+                <div>
+                  {STAND_IN_KIT.map(kind => <button type="button" key={kind.key} disabled={busy}
+                    aria-label={`Add ${kind.label.toLowerCase()} stand-in`} onClick={() => addStandIn(kind)}>
+                    {kind.label}
+                  </button>)}
+                </div>
+              </div>
               <div className="scene-add">
                 {/* Editing the scene on screen while another is being opened or
                     created would be editing one that is about to be replaced. */}
@@ -647,6 +666,26 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                   Replace this object
                 </button>
                 <p className="model-note">Keeps this object's identity, placement, scale, pivot motion, notes, and plan lineage. Models use +Y-up metres; adjust the visible scale only if the source needs it.</p>
+              </div>}
+
+              {selected.placeholder && <div className="scene-vector" data-testid="scene-standin-size">
+                <span>{selected.placeholder.shape === 'Sphere' ? 'Diameter (metres)' : selected.placeholder.shape === 'Cylinder' ? 'Diameter and height (metres)' : 'Size (metres)'}</span>
+                <div>
+                  {(selected.placeholder.shape === 'Sphere' ? [0] : selected.placeholder.shape === 'Cylinder' ? [0, 1] : [0, 1, 2]).map(index => <label key={index}>
+                    {selected.placeholder!.shape === 'Sphere' ? 'Ø' : selected.placeholder!.shape === 'Cylinder' ? (index === 0 ? 'Ø' : 'H') : ['W', 'H', 'D'][index]}
+                    <input type="number" step={0.05} min={STAND_IN_MIN_SIZE} max={STAND_IN_MAX_SIZE}
+                      aria-label={`Stand-in size ${['width', 'height', 'depth'][index]}`}
+                      value={selected.placeholder!.size[index]}
+                      onChange={event => {
+                        const value = Number(event.target.value)
+                        editInstance(selected.id, item => {
+                          if (!item.placeholder) return item
+                          const placeholder = resizeStandIn(item.placeholder, index as 0 | 1 | 2, value)
+                          return { ...item, placeholder, dimensions: placeholder.size }
+                        })
+                      }} />
+                  </label>)}
+                </div>
               </div>}
 
               {(['position', 'rotation', 'scale'] as const).map(field => <div className="scene-vector" key={field}>
