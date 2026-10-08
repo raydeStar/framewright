@@ -28,6 +28,19 @@ test.describe('browser WebMCP collaboration', () => {
     })
     expect(registration.names).toEqual(['get_storyboard_context', 'list_storyboard_shots', 'get_shot_details', 'inspect_shot_continuity', 'get_director_context', 'search_scene_assets', 'observe_current_frame', 'propose_shot_revision', 'propose_scene_edit', 'propose_scene_blockout', 'get_generation_status'])
     expect(registration.closed).toBe(true)
+    // A blockout object is closed too, and offers exactly the stand-ins the
+    // artist can place by hand: a person with one of the service's nine poses,
+    // and a card naming the project image it shows.
+    const blockoutItem = await page.evaluate(() => {
+      const tools = (window as unknown as { __framewrightTools: Map<string, { inputSchema: { properties: { items: { items: unknown } } } }> }).__framewrightTools
+      return tools.get('propose_scene_blockout')!.inputSchema.properties.items.items
+    }) as { additionalProperties: boolean; required: string[]; properties: Record<string, { enum?: string[] }> }
+    expect(blockoutItem.additionalProperties).toBe(false)
+    expect(blockoutItem.required).toEqual(['role'])
+    expect(Object.keys(blockoutItem.properties)).toEqual(['role', 'matchAssetId', 'shape', 'size', 'pose', 'imageAssetId', 'position', 'rotation', 'scale', 'motionIntent', 'confidence', 'note'])
+    expect(blockoutItem.properties.shape.enum).toEqual(['Box', 'Cylinder', 'Sphere', 'Plane', 'Person', 'Card'])
+    expect(blockoutItem.properties.pose.enum).toEqual(['Neutral', 'Walking', 'Running', 'Seated', 'Kneeling', 'Pointing', 'Reaching', 'Conversation', 'Prone'])
+    expect(blockoutItem.properties.imageAssetId).toEqual({ type: 'string', format: 'uuid', maxLength: 36 })
     expect(registration.oneLifecycle).toBe(true)
     expect(registration.signalActive).toBe(true)
     await page.getByTestId('agent-activity-button').click()
