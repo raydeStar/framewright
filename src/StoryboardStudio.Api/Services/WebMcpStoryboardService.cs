@@ -83,20 +83,7 @@ public sealed partial class WebMcpStoryboardService(
 
         offset = Math.Max(0, offset);
         limit = Math.Clamp(limit, 1, 20);
-        var query = db.Assets.AsNoTracking()
-            .Where(x => x.Kind == "Model" && !x.IsArchived
-                && (x.RevisionFamilyId == null || x.IsCurrentRevision));
-        if (search.Length > 0)
-        {
-            var pattern = $"%{EscapeLike(search)}%";
-            query = query.Where(x =>
-                EF.Functions.Like(x.DisplayName, pattern, "\\")
-                || EF.Functions.Like(x.OriginalFileName, pattern, "\\")
-                || EF.Functions.Like(x.TagsJson, pattern, "\\")
-                || EF.Functions.Like(x.Notes, pattern, "\\")
-                || EF.Functions.Like(x.Source, pattern, "\\"));
-        }
-
+        var query = CurrentLibrary("Model", search);
         var total = await query.CountAsync(cancellationToken);
         var page = await query.OrderBy(x => x.DisplayName).ThenBy(x => x.OriginalFileName).ThenBy(x => x.Id)
             .Skip(offset).Take(limit)
@@ -153,6 +140,85 @@ public sealed partial class WebMcpStoryboardService(
             generationAuthorized = false,
             usage = "Pass one returned assetId as matchAssetId in a scene blockout proposal. Searching does not place, import, or generate anything.",
         });
+    }
+
+    /// <summary>
+    /// A bounded search over current, non-archived pictures in the active project.
+    ///
+    /// A Card in a scene blockout proposal must cite a project Image by id. The
+    /// director context only names the selected reference, so without this an
+    /// agent could not put any other library picture on a card. It reads the
+    /// library and nothing else: no import, placement, generation, or job.
+    /// </summary>
+    public async Task<WebMcpEnvelope> SearchProjectImagesAsync(
+        string? search, int offset, int limit, CancellationToken cancellationToken)
+    {
+        search = (search ?? "").Trim();
+        if (search.Length > 120)
+            return Failure("invalid_image_search", "Image search text must be 120 characters or fewer.");
+
+        offset = Math.Max(0, offset);
+        limit = Math.Clamp(limit, 1, 20);
+        var query = CurrentLibrary("Image", search);
+        var total = await query.CountAsync(cancellationToken);
+        var page = await query.OrderBy(x => x.DisplayName).ThenBy(x => x.OriginalFileName).ThenBy(x => x.Id)
+            .Skip(offset).Take(limit)
+            .Select(x => new
+            {
+                x.Id, x.DisplayName, x.OriginalFileName, x.ContentHash, x.Width, x.Height, x.TagsJson, x.Notes,
+                x.RevisionFamilyId, x.RevisionNumber, x.IsCurrentRevision, x.UpdatedAt,
+            })
+            .ToArrayAsync(cancellationToken);
+
+        var images = page.Select(x => new
+        {
+            assetId = x.Id,
+            name = string.IsNullOrWhiteSpace(x.DisplayName)
+                ? Path.GetFileNameWithoutExtension(x.OriginalFileName)
+                : x.DisplayName,
+            kind = "Image",
+            x.ContentHash,
+            x.Width,
+            x.Height,
+            revisionFamilyId = x.RevisionFamilyId,
+            revisionNumber = x.RevisionNumber ?? 1,
+            currentRevision = x.RevisionFamilyId is null || x.IsCurrentRevision,
+            tags = Parse<string[]>(x.TagsJson) ?? [],
+            description = BoundedText(x.Notes, 300),
+            canShowOnSceneCard = true,
+            x.UpdatedAt,
+        }).ToArray();
+
+        return Success("project_images_listed", $"Loaded {images.Length} of {total} project images.", new
+        {
+            images,
+            search,
+            offset,
+            limit,
+            total,
+            generationAuthorized = false,
+            usage = "Pass one returned assetId as imageAssetId on a Card in a scene blockout proposal. Searching does not place, import, or generate anything.",
+        });
+    }
+
+    /// <summary>
+    /// Current, non-archived library rows of one kind in the active project,
+    /// optionally narrowed by literal text. Archived and superseded revisions
+    /// stay out, while their immutable rows remain in the ordinary library.
+    /// </summary>
+    private IQueryable<AssetRecord> CurrentLibrary(string kind, string search)
+    {
+        var query = db.Assets.AsNoTracking()
+            .Where(x => x.Kind == kind && !x.IsArchived
+                && (x.RevisionFamilyId == null || x.IsCurrentRevision));
+        if (search.Length == 0) return query;
+        var pattern = $"%{EscapeLike(search)}%";
+        return query.Where(x =>
+            EF.Functions.Like(x.DisplayName, pattern, "\\")
+            || EF.Functions.Like(x.OriginalFileName, pattern, "\\")
+            || EF.Functions.Like(x.TagsJson, pattern, "\\")
+            || EF.Functions.Like(x.Notes, pattern, "\\")
+            || EF.Functions.Like(x.Source, pattern, "\\"));
     }
 
     public async Task<WebMcpEnvelope> ShotDetailsAsync(Guid shotId, CancellationToken cancellationToken)

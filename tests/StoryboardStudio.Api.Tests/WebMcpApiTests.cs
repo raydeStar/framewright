@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using StoryboardStudio.Api.Persistence;
 
@@ -146,6 +147,105 @@ public sealed class WebMcpApiTests
         using var isolated = await client.GetFromJsonAsync<JsonDocument>(
             "/api/webmcp/scene-assets?search=warm-light") ?? throw new InvalidOperationException();
         Assert.Equal(0, isolated.RootElement.GetProperty("data").GetProperty("total").GetInt32());
+    }
+
+    [Fact]
+    public async Task ProjectImageSearchFindsOnlyCurrentImagesInTheActiveProjectAndStartsNoWork()
+    {
+        using var factory = new StudioApiFactory();
+        using var client = factory.CreateClient();
+        var duskOriginal = await AssetUploads.ImageAsync(client, "harbour-card-dusk.png");
+        var duskCurrent = await AssetUploads.ImageAsync(client, "harbour-card-dusk-graded.png");
+        var sky = await AssetUploads.ImageAsync(client, "evening-sky.png");
+        var archived = await AssetUploads.ImageAsync(client, "harbour-card-rejected.png");
+        var crate = await ImportModelAsync(client, ModelFixtures.AsymmetricBlock(), "harbour-card-crate.glb");
+        var projectId = sky.ProjectId;
+
+        // Found by tag, not by its file name.
+        (await client.PutAsJsonAsync($"/api/assets/{sky.Id}", new
+        {
+            displayName = "Evening sky", collectionId = (Guid?)null,
+            tags = (string[])["harbour-card"], notes = "Backdrop for the quay.",
+        })).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/assets/{duskOriginal.Id}/revisions", new
+        {
+            assetId = duskCurrent.Id, prompt = "Graded current revision.", engine = "Imported",
+        })).EnsureSuccessStatusCode();
+        (await client.PostAsync($"/api/assets/{archived.Id}/archive", null)).EnsureSuccessStatusCode();
+
+        var before = await WorkCountsAsync(factory);
+        using var result = await ImagesAsync(client, "search=harbour-card&offset=0&limit=20");
+        Assert.True(result.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("project_images_listed", result.RootElement.GetProperty("code").GetString());
+        var data = result.RootElement.GetProperty("data");
+        Assert.Equal(2, data.GetProperty("total").GetInt32());
+        Assert.False(data.GetProperty("generationAuthorized").GetBoolean());
+        var images = data.GetProperty("images").EnumerateArray().ToArray();
+        // The current revision and the tagged picture; never the superseded
+        // revision, the archived picture, or a model whose name matches.
+        Assert.Equal(
+            new[] { duskCurrent.Id, sky.Id }.Order(),
+            images.Select(x => x.GetProperty("assetId").GetGuid()).Order());
+        Assert.DoesNotContain(images, x => x.GetProperty("assetId").GetGuid() == crate);
+        var found = images.Single(x => x.GetProperty("assetId").GetGuid() == sky.Id);
+        Assert.Equal("Evening sky", found.GetProperty("name").GetString());
+        Assert.Equal("Image", found.GetProperty("kind").GetString());
+        Assert.Equal(sky.ContentHash, found.GetProperty("contentHash").GetString());
+        Assert.Equal(sky.Width, found.GetProperty("width").GetInt32());
+        Assert.Equal(sky.Height, found.GetProperty("height").GetInt32());
+        Assert.True(found.GetProperty("canShowOnSceneCard").GetBoolean());
+        var graded = images.Single(x => x.GetProperty("assetId").GetGuid() == duskCurrent.Id);
+        Assert.Equal(2, graded.GetProperty("revisionNumber").GetInt32());
+        Assert.True(graded.GetProperty("currentRevision").GetBoolean());
+
+        // Paged and bounded: a page of one, and no page larger than twenty.
+        using var first = await ImagesAsync(client, "search=harbour-card&offset=0&limit=1");
+        using var second = await ImagesAsync(client, "search=harbour-card&offset=1&limit=1");
+        var firstId = Assert.Single(first.RootElement.GetProperty("data").GetProperty("images").EnumerateArray()).GetProperty("assetId").GetGuid();
+        var secondId = Assert.Single(second.RootElement.GetProperty("data").GetProperty("images").EnumerateArray()).GetProperty("assetId").GetGuid();
+        Assert.NotEqual(firstId, secondId);
+        using var huge = await ImagesAsync(client, "limit=500");
+        Assert.Equal(20, huge.RootElement.GetProperty("data").GetProperty("limit").GetInt32());
+        Assert.True(huge.RootElement.GetProperty("data").GetProperty("images").GetArrayLength() <= 20);
+        using var overlong = await ImagesAsync(client, $"search={new string('x', 121)}");
+        Assert.Equal("invalid_image_search", overlong.RootElement.GetProperty("code").GetString());
+        using var literalWildcard = await ImagesAsync(client, "search=harbour%25");
+        Assert.Equal(0, literalWildcard.RootElement.GetProperty("data").GetProperty("total").GetInt32());
+
+        // Searching imported, placed, staged, and dispatched nothing.
+        Assert.Equal(before, await WorkCountsAsync(factory));
+
+        // A found picture is one a blockout card accepts.
+        var staged = await PostEnvelopeAsync(client, "/api/webmcp/scene-blockouts", new
+        {
+            referenceAssetId = duskCurrent.Id, observedReferenceHash = duskCurrent.ContentHash,
+            title = "Quay", summary = "A painted sky behind the quay.",
+            items = new[] { new { role = "Sky", shape = "Card", size = (double[])[4d, 2d, 0.01], imageAssetId = sky.Id } },
+            idempotencyKey = $"image-search-{Guid.NewGuid():N}",
+        });
+        Assert.True(staged.RootElement.GetProperty("ok").GetBoolean(), staged.RootElement.GetProperty("message").GetString());
+
+        // Another project sees only its own pictures, and switching back does
+        // not bring that project's pictures along.
+        var project = await client.PostAsJsonAsync("/api/projects", new
+        {
+            name = "Other picture library", production = "WebMCP", sequenceCode = "ISO-04",
+            sequenceName = "Empty sequence", framesPerSecond = 24, aspectRatio = "2.40:1",
+            deliveryWidth = 2304, deliveryHeight = 960,
+        });
+        project.EnsureSuccessStatusCode();
+        using var projectJson = await project.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        (await client.PostAsync($"/api/projects/{projectJson.RootElement.GetProperty("id").GetGuid()}/activate", null)).EnsureSuccessStatusCode();
+        using (var isolated = await ImagesAsync(client, "search=harbour-card"))
+            Assert.Equal(0, isolated.RootElement.GetProperty("data").GetProperty("total").GetInt32());
+        var other = await AssetUploads.ImageAsync(client, "harbour-card-elsewhere.png");
+        using (var own = await ImagesAsync(client, "search=harbour-card"))
+            Assert.Equal(other.Id, Assert.Single(own.RootElement.GetProperty("data").GetProperty("images").EnumerateArray()).GetProperty("assetId").GetGuid());
+        (await client.PostAsync($"/api/projects/{projectId}/activate", null)).EnsureSuccessStatusCode();
+        using var back = await ImagesAsync(client, "search=harbour-card");
+        Assert.Equal(
+            new[] { duskCurrent.Id, sky.Id }.Order(),
+            back.RootElement.GetProperty("data").GetProperty("images").EnumerateArray().Select(x => x.GetProperty("assetId").GetGuid()).Order());
     }
 
     [Fact]
@@ -450,6 +550,23 @@ public sealed class WebMcpApiTests
         response.EnsureSuccessStatusCode();
         using var asset = await response.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         return asset.RootElement.GetProperty("id").GetGuid();
+    }
+
+    private static async Task<JsonDocument> ImagesAsync(HttpClient client, string query) =>
+        await client.GetFromJsonAsync<JsonDocument>($"/api/webmcp/images?{query}") ?? throw new InvalidOperationException();
+
+    /// <summary>Every row a search must never create, across all projects.</summary>
+    private static async Task<(int Assets, int Jobs, int Scenes, int Instances, int Plans, int Items)> WorkCountsAsync(StudioApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        return (
+            await db.Assets.IgnoreQueryFilters().CountAsync(),
+            await db.Jobs.IgnoreQueryFilters().CountAsync(),
+            await db.Scenes.IgnoreQueryFilters().CountAsync(),
+            await db.SceneInstances.IgnoreQueryFilters().CountAsync(),
+            await db.SceneBlockoutPlans.IgnoreQueryFilters().CountAsync(),
+            await db.SceneBlockoutItems.IgnoreQueryFilters().CountAsync());
     }
 
     private static async Task<JsonDocument> PostEnvelopeAsync(HttpClient client, string url, object body)
