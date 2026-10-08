@@ -287,6 +287,7 @@ public sealed class PortableProjectImportService(
         {
             var sourceId = row.Id; row.Id = Required(planItemIds, sourceId, "blockout item"); row.ProjectId = projectId;
             row.PlanId = Required(planIds, row.PlanId, "blockout plan"); row.MatchAssetId = Optional(assetIds, row.MatchAssetId, "matched asset");
+            row.PlaceholderImageAssetId = Optional(assetIds, row.PlaceholderImageAssetId, "planned card image");
             row.InstanceId = Optional(instanceIds, row.InstanceId, "scene instance");
         }
         foreach (var row in package.SceneShotBindings)

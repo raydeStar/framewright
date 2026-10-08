@@ -228,10 +228,15 @@ public sealed record SceneBlockoutPlanSummary(
     SceneBlockoutItemSummary[] Items, Guid? SceneId, string? SceneName,
     DateTimeOffset CreatedAt, DateTimeOffset? DecidedAt, DateTimeOffset? AppliedAt);
 
+/// <summary>
+/// One object an agent proposes. A Person stand-in may name its pose, and a Card
+/// names the project image it shows, exactly as the artist's own stand-ins do.
+/// </summary>
 public sealed record ProposeSceneBlockoutItemRequest(
     string Role, Guid? MatchAssetId, string? Shape, double[]? Size,
     double[]? Position, double[]? Rotation, double[]? Scale,
-    string? MotionIntent, string? Confidence, string? Note);
+    string? MotionIntent, string? Confidence, string? Note,
+    string? Pose = null, Guid? ImageAssetId = null);
 
 public sealed record ProposeSceneBlockoutRequest(
     Guid ReferenceAssetId, string ObservedReferenceHash, string Title, string Summary,

@@ -453,4 +453,92 @@ public sealed class SchemaMigrationTests
             if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task BlockoutPersonCardV24UpgradesAWorkstationWhosePlansCannotHoldPosesOrCards()
+    {
+        var dataRoot = Path.Combine(Path.GetTempPath(), "framewright-schema-blockout-standins", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataRoot);
+        var databasePath = Path.Combine(dataRoot, "test.db");
+
+        try
+        {
+            Guid oldPlanId;
+            AssetSummary reference;
+            using (var baselineFactory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var baselineClient = baselineFactory.CreateClient())
+            {
+                reference = await AssetUploads.ImageAsync(baselineClient, "before-v24-reference.png");
+                var staged = await baselineClient.PostAsJsonAsync("/api/webmcp/scene-blockouts", new
+                {
+                    referenceAssetId = reference.Id, observedReferenceHash = reference.ContentHash,
+                    title = "Before v24", summary = "A plan staged before plans could hold people or cards.",
+                    items = new object[] { new { role = "Crate", shape = "Box", size = (double[])[1d, 1d, 1d] } },
+                    idempotencyKey = "before-v24",
+                });
+                staged.EnsureSuccessStatusCode();
+                using var envelope = (await staged.Content.ReadFromJsonAsync<JsonDocument>())!;
+                oldPlanId = envelope.RootElement.GetProperty("data").GetProperty("id").GetGuid();
+            }
+
+            // Reproduce a workstation that recorded v23 and never saw v24.
+            await using (var legacy = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+            {
+                await legacy.OpenAsync();
+                await using var downgrade = legacy.CreateCommand();
+                downgrade.CommandText = """
+                    DELETE FROM "SchemaMigrations" WHERE "Id" = '20261008-blockout-person-and-card-v24';
+                    ALTER TABLE "SceneBlockoutItems" DROP COLUMN "PlaceholderPose";
+                    ALTER TABLE "SceneBlockoutItems" DROP COLUMN "PlaceholderImageAssetId";
+                    """;
+                await downgrade.ExecuteNonQueryAsync();
+            }
+
+            using (var upgradedFactory = new StudioApiFactory(dataRoot, deleteDataRoot: false))
+            using (var upgradedClient = upgradedFactory.CreateClient())
+            {
+                Assert.Equal(HttpStatusCode.OK, (await upgradedClient.GetAsync("/health/ready")).StatusCode);
+                // The plan from before keeps its box, which has no pose and no picture.
+                using var oldPlan = (await upgradedClient.GetFromJsonAsync<JsonDocument>($"/api/scene-blockouts/{oldPlanId}"))!;
+                var crate = Assert.Single(oldPlan.RootElement.GetProperty("items").EnumerateArray().ToArray()).GetProperty("placeholder");
+                Assert.Equal("Box", crate.GetProperty("shape").GetString());
+                Assert.False(crate.TryGetProperty("pose", out _));
+                Assert.False(crate.TryGetProperty("imageAssetId", out _));
+
+                // And the upgraded workstation stages and builds a posed person and a card at once.
+                var picture = await AssetUploads.ImageAsync(upgradedClient, "after-v24-picture.png");
+                var staged = await upgradedClient.PostAsJsonAsync("/api/webmcp/scene-blockouts", new
+                {
+                    referenceAssetId = reference.Id, observedReferenceHash = reference.ContentHash,
+                    title = "After v24", summary = "A seated figure in front of a picture.",
+                    items = new object[]
+                    {
+                        new { role = "Sitter", shape = "Person", size = (double[])[0.5, 1.75, 0.3], pose = "Seated" },
+                        new { role = "Backdrop", shape = "Card", size = (double[])[4d, 2d, 0.01], imageAssetId = picture.Id },
+                    },
+                    idempotencyKey = "after-v24",
+                });
+                staged.EnsureSuccessStatusCode();
+                using var envelope = (await staged.Content.ReadFromJsonAsync<JsonDocument>())!;
+                Assert.True(envelope.RootElement.GetProperty("ok").GetBoolean());
+                var planId = envelope.RootElement.GetProperty("data").GetProperty("id").GetGuid();
+                var built = await upgradedClient.PostAsJsonAsync($"/api/scene-blockouts/{planId}/apply", new { sceneName = "After v24" });
+                Assert.Equal(HttpStatusCode.OK, built.StatusCode);
+                var scene = (await built.Content.ReadFromJsonAsync<SceneSummary>())!;
+                Assert.Equal("Seated", Assert.Single(scene.Instances, x => x.Name == "Sitter").Placeholder!.Pose);
+                Assert.Equal(picture.Id, Assert.Single(scene.Instances, x => x.Name == "Backdrop").Placeholder!.ImageAssetId);
+            }
+
+            await using var verified = new SqliteConnection($"Data Source={databasePath};Mode=ReadOnly;Pooling=False");
+            await verified.OpenAsync();
+            await using var ledger = verified.CreateCommand();
+            ledger.CommandText = "SELECT COUNT(*) FROM \"SchemaMigrations\" WHERE \"Id\" = '20261008-blockout-person-and-card-v24';";
+            Assert.Equal(1L, (long)(await ledger.ExecuteScalarAsync() ?? 0L));
+            Assert.NotEmpty(Directory.EnumerateFiles(dataRoot, "*blockout-person-and-card-v24*", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
+        }
+    }
 }

@@ -931,6 +931,10 @@ public sealed class SceneBlockoutItemRecord
     public double PlaceholderSizeX { get; set; }
     public double PlaceholderSizeY { get; set; }
     public double PlaceholderSizeZ { get; set; }
+    /// <summary>A planned Person's pose; empty for every other shape.</summary>
+    public string? PlaceholderPose { get; set; }
+    /// <summary>The project image a planned Card shows; empty for every other shape.</summary>
+    public Guid? PlaceholderImageAssetId { get; set; }
     public double PositionX { get; set; }
     public double PositionY { get; set; }
     public double PositionZ { get; set; }
