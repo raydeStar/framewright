@@ -11,6 +11,15 @@ const SceneViewport = lazy(() => import('./SceneViewport'))
 
 const axes = ['X', 'Y', 'Z'] as const
 
+/** A camera rounded to what its fields show, so an orbit never writes floating-point noise into them. */
+function settleCamera(camera: SceneCameraSummary): SceneCameraSummary {
+  const fixed = (value: number, places: number) => Number(value.toFixed(places)) + 0
+  return {
+    yaw: fixed(camera.yaw, 4), pitch: fixed(camera.pitch, 4), distance: fixed(camera.distance, 3),
+    target: camera.target.map(value => fixed(value, 3)), fieldOfView: fixed(camera.fieldOfView, 2),
+  }
+}
+
 function interpolateCamera(start: SceneCameraSummary, end: SceneCameraSummary, ratio: number): SceneCameraSummary {
   const amount = Math.min(1, Math.max(0, ratio))
   const linear = (from: number, to: number) => from + (to - from) * amount
@@ -80,6 +89,11 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
   const [replacementId, setReplacementId] = useState<string>()
   const [shotId, setShotId] = useState(studio.shots[0]?.id ?? '')
   const [shotCamera, setShotCamera] = useState<SceneCameraSummary>()
+  /**
+   * Looking through the shot camera. Orbiting then moves the shot camera, which
+   * is working state for the next render, and never the saved inspection view.
+   */
+  const [lookThrough, setLookThrough] = useState(false)
   const [shotStart, setShotStart] = useState(0)
   const [shotStill, setShotStill] = useState(0)
   const [shotBindings, setShotBindings] = useState<SceneShotBindingSummary[]>([])
@@ -276,10 +290,12 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
       shotSceneId.current = undefined
       setShotBindings([])
       setShotCamera(undefined)
+      setLookThrough(false)
       return
     }
     if (shotSceneId.current === scene.id) return
     shotSceneId.current = scene.id
+    setLookThrough(false)
     setShotCamera({ ...scene.camera, target: [...scene.camera.target] })
     let live = true
     void studioApi.sceneShotStills(scene.id)
@@ -596,7 +612,11 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
             <Suspense fallback={<div className="asset-loading"><LoaderCircle className="spin" /><span>Opening the scene view…</span></div>}>
               <SceneViewport
                 instances={scene.instances}
-                camera={scene.camera}
+                camera={lookThrough && shotCamera ? shotCamera : scene.camera}
+                framing={lookThrough && shotCamera ? {
+                  aspect: studio.project.deliveryWidth / studio.project.deliveryHeight,
+                  label: `${shot?.code ?? 'Shot'} camera · ${studio.project.deliveryWidth} × ${studio.project.deliveryHeight}`,
+                } : undefined}
                 environment={scene.environment}
                 selectedId={selectedId}
                 noteMode={noteMode}
@@ -606,7 +626,9 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                 onPlaceNote={placeNote}
                 onTransform={(instanceId, transform) => editInstance(instanceId, item => ({ ...item, ...transform }))}
                 onCaptureReady={capture => setCaptureStill(() => capture)}
-                onCameraChange={(camera: SceneCameraSummary) => edit(current => ({ ...current, camera }))}
+                onCameraChange={(camera: SceneCameraSummary) => lookThrough && shotCamera
+                  ? setShotCamera(settleCamera(camera))
+                  : edit(current => ({ ...current, camera }))}
               />
             </Suspense>
           </section>
@@ -830,6 +852,11 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                     {shotCamera && <div className="scene-shot-camera">
                       <div className="scene-section-heading"><strong>Shot camera</strong><button type="button" disabled={busy}
                         onClick={() => setShotCamera({ ...scene.camera, target: [...scene.camera.target] })}>Use inspection view</button></div>
+                      <button type="button" className={`scene-look-through${lookThrough ? ' active' : ''}`} aria-pressed={lookThrough}
+                        data-testid="scene-look-through" onClick={() => setLookThrough(value => !value)}>
+                        {lookThrough ? 'Back to inspection view' : 'Look through shot camera'}
+                      </button>
+                      {lookThrough && <p className="model-note">Orbit, zoom, and Frame all now move this shot camera. The saved inspection view stays where it was.</p>}
                       <div className="scene-vector"><span>Orbit</span><div>
                         <label>Yaw<input type="number" step={0.05} aria-label="Shot camera yaw" value={shotCamera.yaw}
                           onChange={event => setShotCamera(current => current && ({ ...current, yaw: Number(event.target.value) }))} /></label>

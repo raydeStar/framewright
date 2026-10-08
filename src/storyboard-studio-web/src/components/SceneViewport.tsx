@@ -3,6 +3,7 @@ import { AmbientLight, AnimationMixer, Box3, BoxGeometry, Color, CylinderGeometr
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { settleTransform, type HandleMode, type SceneInstanceTransform } from '../sceneTransforms'
+import { frameGuide, framedFieldOfView } from '../sceneFraming'
 import { ACESFilmicToneMapping, NoToneMapping, PCFShadowMap, PointLight } from 'three'
 import { sharpenTextures } from './textureQuality'
 // A skinned mesh cannot be cloned with Object3D.clone: the copies would share
@@ -46,6 +47,12 @@ export interface SceneViewportProps {
    * transform. Reported into working state only; Save is still the only write.
    */
   onTransform?: (instanceId: string, transform: SceneInstanceTransform) => void
+  /**
+   * Looking through the shot camera: the stage shows the delivery-shaped frame
+   * a render would take, and `camera` is the shot camera. Absent, the stage is
+   * the inspection view.
+   */
+  framing?: { aspect: number; label: string }
   /** Supplies the real renderer's exact-canvas still capture while it is mounted. */
   onCaptureReady?: (capture: ((request: { camera: SceneCameraSummary; time: number; width: number; height: number }) => Promise<Blob>) | undefined) => void
 }
@@ -55,7 +62,7 @@ type ViewportState = 'loading' | 'ready' | 'unsupported'
 /** Identifies one stand-in's geometry, so a resized placeholder is rebuilt. */
 const shapeKey = (shape: ScenePlaceholderSummary) => `${shape.shape}:${shape.size.join(',')}`
 
-export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote, onCaptureReady, onTransform }: SceneViewportProps) {
+export default function SceneViewport({ instances, camera, environment, selectedId, noteMode, playhead, playing, onSelect, onCameraChange, onPlaceNote, onCaptureReady, onTransform, framing }: SceneViewportProps) {
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewportState>('loading')
   const [handleMode, setHandleMode] = useState<HandleMode>('move')
@@ -73,6 +80,9 @@ export default function SceneViewport({ instances, camera, environment, selected
   } | undefined>(undefined)
   const transformed = useRef(onTransform)
   transformed.current = onTransform
+  const framingAspect = useRef(framing?.aspect)
+  framingAspect.current = framing?.aspect
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 })
   const view = useRef({ ...camera })
   const drag = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | undefined>(undefined)
   const report = useRef(onCameraChange)
@@ -186,9 +196,14 @@ export default function SceneViewport({ instances, camera, environment, selected
       if (handles.object !== proxy) handles.attach(proxy)
     }
 
+    // A render sets its own aspect and must take the shot camera's field of
+    // view exactly, so the stage's widened framing never reaches a still.
+    let capturing = false
     const place = () => {
       const { yaw, pitch, distance, target } = view.current
-      perspective.fov = view.current.fieldOfView
+      perspective.fov = capturing || !framingAspect.current
+        ? view.current.fieldOfView
+        : framedFieldOfView(view.current.fieldOfView, framingAspect.current, perspective.aspect)
       perspective.updateProjectionMatrix()
       perspective.position.set(
         target[0] + distance * Math.cos(pitch) * Math.sin(yaw),
@@ -549,6 +564,7 @@ export default function SceneViewport({ instances, camera, environment, selected
       const restoreWidth = Math.max(1, container.clientWidth)
       const restoreHeight = Math.max(1, container.clientHeight)
       try {
+        capturing = true
         grid.visible = false
         handleHelper.visible = false
         renderer.setPixelRatio(1)
@@ -564,6 +580,7 @@ export default function SceneViewport({ instances, camera, environment, selected
           blob => blob ? resolve(blob) : reject(new Error('The graphics device could not encode the scene still.')),
           'image/png'))
       } finally {
+        capturing = false
         grid.visible = true
         handleHelper.visible = true
         renderer.setPixelRatio(originalRatio)
@@ -632,8 +649,10 @@ export default function SceneViewport({ instances, camera, environment, selected
       const height = Math.max(1, container.clientHeight)
       renderer.setSize(width, height, false)
       perspective.aspect = width / height
-      perspective.updateProjectionMatrix()
-      draw()
+      setStageSize(current => current.width === width && current.height === height ? current : { width, height })
+      // The shot frame's fit depends on the stage's shape, so placing again
+      // keeps it right as the stage resizes.
+      place()
     }
     const observer = new ResizeObserver(resize)
     observer.observe(container)
@@ -749,7 +768,7 @@ export default function SceneViewport({ instances, camera, environment, selected
   // through its own settings.
   useEffect(() => { surface.current?.animate(instances, playhead ?? 0) }, [instances, playhead])
   useEffect(() => { surface.current?.light(environment) }, [environment])
-  useEffect(() => { view.current = { ...camera }; surface.current?.place() }, [camera])
+  useEffect(() => { view.current = { ...camera }; surface.current?.place() }, [camera, framing?.aspect])
 
   // A running clock is the artist's play button; nothing here advances on its
   // own, so a paused scene draws nothing it was not asked to.
@@ -808,22 +827,33 @@ export default function SceneViewport({ instances, camera, environment, selected
     orbit(move[0], move[1])
   }
 
+  const guide = framing ? frameGuide(stageSize.width, stageSize.height, framing.aspect) : undefined
   return <div className="scene-viewport" data-testid="scene-viewport" data-state={state}>
-    <div
-      ref={host}
-      className="scene-stage"
-      data-testid="scene-stage"
-      role="img"
-      aria-label={noteMode
-        ? 'Scene view. Placing a note: click the exact spot on an object.'
-        : "Scene view. Drag empty space or use the arrow keys to orbit the inspection camera. Drag a selected object's handles to move, rotate, or scale it; the placement fields do the same from the keyboard."}
-      tabIndex={0}
-      onKeyDown={nudge}
-      onPointerDown={pointerDown}
-      onPointerMove={pointerMove}
-      onPointerUp={pointerUp}
-      onPointerCancel={() => { drag.current = undefined }}
-    />
+    <div className="scene-stage-frame">
+      <div
+        ref={host}
+        className={`scene-stage${framing ? ' through-shot' : ''}`}
+        data-testid="scene-stage"
+        data-view={framing ? 'shot' : 'inspection'}
+        role="img"
+        aria-label={noteMode
+          ? 'Scene view. Placing a note: click the exact spot on an object.'
+          : framing
+            ? `Looking through the shot camera, ${framing.label}. Drag empty space or use the arrow keys to orbit the shot camera; the inspection camera stays where it was.`
+            : "Scene view. Drag empty space or use the arrow keys to orbit the inspection camera. Drag a selected object's handles to move, rotate, or scale it; the placement fields do the same from the keyboard."}
+        tabIndex={0}
+        onKeyDown={nudge}
+        onPointerDown={pointerDown}
+        onPointerMove={pointerMove}
+        onPointerUp={pointerUp}
+        onPointerCancel={() => { drag.current = undefined }}
+      />
+      {/* What a render would take: everything outside the frame is dimmed. */}
+      {guide && guide.width > 0 && <div className="scene-shot-guide" data-testid="scene-shot-guide" aria-hidden="true"
+        style={{ left: guide.left, top: guide.top, width: guide.width, height: guide.height }}>
+        <span>{framing!.label}</span>
+      </div>}
+    </div>
     <div className="scene-viewport-bar">
       <span data-testid="scene-object-count">{instances.length} {instances.length === 1 ? 'object' : 'objects'}</span>
       {onTransform && <div className="scene-handle-tools" role="group" aria-label="Object handles">

@@ -1918,6 +1918,8 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .scene-workspace.director-mode .scene-stage-shell{padding:0}
 .scene-section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
 .scene-section-heading button{padding:6px 9px}
+.scene-look-through{width:100%;min-height:40px;margin:0 0 10px;justify-content:center}
+.scene-look-through.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent-strong)}
 .scene-render-still{width:100%;justify-content:center;margin-top:10px}
 .scene-shot-bindings{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
 .scene-shot-bindings li{display:grid;grid-template-columns:72px minmax(0,1fr);gap:9px;align-items:center;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface-2)}
@@ -2037,6 +2039,11 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .scene-stage-shell{min-width:0;min-height:0;display:grid;padding:16px}
 .scene-viewport{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto;gap:8px}
 .scene-stage{min-height:240px;border:1px solid var(--line);border-radius:10px;background:var(--surface-void);overflow:hidden;touch-action:none;cursor:grab}
+.scene-stage-frame{position:relative;min-width:0;min-height:0;display:grid;border-radius:10px;overflow:hidden}
+.scene-stage.through-shot{border-color:var(--accent-line)}
+/* The shot frame: what a render takes. The shadow dims everything outside it. */
+.scene-shot-guide{position:absolute;margin:1px 0 0 1px;pointer-events:none;outline:1px solid var(--accent-strong);box-shadow:0 0 0 100vmax rgb(0 0 0 / 55%)}
+.scene-shot-guide span{position:absolute;left:8px;top:8px;padding:3px 7px;border-radius:5px;background:rgb(0 0 0 / 60%);color:var(--accent-strong);font-size:var(--text-2xs);font-weight:650}
 .scene-stage:active{cursor:grabbing}
 .scene-stage:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .scene-stage canvas{display:block;width:100%;height:100%}
@@ -2070,12 +2077,12 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
      toolbar, however many lines it wraps to, so the toolbar never sits over
      the stage. Director Mode below still gives the stage the whole screen. */
   .scene-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto}
-  .scene-stage-shell,.scene-viewport{min-height:auto}
+  .scene-stage-shell,.scene-viewport,.scene-stage-frame{min-height:auto}
   .scene-viewport{grid-template-rows:auto auto}
   .scene-inspector{border-left:0;border-top:1px solid var(--line)}
   .scene-stage{height:clamp(240px,42vh,560px);min-height:0}
   .scene-workspace.director-mode .scene-layout{grid-template-rows:minmax(0,1fr)}
-  .scene-workspace.director-mode .scene-stage-shell,.scene-workspace.director-mode .scene-viewport{min-height:0}
+  .scene-workspace.director-mode .scene-stage-shell,.scene-workspace.director-mode .scene-viewport,.scene-workspace.director-mode .scene-stage-frame{min-height:0}
   .scene-workspace.director-mode .scene-viewport{grid-template-rows:minmax(0,1fr) auto}
   .scene-workspace.director-mode .scene-stage{height:auto;min-height:200px}
 }

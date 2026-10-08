@@ -221,6 +221,74 @@ test('handles in the view move, turn, and scale only the selected object, and or
   verifyConsole()
 })
 
+test('looking through the shot camera frames the delivery picture and moves only the shot camera', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  await page.goto('/')
+  const studio = await (await page.request.get('/api/studio')).json() as {
+    shots: { id: string; code: string; version: number }[]
+    project: { deliveryWidth: number; deliveryHeight: number }
+  }
+  const targetShot = studio.shots[0]
+  const aspect = studio.project.deliveryWidth / studio.project.deliveryHeight
+
+  const scene = await newScene(page)
+  await page.getByTestId('scene-objects').getByRole('button', { name: 'Add box stand-in' }).click()
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+  const saved = await readScene(page, scene.id)
+
+  const shotSetup = page.getByTestId('scene-shot')
+  await shotSetup.getByLabel('Scene shot').selectOption(targetShot.id)
+  const stage = page.getByTestId('scene-stage')
+  await expect(stage).toHaveAttribute('data-view', 'inspection')
+  await expect(page.getByTestId('scene-shot-guide')).toHaveCount(0)
+  const yawBefore = await shotSetup.getByLabel('Shot camera yaw').inputValue()
+
+  await shotSetup.getByTestId('scene-look-through').click()
+  await expect(stage).toHaveAttribute('data-view', 'shot')
+  const guide = page.getByTestId('scene-shot-guide')
+  await expect(guide).toBeVisible()
+  await expect(guide).toContainText(`${targetShot.code} camera`)
+
+  // The frame has the delivery shape and fits the stage on its long side.
+  const frame = (await guide.boundingBox())!
+  const view = (await stage.boundingBox())!
+  expect(Math.abs(frame.width / frame.height - aspect)).toBeLessThan(0.02)
+  if (aspect >= view.width / view.height) expect(Math.abs(frame.width - (view.width - 2))).toBeLessThan(2)
+  else expect(Math.abs(frame.height - (view.height - 2))).toBeLessThan(2)
+  expect(frame.x).toBeGreaterThanOrEqual(view.x)
+  expect(frame.x + frame.width).toBeLessThanOrEqual(view.x + view.width + 0.5)
+
+  // Orbiting here moves the shot camera only. The saved scene, inspection
+  // camera included, is untouched and has nothing to save.
+  await page.mouse.move(frame.x + 20, frame.y + 20)
+  await page.mouse.down()
+  await page.mouse.move(frame.x + 140, frame.y + 50, { steps: 6 })
+  await page.mouse.up()
+  await expect(shotSetup.getByLabel('Shot camera yaw')).not.toHaveValue(yawBefore)
+  await expect(page.getByTestId('scene-save')).toBeDisabled()
+  expect((await readScene(page, scene.id)).camera).toEqual(saved.camera)
+  // Fields show the camera at their own precision, not floating-point noise.
+  expect(await shotSetup.getByLabel('Shot camera yaw').inputValue()).toMatch(/^-?\d+(\.\d{1,4})?$/)
+  const framedYaw = Number(await shotSetup.getByLabel('Shot camera yaw').inputValue())
+  const framedPitch = Number(await shotSetup.getByLabel('Shot camera pitch').inputValue())
+  await page.screenshot({ path: testInfo.outputPath('scene-look-through.png'), fullPage: true })
+
+  await shotSetup.getByTestId('scene-look-through').click()
+  await expect(stage).toHaveAttribute('data-view', 'inspection')
+  await expect(page.getByTestId('scene-shot-guide')).toHaveCount(0)
+  await expect(page.getByTestId('scene-save')).toBeDisabled()
+
+  // The still is taken with the camera the artist framed.
+  await shotSetup.getByRole('button', { name: 'Render still for review' }).click()
+  await expect(page.getByTestId('review-workspace')).toBeVisible()
+  const bindings = await (await page.request.get(`/api/scenes/${scene.id}/shot-stills`)).json() as { shotId: string; camera: { yaw: number; pitch: number } }[]
+  const binding = bindings.find(item => item.shotId === targetShot.id)!
+  expect(binding.camera.yaw).toBeCloseTo(framedYaw, 4)
+  expect(binding.camera.pitch).toBeCloseTo(framedPitch, 4)
+  verifyConsole()
+})
+
 async function newScene(page: Page) {
   await page.getByRole('button', { name: 'Scene', exact: true }).click()
   const createdResponse = page.waitForResponse(response => response.url().endsWith('/api/scenes') && response.request().method() === 'POST')
