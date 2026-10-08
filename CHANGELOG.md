@@ -49,6 +49,11 @@
   a picture from the active project. The plan names both for review, and Build
   makes the same objects the artist would place by hand. A card citing anything
   but this project's image is refused and nothing is staged.
+- **Agents can find the pictures to put on cards.** A new read-only browser
+  tool, `search_project_images`, lists current, non-archived images in the
+  active project, twenty at a time, with id, name, content hash, and size. An
+  agent can now put any library picture on a planned card, not only the
+  selected reference. Searching imports, places, and generates nothing.
 - Three schema migrations back up the database first: v22 and v23 add one
   nullable column each to scene objects, and v24 adds a pose and a card picture
   to blockout plan objects.

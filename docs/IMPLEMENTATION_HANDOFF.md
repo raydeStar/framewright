@@ -82,6 +82,13 @@ project, and package import remaps a planned card's picture. Build is still the
 only step that creates anything. Proven with the WebMCP shim, not yet in an
 actual host.
 
+A twelfth, read-only WebMCP tool, `search_project_images` (K07), lets an agent
+find a card's picture: `GET /api/webmcp/images` returns current, non-archived
+Image assets in the active project, paged at twenty or fewer, with id, name,
+content hash, width, and height. It shares the model search's filter and
+starts no import, placement, plan, or job. Proven with the shim, not yet seen
+by an actual host.
+
 ## Scene local lighting (2026-09-22)
 
 Saved scenes now support named local lights, lighting colors, exposure, filmic

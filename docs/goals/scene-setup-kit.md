@@ -2,8 +2,8 @@
 
 **Project:** Framewright
 **Created:** 2026-10-08
-**Branch:** `feat/scene-setup-kit` from `main` at `94145b20abf510c056acf61607056c7ecd66e638`; K06 on `feat/blockout-person-card` from `feat/scene-setup-kit` at `e913ed9`
-**Overall status:** VERIFIED for K00-K05 and CONTRACT_VERIFIED for K06 on the branches; not pushed, not released, no human visual acceptance recorded
+**Branch:** `feat/scene-setup-kit` from `main` at `94145b20abf510c056acf61607056c7ecd66e638`; K06 on `feat/blockout-person-card` from `feat/scene-setup-kit` at `e913ed9`; K07 on `feat/blockout-image-search` from `feat/blockout-person-card` at `d45d747`
+**Overall status:** VERIFIED for K00-K05 and CONTRACT_VERIFIED for K06 and K07 on the branches; not pushed, not released, no human visual acceptance recorded
 
 ## 1. Outcome
 
@@ -56,6 +56,7 @@ implementation is written against Framewright's own contracts.
 | K04 | A posable 3D stand-in person with pose presets, saved and reopened | K01 | D, A, migration, package |
 | K05 | Image cards: a library image as a backdrop or cutout plane | K01 | D, A, migration, package |
 | K06 | An agent's blockout plan can propose a posed person and an image card | K04, K05, director-mode M11 | D, A (shim agent), migration, package |
+| K07 | An agent can find a project picture other than the selected reference to put on a planned card | K06 | D, A (shim agent), desktop + tablet |
 
 ### K01. Hand-placed stand-ins
 
@@ -115,7 +116,29 @@ picture.
 
 **Defer:** An image search tool for agents (a card can cite the selected
 reference, whose id the director context already gives, or an id the agent
-learned elsewhere), and actual-host evidence for the widened schema.
+learned elsewhere), and actual-host evidence for the widened schema. K07
+delivers the search.
+
+### K07. Image search for planned cards
+
+**Deliver:** A twelfth WebMCP tool, `search_project_images`, read-only and
+closed like `search_scene_assets`: optional `search` (120 characters or
+fewer), `offset`, and `limit` (1 to 20). It returns current, non-archived
+Image assets in the active project with `assetId`, name, content hash, width,
+and height, plus revision identity and tags. `GET /api/webmcp/images` in
+`WebMcpStoryboardService` shares the model search's library filter. A new
+tool rather than a kind filter on `search_scene_assets`, so that tool's
+model-specific result and its host-verified schema stay unchanged.
+
+**Prove:** Archived pictures, superseded revisions, and models never appear;
+another project's pictures never appear; a page never exceeds twenty;
+searching creates no asset, job, scene, object, or plan; and an id the search
+returns is accepted as a card's `imageAssetId` and builds a card showing those
+exact bytes.
+
+**Defer:** Actual-host discovery of the twelve-tool registry. Archived images
+are still accepted on a card by id, as before; the search only stops offering
+them.
 
 ## 4. Progress and evidence ledger
 
@@ -128,6 +151,7 @@ learned elsewhere), and actual-host evidence for the widened schema.
 | K04 | VERIFIED | Schema: migration `20261008-person-stand-in-pose-v22` adds nullable `SceneInstances.PlaceholderPose`. D: `SceneStandInTests` (pose survives restart and a working-package import with fresh IDs, unknown poses and poses on other shapes refused with the version unchanged, a still freezes the pose it was rendered with after the pose changes), `SchemaMigrationTests.PersonStandInV22...` (an isolated v21 database upgrades, keeps its box stand-in, writes a pre-migration backup, records v22, and takes a posed person), `unit/scenePoses.test.ts` (front-end pose list matches `SceneService.SupportedPoses`). A: person journey on desktop and tablet drops every pose to the same resting height, saves height and pose, reloads three posed figures. Full backend suite 379/379. Non-person stand-ins serialise without a `pose` field, so their snapshots are byte-identical to before. Sabotage: not storing the pose fails three backend tests; not sending it fails the journey. Also fixed: stand-in colours came from a hash that put `Box 1` and `Box 2` a degree apart. Not done: the agent blockout tool's shape list still omits Person, and blockout plans cannot carry a pose; agent-built people stand in Neutral. |
 | K05 | VERIFIED | Schema: migration `20261008-image-card-stand-in-v23` adds nullable `SceneInstances.PlaceholderImageAssetId`. A Card stand-in cites a project Image asset by id; the service describes it with URL and content hash, so stills freeze the exact picture. D: `SceneImageCardTests` (card survives restart; working-package import remaps the picture to the new project's copy with the same hash; library usage counts the card; a missing picture, a model, another project's image, an unknown id, or a picture on a box is refused with the version unchanged), `SchemaMigrationTests.ImageCardV23...`, unit tests for card shape and aspect-keeping resize. A: image-card journey on desktop and tablet adds a 2:1 half-transparent picture, keeps its shape on resize, samples canvas pixels showing the opaque half red and unlit and the clear half not filled, saves and reopens it, and proves a still waits for a held picture instead of freezing a blank card. Full backend suite 382/382. Sabotage: dropping the package remap fails the package test; skipping the picture wait fails the journey. Not done: background removal for cutouts needs a provider route and stays deferred; cards are unlit by design. |
 | K06 | CONTRACT_VERIFIED | Schema: migration `20261008-blockout-person-and-card-v24` adds nullable `SceneBlockoutItems.PlaceholderPose` and `SceneBlockoutItems.PlaceholderImageAssetId`. Staging validates through `SceneService.ValidatePlaceholder`, so a plan accepts exactly what a hand save accepts; a planned person with no pose is stored as Neutral, as a hand-placed one is. D: `SceneBlockoutStandInTests` (a seated person and a card build into objects whose placeholder JSON equals the hand-placed equivalents' through a restart; the plan describes pose, picture id, URL, and hash; a working package remaps the planned card to the new project's copy, the same one the built card shows; nine refusals including a card with no picture, a model, an unknown id, another project's image, a picture on a box, a pose on a box or a match, and an unknown pose leave zero plans and items; Build refuses a plan whose picture row has gone and leaves it Pending), `SchemaMigrationTests.BlockoutPersonCardV24...`. A: the shim agent's refused ghost card stages nothing; the staged plan shows the pose and the picture's name; Build makes a seated person and a ready card; the artist hand-places the same pair; after save and reload all four reopen and the planned and hand-placed placeholders are equal; desktop Chromium and iPad-sized WebKit. The WebMCP registration test now pins the blockout object schema (closed, field list, both enums, `imageAssetId` shape). Sabotage: Build not copying pose and picture fails two backend tests and the journey (card never ready); Build not copying only the pose fails the journey (`Neutral`, not `Seated`); dropping the package remap fails the package test; dropping `Person` from the tool enum fails the registration test. Not proven: an actual WebMCP host seeing the widened schema (the 2026-09-22 host check saw the old one), so this is CONTRACT_VERIFIED, not VERIFIED. Agents still have no image search; see the K06 Defer note. |
+| K07 | CONTRACT_VERIFIED | No schema change. D: `WebMcpApiTests.ProjectImageSearchFindsOnlyCurrentImagesInTheActiveProjectAndStartsNoWork` returns the graded current revision and a picture found by tag, never the superseded revision, the archived picture, or a model whose file name matches; checks id, name, kind, hash, width, and height against the import; pages of one return different pictures, a limit of 500 is clamped to 20, an overlong search is refused, and `%` is literal; asset, job, scene, object, plan, and plan-item counts across all projects are unchanged by searching; a found id stages a card; a second project sees none of the first's pictures and only its own, and switching back restores the first's. A: the registration test now expects twelve tools and pins `search_project_images`'s closed schema and read-only annotations; a shim-agent journey on desktop Chromium and iPad-sized WebKit uploads a reference, a picture, and an archived picture, reads the director context (which names only the reference), searches and gets the reference and the picture but not the archived one, with size and hash matching the upload, sees nothing staged or imported, stages a card citing the picture, sees the plan name it, builds it, reloads, and finds a ready card whose stored placeholder is the searched id, URL, and hash. Sabotage: dropping the archived filter fails the backend test (3, not 2) and the journey (3, not 2); bypassing the project query filter fails isolation (2, not 0). Not proven: an actual WebMCP host seeing the twelve-tool registry. |
 
 ### Full gate record - 2026-10-08
 
@@ -162,9 +186,8 @@ and human review of the plan text or the figures.
 
 ### Next candidates
 
-- A bounded, read-only image search for agents, so a card can cite a library
-  picture other than the selected reference without the artist naming it.
-- Exercise the widened blockout schema in an actual WebMCP host.
+- Exercise the widened blockout schema and the twelve-tool registry, including
+  `search_project_images`, in an actual WebMCP host.
 - Background removal for cutouts, as a separately gated provider route.
 - A pixel comparison between the framed stage and a rendered still.
 
