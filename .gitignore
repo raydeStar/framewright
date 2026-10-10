@@ -43,6 +43,14 @@ appsettings.Local.json
 
 # Production and generated media never belong in this repository
 media/
+# Reviewed offline assembly code only; generated media stays excluded.
+!tools/media/
+tools/media/*
+!tools/media/*.py
+!tools/media/README.md
+!tools/media/tests/
+tools/media/tests/*
+!tools/media/tests/*.py
 renders/
 outputs/
 output/
