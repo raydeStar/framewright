@@ -218,7 +218,7 @@ test('with no generator ready, generating explains itself and leads to working s
 
     // A connection test that fails says so in plain words.
     await drawer.getByRole('button', { name: 'Test connection' }).click()
-    await expect(drawer.getByText(/Nothing answered at this address|must run on this computer/)).toBeVisible()
+    await expect(drawer.getByRole('status').filter({ hasText: /Nothing answered at this address|must run on this computer/ })).toBeVisible()
   } finally {
     await restoreSetup()
     await restoreProject(page, original.id, name)

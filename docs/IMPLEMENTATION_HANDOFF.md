@@ -71,8 +71,23 @@ image. Non-person, non-card stand-ins serialise without the new fields, so
 their frozen snapshots are unchanged. The ideas were borrowed from ArtCraft's
 scene tools; no ArtCraft code is used, because its licence forbids that use.
 Evidence, sabotage checks, and limits are in
-[the goal ledger](goals/scene-setup-kit.md). Not covered: background removal,
-agent-proposed poses or cards, and human acceptance of how the figure looks.
+[the goal ledger](goals/scene-setup-kit.md). Not covered: background removal
+and human acceptance of how the figure looks.
+
+An agent's blockout plan can now propose the same posed person and image card
+(K06). Migration v24 adds `SceneBlockoutItems.PlaceholderPose` and
+`SceneBlockoutItems.PlaceholderImageAssetId`; staging validates through the
+scene save's own placeholder rules, a card must cite an Image in the active
+project, and package import remaps a planned card's picture. Build is still the
+only step that creates anything. Proven with the WebMCP shim, not yet in an
+actual host.
+
+A twelfth, read-only WebMCP tool, `search_project_images` (K07), lets an agent
+find a card's picture: `GET /api/webmcp/images` returns current, non-archived
+Image assets in the active project, paged at twenty or fewer, with id, name,
+content hash, width, and height. It shares the model search's filter and
+starts no import, placement, plan, or job. Proven with the shim, not yet seen
+by an actual host.
 
 ## Scene local lighting (2026-09-22)
 
@@ -178,7 +193,7 @@ The UI uses five persistent rail workspaces plus a focused authority workspace:
 - **Model generation:** a reference image can be frozen into a model-generation request and queued as durable owned work that survives leaving the screen. The Reference Asset Compiler does the work behind one typed gateway; a missing capability blocks before submission, an uncommissioned route refuses while still reporting what it could do, an interrupted run is reconciled or rerun out loud, a stale source is labelled rather than rejected, and a duplicate delivery produces no second model. Generated models enter the library through the same validated gate imported ones do.
 - **Motion:** a clip is read from a model's own file and bound to a scene object, with that object's own trim, speed, loop, playback position, and root-motion policy, so two characters can share one clip and play it differently. A mismatched skeleton or an impossible trim is refused before anything plays, and root motion reaches the scene exactly once. A rigid part turns about a pivot declared in its own space, with no skeleton. Playback draws; only a save writes.
 - **Rigs:** a model's skeleton, bind data, and skin weights are read from the stored bytes. A rig is called animation-ready only when it matches the one documented humanoid profile and passes every check; a skeleton named anything else is an unknown skeleton, and a static prop simply has no skeleton. A rig can be posed for inspection, which is calculated from the file and stored nowhere.
-- **Blockout from a reference:** an agent can read the reference image the artist has selected into a bounded construction plan: roles, library matches, simple stand-in geometry, approximate scale, motion intent, a camera, and what it could not see. The plan is bound to the exact reference bytes and builds nothing until the artist approves it, which creates a new scene of placeholders and existing models and starts no generation. Each object keeps the role and plan it came from.
+- **Blockout from a reference:** an agent can read the reference image the artist has selected into a bounded construction plan: roles, library matches, simple stand-in geometry (including a posed person and an image card citing a project picture), approximate scale, motion intent, a camera, and what it could not see. The plan is bound to the exact reference bytes and builds nothing until the artist approves it, which creates a new scene of placeholders and existing models and starts no generation. Each object keeps the role and plan it came from.
 - **Scene direction:** notes can be pinned to a point on one object, anchored in that object's own space against the exact model revision they were measured on; re-pinning the object to another revision marks the note stale rather than moving it. A browser agent can read which object is selected and stage a change to that one instance, which the artist applies into working state and then saves. Two identical props are two different objects throughout.
 - **Director mode:** a full-view state of the Shot workspace, not a separate screen. The rails, context bar, version rail, inspector, and video endpoint strip step aside so the frame takes the whole workstation at the exact delivery aspect; the tools, candidate review bar, Compare, and Exit stay in reach. Because only the shell restyles, the displayed revision, pins, unsaved markup, and unsaved inspector drafts survive entering and leaving it. Escape leaves full view once any modal on top has had its own press, and leaving the Shot workspace always leaves full view. Browser tools read the same state: `get_director_context` reports the exact revision on screen with a state token, and `observe_current_frame` resolves that revision's picture only while the token still matches, so an agent can never describe one frame while looking at another. Both are read-only and neither opens a panel by itself. A browser agent can also stage a bounded edit proposal against the context it read, naming the pinned notes it targets and the shot rules it preserves; the artist rejects it, or accepts and applies it once into the ordinary revision surface. Applying records a single application, refuses a shot that has moved on, and authorizes no provider - the existing Generate action still does that.
 - **Authority library:** a project-local working shelf plus a searchable global vault. Importing creates an immutable, provenance-linked project copy; only local copies are offered to shots. Promoting into the global vault is explicit so experimental assets cannot pollute every project.

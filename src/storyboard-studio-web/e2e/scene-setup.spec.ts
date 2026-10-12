@@ -172,10 +172,14 @@ test('handles in the view move, turn, and scale only the selected object, and or
 
   // Dragging empty space orbits the inspection camera and moves no object.
   const workingBefore = [await field('position X').inputValue(), await field('position Z').inputValue()]
+  await stage.scrollIntoViewIfNeeded()
   const box = (await stage.boundingBox())!
-  await page.mouse.move(box.x + 24, box.y + box.height - 24)
+  // Mobile WebKit can pan the layout after inspector edits. A drag must
+  // begin in the visible view, not at a negative screen coordinate.
+  const visibleLeft = Math.max(0, box.x)
+  await page.mouse.move(visibleLeft + 24, box.y + box.height - 24)
   await page.mouse.down()
-  await page.mouse.move(box.x + 140, box.y + box.height - 60, { steps: 6 })
+  await page.mouse.move(visibleLeft + 140, box.y + box.height - 60, { steps: 6 })
   await page.mouse.up()
   expect([await field('position X').inputValue(), await field('position Z').inputValue()]).toEqual(workingBefore)
 
@@ -252,6 +256,7 @@ test('looking through the shot camera frames the delivery picture and moves only
   await expect(guide).toContainText(`${targetShot.code} camera`)
 
   // The frame has the delivery shape and fits the stage on its long side.
+  await stage.scrollIntoViewIfNeeded()
   const frame = (await guide.boundingBox())!
   const view = (await stage.boundingBox())!
   expect(Math.abs(frame.width / frame.height - aspect)).toBeLessThan(0.02)
@@ -262,9 +267,10 @@ test('looking through the shot camera frames the delivery picture and moves only
 
   // Orbiting here moves the shot camera only. The saved scene, inspection
   // camera included, is untouched and has nothing to save.
-  await page.mouse.move(frame.x + 20, frame.y + 20)
+  const visibleFrameLeft = Math.max(0, frame.x)
+  await page.mouse.move(visibleFrameLeft + 20, frame.y + 20)
   await page.mouse.down()
-  await page.mouse.move(frame.x + 140, frame.y + 50, { steps: 6 })
+  await page.mouse.move(visibleFrameLeft + 140, frame.y + 50, { steps: 6 })
   await page.mouse.up()
   await expect(shotSetup.getByLabel('Shot camera yaw')).not.toHaveValue(yawBefore)
   await expect(page.getByTestId('scene-save')).toBeDisabled()

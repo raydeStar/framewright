@@ -5,12 +5,28 @@ import SceneLightingControls from './SceneLightingControls'
 import ConfirmDialog from './ConfirmDialog'
 import { STAND_IN_KIT, STAND_IN_MAX_SIZE, STAND_IN_MIN_SIZE, createImageCard, createStandIn, resizeStandIn, type StandInKind } from '../sceneStandIns'
 import { PERSON_POSES } from '../scenePoses'
-import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
+import type { AssetSummary, DirectorSceneView, ModelClipSummary, SceneAnnotationSummary, SceneBlockoutItemSummary, SceneBlockoutPlanSummary, SceneCameraSummary, SceneInstanceSummary, SceneListItem, SceneProposalSummary, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, StudioSnapshot } from '../types'
 
 // three.js loads only when a scene is actually opened.
 const SceneViewport = lazy(() => import('./SceneViewport'))
 
 const axes = ['X', 'Y', 'Z'] as const
+
+/**
+ * A planned stand-in as the artist reviews it before Build: a person names the
+ * pose it will hold, and a card names the picture it will show, so nothing the
+ * plan would build is left for the artist to discover afterwards.
+ */
+function describePlannedStandIn(item: SceneBlockoutItemSummary, images: readonly AssetSummary[]) {
+  const shape = item.placeholder?.shape ?? 'Box'
+  const size = `${(item.placeholder?.size ?? []).map(value => value.toFixed(2)).join(' × ')} m`
+  if (shape === 'Person') return `Person stand-in ${size} · ${(item.placeholder?.pose ?? 'Neutral').toLowerCase()} pose`
+  if (shape === 'Card') {
+    const picture = images.find(image => image.id === item.placeholder?.imageAssetId)?.displayName ?? 'a picture not in the library list'
+    return `Image card ${size} showing ${picture}${item.placeholder?.imageUrl ? '' : ' · picture unavailable'}`
+  }
+  return `${shape} stand-in ${size}`
+}
 
 /** A camera rounded to what its fields show, so an orbit never writes floating-point noise into them. */
 function settleCamera(camera: SceneCameraSummary): SceneCameraSummary {
@@ -959,9 +975,7 @@ export default function SceneWorkspace({ studio, onToast, proposalSignal, blocko
                     {plan.items.map(item => <li key={item.id}>
                       <span>{item.role}</span>
                       <small>
-                        {item.matchAssetName
-                          ? `matches ${item.matchAssetName}`
-                          : `${item.placeholder?.shape ?? 'Box'} stand-in ${(item.placeholder?.size ?? []).map(value => value.toFixed(2)).join(' × ')} m`}
+                        {item.matchAssetName ? `matches ${item.matchAssetName}` : describePlannedStandIn(item, references)}
                         {' · '}{item.confidence.toLowerCase()}
                         {item.motionIntent ? ` · ${item.motionIntent}` : ''}
                       </small>

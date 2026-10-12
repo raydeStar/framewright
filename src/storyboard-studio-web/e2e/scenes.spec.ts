@@ -751,6 +751,205 @@ test('a blockout plan the artist rejects builds nothing at all', async ({ page }
   verifyConsole()
 })
 
+test('an agent plans a seated person and an image card, and the artist builds them like hand-placed ones', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  const referenceName = `tavern-read-${label}`
+  const pictureName = `tavern-wall-${label}`
+
+  await withWebMcp(page)
+  await page.goto('/')
+  for (const [name, seed] of [[referenceName, `tavern-${label}`], [pictureName, `wall-${label}`]]) {
+    const upload = await page.request.post('/api/assets/images', {
+      headers: { 'X-Storyboard-Studio': '1' },
+      multipart: { file: { name: `${name}.png`, mimeType: 'image/png', buffer: ownReference(seed) } },
+    })
+    expect(upload.ok()).toBeTruthy()
+  }
+  const images = await (await page.request.get('/api/assets')).json() as { id: string; displayName: string; contentHash: string }[]
+  const picture = images.find(asset => asset.displayName === pictureName)!
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  await page.getByTestId('scene-reference').getByLabel('Scene reference').selectOption({ label: referenceName })
+  const context = await callTool(page, 'get_director_context', {})
+  const reference = context.data!.reference as { contentHash: string }
+
+  const plansBefore = await (await page.request.get('/api/scene-blockouts')).json() as unknown[]
+  // A card has to show a picture this project holds. The refusal stages nothing.
+  const refused = await callTool(page, 'propose_scene_blockout', {
+    observedReferenceHash: reference.contentHash, title: `Ghost card ${label}`, summary: 'A card citing no picture here.',
+    items: [
+      { role: 'Seated patron', shape: 'Person', size: [0.5, 1.75, 0.3], pose: 'Seated' },
+      { role: 'Ghost wall', shape: 'Card', size: [2, 2, 0.01], imageAssetId: crypto.randomUUID() },
+    ],
+    idempotencyKey: `ghost-card-${label}-${Date.now()}`,
+  })
+  expect(refused.ok).toBe(false)
+  expect(refused.code).toBe('card_image_not_found')
+  expect(await (await page.request.get('/api/scene-blockouts')).json()).toHaveLength(plansBefore.length)
+
+  const proposed = await callTool(page, 'propose_scene_blockout', {
+    observedReferenceHash: reference.contentHash,
+    title: `Tavern corner ${label}`,
+    summary: 'A patron seated at the bar in front of the painted back wall.',
+    items: [
+      { role: 'Seated patron', shape: 'Person', size: [0.5, 1.75, 0.3], pose: 'Seated', position: [0.8, 0.875, 0], confidence: 'Approximate' },
+      { role: 'Back wall', shape: 'Card', size: [2, 2, 0.01], imageAssetId: picture.id, position: [0, 1, -3], confidence: 'Certain' },
+    ],
+    idempotencyKey: `tavern-corner-${label}-${Date.now()}`,
+  })
+  expect(proposed.ok).toBeTruthy()
+
+  // Staging built nothing. The plan says which pose and which picture it means.
+  await expect(page.getByTestId('scene-object-count')).toContainText('0 objects')
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  const plan = page.getByTestId('scene-blockouts').getByTestId('scene-blockout').filter({ hasText: `Tavern corner ${label}` })
+  await expect(plan).toContainText('Person stand-in 0.50 × 1.75 × 0.30 m · seated pose')
+  await expect(plan).toContainText(`Image card 2.00 × 2.00 × 0.01 m showing ${pictureName}`)
+
+  await plan.getByRole('button', { name: 'Build blockout scene' }).click()
+  await expect(page.getByTestId('scene-object-count')).toContainText('2 objects')
+  const stage = page.getByTestId('scene-stage')
+  await expect(stage).toHaveAttribute('data-blockouts', '2')
+  await expect(stage).toHaveAttribute('data-cards-ready', '1')
+  const objects = page.getByTestId('scene-objects')
+  const placement = page.getByTestId('scene-placement')
+  await expect(objects.getByRole('button', { name: /Seated patron/ })).toContainText('Person stand-in')
+  await expect(objects.getByRole('button', { name: /Back wall/ })).toContainText('Image card')
+  await objects.getByRole('button', { name: /Seated patron/ }).click()
+  await expect(placement.getByLabel('Stand-in pose')).toHaveValue('Seated')
+
+  // The artist places the same two stand-ins by hand beside them.
+  await objects.getByRole('button', { name: 'Add person stand-in' }).click()
+  await placement.getByLabel('Stand-in pose').selectOption('Seated')
+  await placement.getByLabel('position X', { exact: true }).fill('-0.8')
+  await objects.getByLabel('Add image card').selectOption({ label: pictureName })
+  await placement.getByLabel('position X', { exact: true }).fill('2.5')
+  await page.getByTestId('scene-save').click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 2')
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await expect(page.getByTestId('scene-object-count')).toContainText('4 objects')
+  await expect(page.getByTestId('scene-built-from')).toContainText(referenceName)
+  await expect(stage).toHaveAttribute('data-blockouts', '4')
+  await expect(stage).toHaveAttribute('data-cards-ready', '2')
+  await objects.getByRole('button', { name: /Seated patron/ }).click()
+  await expect(placement.getByLabel('Stand-in pose')).toHaveValue('Seated')
+
+  const scenes = await (await page.request.get('/api/scenes')).json() as { id: string; name: string }[]
+  const built = scenes.find(item => item.name === `Tavern corner ${label}`)!
+  const scene = await (await page.request.get(`/api/scenes/${built.id}`)).json() as {
+    instances: { name: string; planId: string | null; position: number[]; placeholder: Record<string, unknown> }[]
+  }
+  const named = (name: string) => scene.instances.find(instance => instance.name === name)!
+  const planned = { person: named('Seated patron'), card: named('Back wall') }
+  const byHand = { person: named('Person 1'), card: named(pictureName) }
+  expect(planned.person.planId).toBeTruthy()
+  expect(byHand.person.planId).toBeNull()
+  // What the plan built is the same stand-in the artist placed, pose and picture included.
+  expect(planned.person.placeholder).toEqual({ shape: 'Person', size: [0.5, 1.75, 0.3], pose: 'Seated' })
+  expect(byHand.person.placeholder).toEqual(planned.person.placeholder)
+  expect(planned.card.placeholder).toEqual({
+    shape: 'Card', size: [2, 2, 0.01], imageAssetId: picture.id,
+    imageUrl: `/api/assets/${picture.id}/content`, imageContentHash: picture.contentHash,
+  })
+  expect(byHand.card.placeholder).toEqual(planned.card.placeholder)
+  expect(planned.person.position).toEqual([0.8, 0.875, 0])
+  await page.getByRole('button', { name: 'Frame all' }).click()
+  await page.screenshot({ path: testInfo.outputPath('blockout-person-card.png'), fullPage: true })
+  verifyConsole()
+})
+
+test('an agent finds a library picture that is not the reference and puts it on a card the artist builds', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = testInfo.project.name
+  // Unique per run, so the search sees only this journey's pictures.
+  const run = `quay-${label}-${Date.now()}`
+  const [referenceName, skyName, oldName] = [`${run}-read`, `${run}-sky`, `${run}-old`]
+
+  await withWebMcp(page)
+  await page.goto('/')
+  const uploaded: Record<string, { id: string; contentHash: string; width: number; height: number }> = {}
+  for (const name of [referenceName, skyName, oldName]) {
+    const upload = await page.request.post('/api/assets/images', {
+      headers: { 'X-Storyboard-Studio': '1' },
+      multipart: { file: { name: `${name}.png`, mimeType: 'image/png', buffer: ownReference(name) } },
+    })
+    expect(upload.ok()).toBeTruthy()
+    uploaded[name] = await upload.json()
+  }
+  expect((await page.request.post(`/api/assets/${uploaded[oldName].id}/archive`, { headers: { 'X-Storyboard-Studio': '1' } })).ok()).toBeTruthy()
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await page.getByRole('button', { name: 'New scene' }).click()
+  await expect(page.getByTestId('scene-version')).toContainText('Version 1')
+  await page.getByTestId('scene-reference').getByLabel('Scene reference').selectOption({ label: referenceName })
+  const context = await callTool(page, 'get_director_context', {})
+  const reference = context.data!.reference as { assetId: string; contentHash: string }
+
+  // The director context names only the reference. The search finds the rest
+  // of the project's current pictures, never the archived one.
+  const plansBefore = await (await page.request.get('/api/scene-blockouts')).json() as unknown[]
+  const assetsBefore = await (await page.request.get('/api/assets')).json() as unknown[]
+  type Image = { assetId: string; name: string; contentHash: string; width: number; height: number; canShowOnSceneCard: boolean }
+  const search = await callTool(page, 'search_project_images', { search: run, offset: 0, limit: 20 })
+  expect(search.ok).toBe(true)
+  expect(search.code).toBe('project_images_listed')
+  const found = search.data as { images: Image[]; total: number; limit: number; generationAuthorized: boolean }
+  expect(found.total).toBe(2)
+  expect(found.generationAuthorized).toBe(false)
+  expect(found.images.map(image => image.name).sort()).toEqual([referenceName, skyName])
+  const sky = found.images.find(image => image.name === skyName)!
+  expect(sky.assetId).not.toBe(reference.assetId)
+  expect(sky).toMatchObject({
+    assetId: uploaded[skyName].id, contentHash: uploaded[skyName].contentHash,
+    width: uploaded[skyName].width, height: uploaded[skyName].height, canShowOnSceneCard: true,
+  })
+  const page1 = await callTool(page, 'search_project_images', { search: run, limit: 1 })
+  expect((page1.data as { images: Image[] }).images).toHaveLength(1)
+
+  // Searching staged, built, and imported nothing.
+  await expect(page.getByTestId('scene-object-count')).toContainText('0 objects')
+  expect(await (await page.request.get('/api/scene-blockouts')).json()).toHaveLength(plansBefore.length)
+  expect(await (await page.request.get('/api/assets')).json()).toHaveLength(assetsBefore.length)
+
+  const proposed = await callTool(page, 'propose_scene_blockout', {
+    observedReferenceHash: reference.contentHash,
+    title: `Quay ${label}`,
+    summary: 'The evening sky the artist keeps in the library, behind the quay.',
+    items: [{ role: 'Sky backdrop', shape: 'Card', size: [4, 2, 0.01], imageAssetId: sky.assetId, position: [0, 1, -4], confidence: 'Certain' }],
+    idempotencyKey: `quay-${label}-${Date.now()}`,
+  })
+  expect(proposed.ok).toBeTruthy()
+  await expect(page.getByTestId('scene-object-count')).toContainText('0 objects')
+  const plan = page.getByTestId('scene-blockouts').getByTestId('scene-blockout').filter({ hasText: `Quay ${label}` })
+  await expect(plan).toContainText(`Image card 4.00 × 2.00 × 0.01 m showing ${skyName}`)
+
+  await plan.getByRole('button', { name: 'Build blockout scene' }).click()
+  await expect(page.getByTestId('scene-object-count')).toContainText('1 object')
+  const stage = page.getByTestId('scene-stage')
+  await expect(stage).toHaveAttribute('data-cards-ready', '1')
+  await expect(page.getByTestId('scene-objects').getByRole('button', { name: /Sky backdrop/ })).toContainText('Image card')
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Scene', exact: true }).click()
+  await expect(page.getByTestId('scene-object-count')).toContainText('1 object')
+  await expect(stage).toHaveAttribute('data-cards-ready', '1')
+  const scenes = await (await page.request.get('/api/scenes')).json() as { id: string; name: string }[]
+  const built = scenes.find(item => item.name === `Quay ${label}`)!
+  const scene = await (await page.request.get(`/api/scenes/${built.id}`)).json() as { instances: { name: string; placeholder: Record<string, unknown> }[] }
+  // The built card shows exactly the picture the search returned, by id and bytes.
+  expect(scene.instances.find(instance => instance.name === 'Sky backdrop')!.placeholder).toEqual({
+    shape: 'Card', size: [4, 2, 0.01], imageAssetId: sky.assetId,
+    imageUrl: `/api/assets/${sky.assetId}/content`, imageContentHash: sky.contentHash,
+  })
+  await page.screenshot({ path: testInfo.outputPath('blockout-searched-card.png'), fullPage: true })
+  verifyConsole()
+})
+
 test('two characters share one clip with their own settings, and a door swings on its pivot', async ({ page }, testInfo) => {
   const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
   const label = testInfo.project.name

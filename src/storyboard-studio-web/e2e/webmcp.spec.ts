@@ -18,7 +18,7 @@ test.describe('browser WebMCP collaboration', () => {
     })
   })
 
-  test('registers exactly the eleven closed-schema tools without duplicates', async ({ page }) => {
+  test('registers exactly the twelve closed-schema tools without duplicates', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByTestId('agent-activity-button')).toBeVisible()
     const registration = await page.evaluate(() => {
@@ -26,8 +26,35 @@ test.describe('browser WebMCP collaboration', () => {
       const signals = (window as unknown as { __framewrightRegistrationSignals: AbortSignal[] }).__framewrightRegistrationSignals
       return { names: tools.map(([name]) => name), closed: tools.every(([, tool]) => tool.inputSchema.additionalProperties === false), oneLifecycle: new Set(signals).size === 1, signalActive: signals.every(signal => !signal.aborted) }
     })
-    expect(registration.names).toEqual(['get_storyboard_context', 'list_storyboard_shots', 'get_shot_details', 'inspect_shot_continuity', 'get_director_context', 'search_scene_assets', 'observe_current_frame', 'propose_shot_revision', 'propose_scene_edit', 'propose_scene_blockout', 'get_generation_status'])
+    expect(registration.names).toEqual(['get_storyboard_context', 'list_storyboard_shots', 'get_shot_details', 'inspect_shot_continuity', 'get_director_context', 'search_scene_assets', 'search_project_images', 'observe_current_frame', 'propose_shot_revision', 'propose_scene_edit', 'propose_scene_blockout', 'get_generation_status'])
     expect(registration.closed).toBe(true)
+    // A blockout object is closed too, and offers exactly the stand-ins the
+    // artist can place by hand: a person with one of the service's nine poses,
+    // and a card naming the project image it shows.
+    const blockoutItem = await page.evaluate(() => {
+      const tools = (window as unknown as { __framewrightTools: Map<string, { inputSchema: { properties: { items: { items: unknown } } } }> }).__framewrightTools
+      return tools.get('propose_scene_blockout')!.inputSchema.properties.items.items
+    }) as { additionalProperties: boolean; required: string[]; properties: Record<string, { enum?: string[] }> }
+    expect(blockoutItem.additionalProperties).toBe(false)
+    expect(blockoutItem.required).toEqual(['role'])
+    expect(Object.keys(blockoutItem.properties)).toEqual(['role', 'matchAssetId', 'shape', 'size', 'pose', 'imageAssetId', 'position', 'rotation', 'scale', 'motionIntent', 'confidence', 'note'])
+    expect(blockoutItem.properties.shape.enum).toEqual(['Box', 'Cylinder', 'Sphere', 'Plane', 'Person', 'Card'])
+    expect(blockoutItem.properties.pose.enum).toEqual(['Neutral', 'Walking', 'Running', 'Seated', 'Kneeling', 'Pointing', 'Reaching', 'Conversation', 'Prone'])
+    expect(blockoutItem.properties.imageAssetId).toEqual({ type: 'string', format: 'uuid', maxLength: 36 })
+    // The picture search is a read: closed, paged at twenty or fewer, and
+    // annotated so a host never treats it as consequential.
+    const imageSearch = await page.evaluate(() => {
+      const tool = (window as unknown as { __framewrightTools: Map<string, { inputSchema: unknown; annotations: unknown }> }).__framewrightTools.get('search_project_images')!
+      return { inputSchema: tool.inputSchema, annotations: tool.annotations }
+    })
+    expect(imageSearch.inputSchema).toEqual({
+      type: 'object', properties: {
+        search: { type: 'string', maxLength: 120 },
+        offset: { type: 'integer', minimum: 0, maximum: 10000 },
+        limit: { type: 'integer', minimum: 1, maximum: 20 },
+      }, required: [], additionalProperties: false,
+    })
+    expect(imageSearch.annotations).toEqual({ readOnlyHint: true, untrustedContentHint: true, consequentialHint: false })
     expect(registration.oneLifecycle).toBe(true)
     expect(registration.signalActive).toBe(true)
     await page.getByTestId('agent-activity-button').click()
@@ -35,12 +62,12 @@ test.describe('browser WebMCP collaboration', () => {
     await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(0)
     await expect(page.getByTestId('agent-activity-panel')).toContainText('WebMCP paused')
     await page.getByTestId('agent-tools-toggle').click()
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(11)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(12)
   })
 
   test('scene asset search is bounded and starts no work', async ({ page }) => {
     await page.goto('/')
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(11)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(12)
     const before = await (await page.request.get('/api/studio')).json()
     const assetsBefore = await (await page.request.get('/api/assets')).json()
     const result = await page.evaluate(async () => {
@@ -62,7 +89,7 @@ test.describe('browser WebMCP collaboration', () => {
 
   test('tool calls select the shot and synchronize a durable visible proposal', async ({ page }) => {
     await page.goto('/')
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(11)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(12)
     const context = await page.evaluate(async () => {
       const tools = (window as unknown as { __framewrightTools: Map<string, { execute: (input: object, context: object) => Promise<{ data?: { selectedShot?: { id: string; version: number } } }> }> }).__framewrightTools
       return tools.get('get_storyboard_context')!.execute({}, {})
@@ -88,7 +115,7 @@ test.describe('browser WebMCP collaboration', () => {
 
   test('director context names the revision on screen and refuses a view that moved under it', async ({ page }) => {
     await page.goto('/')
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(11)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(12)
     await page.getByRole('button', { name: /Open SH-010,/ }).click()
     await expect(page.getByTestId('shot-workspace')).toBeVisible()
     await page.getByRole('button', { name: 'Director mode' }).click()
@@ -163,7 +190,7 @@ test.describe('browser WebMCP collaboration', () => {
     expect(proof.ok()).toBe(true)
     await page.reload()
     await page.getByRole('button', { name: new RegExp(`Open ${code},`) }).click()
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(11)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(12)
     // The proof job lands a new head asynchronously; read context only once the
     // artist would actually see both revisions.
     await expect(page.getByRole('listbox', { name: 'Versions' }).getByRole('option')).toHaveCount(2)
@@ -216,7 +243,7 @@ test.describe('browser WebMCP collaboration', () => {
     await page.goto('/')
     await page.getByRole('button', { name: new RegExp(`Open ${code},`) }).click()
     await expect(page.getByTestId('shot-workspace')).toBeVisible()
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(11)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(12)
 
     const note = `The seal edge is lost against the gate. ${testInfo.project.name}`
     await page.getByRole('button', { name: 'Place comment' }).click()
@@ -306,7 +333,7 @@ test.describe('browser WebMCP collaboration', () => {
 
   test('passes AbortSignal cancellation through fetch', async ({ page }) => {
     await page.goto('/')
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(11)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(12)
     await page.route('**/api/webmcp/shots?*', async route => { await new Promise(resolve => setTimeout(resolve, 1500)); await route.continue() })
     const result = await page.evaluate(async () => {
       const tool = (window as unknown as { __framewrightTools: Map<string, { execute: (input: object, context: object) => Promise<{ code: string }> }> }).__framewrightTools.get('list_storyboard_shots')!

@@ -13,7 +13,9 @@ namespace StoryboardStudio.Api.Services;
 /// to call for, matches the ones the library already holds, describes simple
 /// stand-in geometry for the rest, and says plainly what it could not see. It
 /// stays inert until the artist approves it, and approving it builds a blockout
-/// out of placeholders and existing models only. Nothing here dispatches a
+/// out of placeholders and existing models only. Those placeholders are the
+/// same stand-ins the artist places by hand, including a posed person and a
+/// card showing one of the project's own pictures. Nothing here dispatches a
 /// provider or generates an asset, at either step.
 /// </summary>
 public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, IProjectScope projectScope, TimeProvider timeProvider)
@@ -78,6 +80,15 @@ public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, 
         if (matches.Length != matchIds.Length)
             return Failure("match_not_found", "Every library match must be a model this project already holds.");
 
+        // A card shows a picture this project holds, never another project's and
+        // never a model, checked before anything is staged.
+        var cardImageIds = items.Where(x => x.ImageAssetId is not null).Select(x => x.ImageAssetId!.Value).Distinct().ToArray();
+        var cardImages = await db.Assets.AsNoTracking()
+            .Where(x => cardImageIds.Contains(x.Id) && x.Kind == nameof(AssetKind.Image))
+            .Select(x => x.Id).ToArrayAsync(cancellationToken);
+        if (cardImages.Length != cardImageIds.Length)
+            return Failure("card_image_not_found", "Every image card must show an image in the active project.");
+
         var prepared = new List<SceneBlockoutItemRecord>(items.Length);
         var order = 0;
         foreach (var item in items)
@@ -85,9 +96,16 @@ public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, 
             var role = (item.Role ?? "").Trim();
             if (role.Length is 0 or > 80) return Failure("invalid_role", "Each planned object needs a role of 1 to 80 characters.");
 
-            var placeholder = item.Shape is null && item.Size is null
+            var shape = (item.Shape ?? "").Trim();
+            // A pose or a picture with no shape is still a stand-in the agent
+            // described, and is refused by shape rather than silently dropped.
+            var placeholder = item.Shape is null && item.Size is null && item.Pose is null && item.ImageAssetId is null
                 ? null
-                : new ScenePlaceholderSummary((item.Shape ?? "").Trim(), item.Size ?? []);
+                : new ScenePlaceholderSummary(shape, item.Size ?? [],
+                    // A person planned without a pose stands in Neutral, the same
+                    // as one the artist adds by hand, so review shows what Build makes.
+                    item.Pose?.Trim() ?? (shape == "Person" ? "Neutral" : null),
+                    item.ImageAssetId);
             if (SceneService.ValidatePlaceholder(item.MatchAssetId, placeholder) is { } shapeError)
                 return Failure("invalid_placeholder", shapeError);
 
@@ -113,6 +131,8 @@ public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, 
                 PlaceholderSizeX = placeholder?.Size[0] ?? 0,
                 PlaceholderSizeY = placeholder?.Size[1] ?? 0,
                 PlaceholderSizeZ = placeholder?.Size[2] ?? 0,
+                PlaceholderPose = placeholder?.Pose,
+                PlaceholderImageAssetId = placeholder?.ImageAssetId,
                 PositionX = position[0], PositionY = position[1], PositionZ = position[2],
                 RotationX = rotation[0], RotationY = rotation[1], RotationZ = rotation[2],
                 ScaleX = scale[0], ScaleY = scale[1], ScaleZ = scale[2],
@@ -224,6 +244,15 @@ public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, 
         if (present.Length != matchIds.Length)
             return RepositoryResult<SceneSummary>.Invalid("A model this plan matched is no longer in the library. Read the reference again before building.");
 
+        // The same holds for a picture a planned card shows: a card with nothing
+        // to show is refused with the rest of the plan, not built blank.
+        var cardImageIds = items.Where(x => x.PlaceholderImageAssetId is not null).Select(x => x.PlaceholderImageAssetId!.Value).Distinct().ToArray();
+        var cardImages = await db.Assets.AsNoTracking()
+            .Where(x => cardImageIds.Contains(x.Id) && x.Kind == nameof(AssetKind.Image))
+            .Select(x => x.Id).ToArrayAsync(cancellationToken);
+        if (cardImages.Length != cardImageIds.Length)
+            return RepositoryResult<SceneSummary>.Invalid("A picture this plan shows on a card is no longer in this project. Read the reference again before building.");
+
         var name = (request?.SceneName ?? "").Trim();
         if (name.Length == 0) name = plan.Title;
         if (name.Length > 120) return RepositoryResult<SceneSummary>.Invalid("A scene name must be 1 to 120 characters.");
@@ -251,6 +280,8 @@ public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, 
                 PlaceholderSizeX = item.PlaceholderSizeX,
                 PlaceholderSizeY = item.PlaceholderSizeY,
                 PlaceholderSizeZ = item.PlaceholderSizeZ,
+                PlaceholderPose = item.PlaceholderShape == "Person" ? item.PlaceholderPose ?? "Neutral" : null,
+                PlaceholderImageAssetId = item.PlaceholderShape == "Card" ? item.PlaceholderImageAssetId : null,
                 // Each object keeps the role it was planned for and the plan it
                 // came from, so what the agent assumed stays inspectable later.
                 Name = item.Role, Role = item.Role, SourcePlanId = plan.Id,
@@ -285,6 +316,8 @@ public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, 
         var matchIds = items.Where(x => x.MatchAssetId is not null).Select(x => x.MatchAssetId!.Value).Distinct().ToArray();
         var matches = await db.Assets.AsNoTracking()
             .Where(x => matchIds.Contains(x.Id)).Select(x => new { x.Id, x.DisplayName }).ToArrayAsync(cancellationToken);
+        var cardImageIds = items.Where(x => x.PlaceholderImageAssetId is not null).Select(x => x.PlaceholderImageAssetId!.Value).Distinct().ToArray();
+        var cardImages = await db.Assets.AsNoTracking().Where(x => cardImageIds.Contains(x.Id)).ToArrayAsync(cancellationToken);
         var reference = await db.Assets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == plan.ReferenceAssetId, cancellationToken);
         var sceneName = plan.SceneId is { } sceneId
             ? (await db.Scenes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sceneId, cancellationToken))?.Name
@@ -303,14 +336,27 @@ public sealed class SceneBlockoutService(StudioDbContext db, AssetStore assets, 
             [.. items.Select(item => new SceneBlockoutItemSummary(
                 item.Id, item.Role, item.MatchAssetId,
                 matches.FirstOrDefault(x => x.Id == item.MatchAssetId)?.DisplayName,
-                item.PlaceholderShape is { } shape
-                    ? new ScenePlaceholderSummary(shape, [item.PlaceholderSizeX, item.PlaceholderSizeY, item.PlaceholderSizeZ])
-                    : null,
+                item.PlaceholderShape is { } shape ? DescribePlaceholder(item, shape, cardImages) : null,
                 [item.PositionX, item.PositionY, item.PositionZ],
                 [item.RotationX, item.RotationY, item.RotationZ],
                 [item.ScaleX, item.ScaleY, item.ScaleZ],
                 item.MotionIntent, item.Confidence, item.Note, item.InstanceId))],
             plan.SceneId, sceneName, plan.CreatedAt, plan.DecidedAt, plan.AppliedAt);
+    }
+
+    /// <summary>
+    /// A planned stand-in described the way a scene describes a built one, so
+    /// the artist reviews the same pose and the same picture that Build makes.
+    /// </summary>
+    private ScenePlaceholderSummary DescribePlaceholder(SceneBlockoutItemRecord item, string shape, AssetRecord[] cardImages)
+    {
+        double[] size = [item.PlaceholderSizeX, item.PlaceholderSizeY, item.PlaceholderSizeZ];
+        if (shape == "Person") return new ScenePlaceholderSummary(shape, size, item.PlaceholderPose ?? "Neutral");
+        if (shape != "Card" || item.PlaceholderImageAssetId is not { } imageId) return new ScenePlaceholderSummary(shape, size);
+        var image = cardImages.FirstOrDefault(x => x.Id == imageId);
+        var present = image is not null && assets.StoredFileExists(image.StoragePath);
+        return new ScenePlaceholderSummary(shape, size, null, imageId,
+            present ? $"/api/assets/{imageId}/content" : null, image?.ContentHash);
     }
 
     private static string[]? Clean(string[]? entries)

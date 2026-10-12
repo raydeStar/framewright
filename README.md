@@ -14,7 +14,7 @@
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?logo=windows11">
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-20232a?logo=react">
-  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-3c7d4f"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-3c7d4f"></a>
 </p>
 
 <p align="center">
@@ -131,7 +131,7 @@ Framewright's 3D path turns reference images into a small, editable scene you ca
 - **Image to 3D prop.** Pick a reference, say roughly how big the object is, and generate. The model arrives in the library at real size and names the reference it came from.
 - **Prepare for runtime.** Reduce triangles, drop faces nothing can see, compress textures, or resurface materials. The triangle budget defaults to Auto: the compiler decides what the model should cost from what it is and how big it is, and says so before anything runs. Each result is a new, reviewable revision, never an overwrite.
 - **Rig a humanoid.** Rig a standing figure on the UE5 Manny skeleton, review how it bends in a five-pose suite, and accept it as the current revision.
-- **Block out a scene.** Drop in stand-ins by hand: a posable person, boxes, cylinders, spheres, a floor, and walls. Put any library picture in the scene as an image card, for a backdrop or, with transparency, a cutout. Move, turn, and scale objects with handles in the view, or type exact values. A browser agent can also read a reference into a blockout plan. Either way, replace any stand-in with an exact library revision without moving anything else.
+- **Block out a scene.** Drop in stand-ins by hand: a posable person, boxes, cylinders, spheres, a floor, and walls. Put any library picture in the scene as an image card, for a backdrop or, with transparency, a cutout. Move, turn, and scale objects with handles in the view, or type exact values. A browser agent can also read a reference into a blockout plan, people in poses and cards showing any library picture included, which builds nothing until you approve it. Either way, replace any stand-in with an exact library revision without moving anything else.
 - **Animate.** Bind compatible clips to rigged characters with their own trim, speed, and loop, and give rigid parts pivot motion.
 - **Shoot it.** Look through the shot camera to frame the delivery picture, render a delivery-sized still into shot review, and once it is approved, render an exact-frame animated take encoded with FFmpeg.
 
@@ -350,7 +350,7 @@ The certificate includes hostname, localhost, and current IPv4 subject-alternati
 
 ### Is Framewright free?
 
-Yes. Framewright is open source under the Apache License 2.0. Optional providers such as Codex or the OpenAI API have their own terms and costs, and nothing is sent to them until you turn them on.
+Yes. Framewright is open source under the MIT License. Optional providers such as Codex or the OpenAI API have their own terms and costs, and nothing is sent to them until you turn them on.
 
 ### Does Framewright replace ComfyUI?
 
@@ -382,11 +382,11 @@ No. It is a local-first Windows workstation application; your project state, app
 
 ## License
 
-Framewright is licensed under the [Apache License 2.0](LICENSE).
+Framewright is licensed under the [MIT License](LICENSE).
 
 ---
 
 <p align="center">
   <strong>Build every shot with intention.</strong><br>
-  Framewright is developed by Mark Hall and released under Apache-2.0.
+  Framewright is developed by Mark Hall and released under MIT.
 </p>

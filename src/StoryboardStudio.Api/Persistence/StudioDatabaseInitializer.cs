@@ -32,6 +32,7 @@ public static class StudioDatabaseInitializer
     private const string AssetReviewMigration = "20261004-asset-review-decisions-v21";
     private const string PersonStandInMigration = "20261008-person-stand-in-pose-v22";
     private const string ImageCardMigration = "20261008-image-card-stand-in-v23";
+    private const string BlockoutPersonCardMigration = "20261008-blockout-person-and-card-v24";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -330,6 +331,20 @@ public static class StudioDatabaseInitializer
                 () => EnsureColumnAsync(db, "SceneInstances", "PlaceholderImageAssetId", "TEXT NULL", cancellationToken), cancellationToken);
         }
 
+        // Blockout plans can propose the same posed people and image cards the
+        // artist places by hand. Every plan staged before this proposed only
+        // the plain shapes, so both new columns start empty everywhere.
+        if (!await HasMigrationAsync(db, BlockoutPersonCardMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, BlockoutPersonCardMigration, cancellationToken);
+            await RunMigrationAsync(db, BlockoutPersonCardMigration, async () =>
+            {
+                await EnsureColumnAsync(db, "SceneBlockoutItems", "PlaceholderPose", "TEXT NULL", cancellationToken);
+                await EnsureColumnAsync(db, "SceneBlockoutItems", "PlaceholderImageAssetId", "TEXT NULL", cancellationToken);
+            }, cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -481,6 +496,7 @@ public static class StudioDatabaseInitializer
             AssetReviewMigration => "per-revision-review-decision-with-answered-send-back-and-review-notes-on-every-asset-kind",
             PersonStandInMigration => "person-stand-in-pose-preset-on-scene-instances",
             ImageCardMigration => "card-stand-in-showing-a-project-image-asset-on-scene-instances",
+            BlockoutPersonCardMigration => "blockout-plan-items-carry-a-person-pose-and-a-card-project-image",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

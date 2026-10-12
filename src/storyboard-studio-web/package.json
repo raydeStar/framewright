@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Tablet-friendly local production workspace for intentional AI-assisted shot development.",
   "author": "raydeStar",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/raydeStar/framewright.git"

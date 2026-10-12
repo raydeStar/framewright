@@ -1,4 +1,5 @@
 import { studioApi } from './api'
+import { PERSON_POSES } from './scenePoses'
 import type { DirectorViewQuery, ShotRevisionProposalSummary, WebMcpEnvelope } from './types'
 
 type JsonSchema = Record<string, unknown>
@@ -39,7 +40,7 @@ const shotIdSchema = {
 
 export const FRAMEWRIGHT_WEBMCP_TOOL_NAMES = [
   'get_storyboard_context', 'list_storyboard_shots', 'get_shot_details',
-  'inspect_shot_continuity', 'get_director_context', 'search_scene_assets', 'observe_current_frame',
+  'inspect_shot_continuity', 'get_director_context', 'search_scene_assets', 'search_project_images', 'observe_current_frame',
   'propose_shot_revision', 'propose_scene_edit', 'propose_scene_blockout', 'get_generation_status',
 ] as const
 
@@ -138,6 +139,19 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
         String(input.search ?? ''), Number(input.offset ?? 0), Number(input.limit ?? 10), signal)),
     },
     {
+      name: 'search_project_images', title: 'Search project images',
+      description: 'Search current, non-archived images in the active project, with their size and content hash. A returned assetId may be used as imageAssetId on a Card in a scene blockout proposal. This places, imports, and generates nothing.',
+      inputSchema: {
+        type: 'object', properties: {
+          search: { type: 'string', maxLength: 120 },
+          offset: { type: 'integer', minimum: 0, maximum: 10000 },
+          limit: { type: 'integer', minimum: 1, maximum: 20 },
+        }, required: [], additionalProperties: false,
+      }, annotations: read,
+      execute: run('search_project_images', (input, signal) => studioApi.webMcpProjectImages(
+        String(input.search ?? ''), Number(input.offset ?? 0), Number(input.limit ?? 10), signal)),
+    },
+    {
       name: 'observe_current_frame', title: 'Observe the current frame',
       description: 'Resolve the picture for a previously read director context. A view that changed since then is refused so structured and visual context can never disagree.',
       inputSchema: {
@@ -202,7 +216,7 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
     },
     {
       name: 'propose_scene_blockout', title: 'Propose a scene blockout',
-      description: 'Read the reference the artist has selected and stage a construction plan for it: what objects the scene needs, which of them the library already has, what stands in for the rest, and what the reference does not show. It builds nothing until the artist approves it.',
+      description: 'Read the reference the artist has selected and stage a construction plan for it: what objects the scene needs, which of them the library already has, what stands in for the rest, and what the reference does not show. A Person stand-in may hold a pose. A Card shows a picture and must name an image in the active project by imageAssetId: the assetId of the selected reference in the director context, or one returned by search_project_images. It builds nothing until the artist approves it.',
       inputSchema: {
         type: 'object', properties: {
           observedReferenceHash: { type: 'string', minLength: 1, maxLength: 128 },
@@ -224,8 +238,11 @@ export function registerFramewrightWebMcp(options: WebMcpBridgeOptions): () => v
               type: 'object', properties: {
                 role: { type: 'string', minLength: 1, maxLength: 80 },
                 matchAssetId: { type: 'string', format: 'uuid', maxLength: 36 },
-                shape: { type: 'string', enum: ['Box', 'Cylinder', 'Sphere', 'Plane'] },
+                shape: { type: 'string', enum: ['Box', 'Cylinder', 'Sphere', 'Plane', 'Person', 'Card'] },
                 size: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+                // Only for a Person, and only for a Card: the service refuses either on any other shape.
+                pose: { type: 'string', enum: [...PERSON_POSES] },
+                imageAssetId: { type: 'string', format: 'uuid', maxLength: 36 },
                 position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
                 rotation: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
                 scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
