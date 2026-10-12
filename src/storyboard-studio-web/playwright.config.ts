@@ -19,8 +19,10 @@ export default defineConfig({
   // The production journey really renders on the GPU and takes minutes.
   // Run it deliberately: npx playwright test production-journey --project=desktop
   testIgnore: process.env.STUDIO_JOURNEY ? [] : ['**/production-journey.spec.ts'],
-  timeout: 30_000,
-  expect: { timeout: 8_000 },
+  // CI renders WebGL in software; cold model/shader setup can exceed eight
+  // seconds. Keep the same assertions, with a bounded slower-runner budget.
+  timeout: process.env.CI ? 60_000 : 30_000,
+  expect: { timeout: process.env.CI ? 20_000 : 8_000 },
   fullyParallel: false,
   // Desktop and tablet projects share one disposable studio database. Serial
   // execution keeps durable ordering/version assertions deterministic.
