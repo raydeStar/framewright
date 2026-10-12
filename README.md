@@ -14,7 +14,7 @@
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?logo=windows11">
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-20232a?logo=react">
-  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-3c7d4f"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-3c7d4f"></a>
 </p>
 
 <p align="center">
@@ -350,7 +350,7 @@ The certificate includes hostname, localhost, and current IPv4 subject-alternati
 
 ### Is Framewright free?
 
-Yes. Framewright is open source under the Apache License 2.0. Optional providers such as Codex or the OpenAI API have their own terms and costs, and nothing is sent to them until you turn them on.
+Yes. Framewright is open source under the MIT License. Optional providers such as Codex or the OpenAI API have their own terms and costs, and nothing is sent to them until you turn them on.
 
 ### Does Framewright replace ComfyUI?
 
@@ -382,11 +382,11 @@ No. It is a local-first Windows workstation application; your project state, app
 
 ## License
 
-Framewright is licensed under the [Apache License 2.0](LICENSE).
+Framewright is licensed under the [MIT License](LICENSE).
 
 ---
 
 <p align="center">
   <strong>Build every shot with intention.</strong><br>
-  Framewright is developed by Mark Hall and released under Apache-2.0.
+  Framewright is developed by Mark Hall and released under MIT.
 </p>

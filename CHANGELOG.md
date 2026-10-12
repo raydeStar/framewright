@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### License
+- Framewright is now licensed under the MIT License, with matching .NET and
+  npm package metadata.
+
 ### 3D models
 - **Blender is found for you.** When no Blender is configured, Framewright uses
   the `BLENDER` or `RAC_BLENDER` environment variable, then `PATH`, then the
