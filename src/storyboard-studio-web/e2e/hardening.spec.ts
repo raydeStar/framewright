@@ -19,6 +19,9 @@ test('a view that fails to render says so and the rest of the studio keeps worki
   await expect(page.getByTestId('project-switcher')).toBeVisible()
   await page.getByRole('button', { name: 'Assets', exact: true }).click()
   await expect(failure).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible()
+  // An empty bin offers Create new too; the header is the dependable butler.
+  const libraryHeader = page.locator('header.asset-hero')
+  await expect(libraryHeader.getByRole('heading', { name: 'Asset library' })).toBeVisible()
+  await expect(libraryHeader.getByRole('button', { name: 'Create new', exact: true })).toBeVisible()
   expect(errors.some(text => text.includes('Framewright view failed to render'))).toBe(true)
 })
