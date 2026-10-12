@@ -124,7 +124,9 @@ jobs:
           cache-dependency-path: src/storyboard-studio-web/package-lock.json
 
       - name: Restore API
-        run: dotnet restore Framewright.slnx --locked-mode
+        # The browser server needs the API and Core, not the Windows launcher.
+        # Restoring that launcher on Linux adds a RID absent from its lockfile.
+        run: dotnet restore src/StoryboardStudio.Api/StoryboardStudio.Api.csproj --locked-mode
 
       - name: Install web dependencies
         working-directory: src/storyboard-studio-web
