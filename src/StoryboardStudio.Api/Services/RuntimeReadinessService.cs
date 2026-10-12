@@ -136,29 +136,38 @@ public sealed class RuntimeReadinessService(
             }
 
             var connection = db.Database.GetDbConnection();
-            if (connection.State != System.Data.ConnectionState.Open)
+            var openedHere = connection.State != System.Data.ConnectionState.Open;
+            try
             {
-                await connection.OpenAsync(cancellationToken);
-            }
+                if (openedHere) await connection.OpenAsync(cancellationToken);
 
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT COUNT(*)
-                FROM "SchemaMigrations"
-                WHERE "Id" IN (
-                    '20260830-production-baseline-v1',
-                    '20260830-durable-generation-v2',
-                    '20260830-audio-generation-v3',
-                    '20260830-production-video-binding-v4',
-                    '20260830-ratified-shot-intent-v5'
-                );
-                """;
-            var migrationCount = Convert.ToInt32(
-                await command.ExecuteScalarAsync(cancellationToken),
-                System.Globalization.CultureInfo.InvariantCulture);
-            checks.Add(migrationCount == 5
-                ? new("database", "Ready", "SQLite is reachable and all production schema migrations are recorded.", true)
-                : new("database", "Failed", "SQLite opened, but one or more production schema migrations are not recorded.", true));
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT COUNT(*)
+                    FROM "SchemaMigrations"
+                    WHERE "Id" IN (
+                        '20260830-production-baseline-v1',
+                        '20260830-durable-generation-v2',
+                        '20260830-audio-generation-v3',
+                        '20260830-production-video-binding-v4',
+                        '20260830-ratified-shot-intent-v5'
+                    );
+                    """;
+                var migrationCount = Convert.ToInt32(
+                    await command.ExecuteScalarAsync(cancellationToken),
+                    System.Globalization.CultureInfo.InvariantCulture);
+                checks.Add(migrationCount == 5
+                    ? new("database", "Ready", "SQLite is reachable and all production schema migrations are recorded.", true)
+                    : new("database", "Failed", "SQLite opened, but one or more production schema migrations are not recorded.", true));
+            }
+            finally
+            {
+                // This read-only probe must not retain its own SQLite handle
+                // until request teardown. Keep a caller's open connection or
+                // transaction intact, and close only what this probe opened.
+                if (openedHere && connection.State != System.Data.ConnectionState.Closed)
+                    await connection.CloseAsync();
+            }
         }
         catch (Exception error) when (error is InvalidOperationException or System.Data.Common.DbException or IOException)
         {
