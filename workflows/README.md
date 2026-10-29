@@ -87,10 +87,11 @@ are checked.
 5. `dotnet test` — `WorkflowLibraryTests` will fail loudly if the JSON is
    malformed, a declared placeholder is missing, a node referenced in `inputs`
    does not exist, or `requiredModels` disagrees with the file.
-6. `GET /api/workflows` additionally checks the live ComfyUI: whether each
-   `requiredNodeTypes` entry is installed and each `requiredModels` value is
-   actually present in that loader's options. That part needs ComfyUI running
-   and is **read-only** — it calls `/object_info` and nothing else.
+6. `GET /api/workflows` reports the same file checks for every entry. Nothing
+   checks the live ComfyUI for `requiredNodeTypes` or `requiredModels`: before
+   uploading, Framewright only confirms that ComfyUI answers `/queue`, so a
+   missing node or model shows up as a failed job. Install the files the
+   [main README](../README.md#set-up-comfyui-for-generation) lists first.
 
 ---
 

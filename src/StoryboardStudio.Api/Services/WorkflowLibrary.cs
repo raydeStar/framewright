@@ -43,8 +43,9 @@ public sealed record WorkflowValidation(
 /// reference points at a node that exists in the same file, and the models named
 /// in <c>requiredModels</c> match what the workflow actually selects.
 ///
-/// Whether the models are *installed* is a live question and lives in the
-/// preflight endpoint, which asks ComfyUI's read-only <c>/object_info</c>.
+/// Whether the models are *installed* is a live question that nothing answers
+/// yet: dispatch only confirms ComfyUI answers <c>/queue</c>, so a missing node
+/// or model surfaces as a failed ComfyUI job.
 /// </summary>
 public sealed class WorkflowLibrary
 {

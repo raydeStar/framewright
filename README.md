@@ -163,6 +163,24 @@ Double-click **Stop Framewright.cmd** to stop the studio. Your work lives in the
 
 Video export uses FFmpeg and FFprobe on your `PATH`. 3D generation and rigging use a separately installed [Reference Asset Compiler](docs/REFERENCE_ASSET_COMPILER.md). Local voice and music need their own workers (see below).
 
+### Set up ComfyUI for generation
+
+Framewright sends image and video jobs to your own ComfyUI and ships no models. Every node its workflows use is part of ComfyUI itself, so no custom nodes are needed, but ComfyUI must be recent enough to include the MiniMax H3 nodes. Put these files in the named folders under `ComfyUI/models`; you only need the files for the routes you turn on.
+
+| File | Folder | Size (GB) | Used by |
+| --- | --- | --- | --- |
+| `qwen_image_2512_fp8_e4m3fn.safetensors` | `diffusion_models` | 19.0 | Text draft |
+| `qwen_image_edit_2511_fp8_e4m3fn.safetensors` | `diffusion_models` | 19.0 | Reference draft, sketch draft, frame edit |
+| `qwen_2.5_vl_7b_fp8_scaled.safetensors` | `text_encoders` | 8.7 | Every image route |
+| `qwen_image_vae.safetensors` | `vae` | 0.2 | Every image route |
+| `Wuli-Qwen-Image-2512-Turbo-LoRA-4steps-V1.0-bf16_ComfyUi.safetensors` | `loras/Qwen` | 1.1 | Text draft |
+| `Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors` | `loras/Qwen` | 0.8 | Reference draft, sketch draft |
+| `minimax_h3_fl2va_pruned_int8_convrot.safetensors` | `diffusion_models` | 19.5 | H3 video |
+| `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | `text_encoders` | 14.6 | H3 video |
+| `minimax_h3_video_vae_fp16.safetensors` | `vae` | 4.9 | H3 video |
+
+The image routes need about 49 GB and H3 video about 39 GB. Framewright checks that ComfyUI answers before it submits anything, but it does not check which models are installed, so a missing file shows up as a failed job. To use other models, see the [workflow templates](workflows/README.md).
+
 From a source checkout, `.\scripts\install-local.ps1 -PublishPath <extracted folder>` installs the same package under `%LOCALAPPDATA%\Framewright`. It adds Start Menu shortcuts (Framewright, Stop Framewright, and Framewright with local voice) and applies updates atomically, keeping your work.
 
 ### Run from source with Codex
