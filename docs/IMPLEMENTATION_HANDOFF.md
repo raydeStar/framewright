@@ -1,5 +1,46 @@
 # Framewright implementation handoff
 
+## Offline reviewed-sequence delivery and audio padding (2026-10-10)
+
+`tools/media/assemble_sequence.py` adds a small offline utility for combining
+existing hash-bound PNG frame directories, video frame ranges, stills and recorded
+WAV clips. It preserves an independent picture master and exact-length 24-bit PCM
+mix, writes an H.264/AAC delivery, checks decoded frames/format/duration and samples
+each shot from the actual movie into a contact sheet. Source media, application
+projects and artistic approval state are untouched. Production-specific profiles
+stay outside this repository; this is not a new Sequence UI or provider route.
+See `tools/media/README.md` for the schema, CLI and focused checks.
+
+The existing `AudioMasteringService` now pads its longest input mix to the sequence
+length before trimming. A real FFmpeg fixture proved the former early-end defect
+and a 60-second padded output; existing offset/trim/volume/limiter policy is retained.
+
+Work was isolated in a normal branch from main `e913ed9`, in an independent clone.
+The artist checkout on `feat/blockout-person-card` at `d45d747` stayed unchanged.
+A transient execution transport disconnect occurred before cloning and recovered
+without setup changes, process termination or job restarts. Nine focused fixture
+tests pass with Python 3.12.7/Pillow 10.4.0/FFmpeg 8.0.1. An additional retained
+160 x 90 fixture uses the intended 16-shot timing: its final movie decodes to
+1,440 frames at 24 fps/60 seconds, with 2,880,000 stereo 48 kHz PCM samples,
+AAC audio and all 16 contact-sheet samples.
+
+Repository verification passed source checks (40 frontend tests), production
+bundle, release-content audit, locked restore, warning-free Release build,
+382 backend tests, script/worker safety contracts and vulnerability inspection.
+The first browser launch rejected this run's incorrectly named stop sentinel;
+only the environment was corrected. The full isolated browser run then recorded
+196 passes, six existing skips and two tablet failures: image-card still review
+timed out, and a mocked image-job response was disposed. Both unchanged tests
+passed in a fresh targeted retry without source or assertion changes. An initial
+npm selector-forwarding failure was corrected by using the local Node/Playwright
+CLI. The failed runs and traces remain in this clone's ignored `.tmp` evidence;
+this is not a clean single-run full-gate pass or proof of a baseline regression.
+
+This increment is implemented and contract-tested as an offline utility. The
+actual production frames, full-HD delivery/playback, Unreal use and human visual
+acceptance remain separate checks. These fixtures do not establish a shipped UI
+workflow or artistic acceptance.
+
 ## Portable package and double-click launcher (2026-09-24)
 
 - `src/Framewright.Launcher` publishes **Framewright Studio.exe**, a trimmed

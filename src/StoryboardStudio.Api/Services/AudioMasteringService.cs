@@ -69,7 +69,7 @@ public sealed class AudioMasteringService(
             var delay = Math.Max(0, (int)Math.Round(input.Clip.StartFrame * 1000d / fps));
             return $"[{index}:a]atrim=start={trim}:duration={length},asetpts=PTS-STARTPTS,volume={volume},adelay={delay}:all=1[a{index}]";
         }).ToList();
-        filters.Add($"{string.Concat(inputs.Select((_, i) => $"[a{i}]"))}amix=inputs={inputs.Length}:duration=longest:normalize=0,atrim=duration={duration.ToString("0.###", CultureInfo.InvariantCulture)},alimiter=limit=0.95[out]");
+        filters.Add($"{string.Concat(inputs.Select((_, i) => $"[a{i}]"))}amix=inputs={inputs.Length}:duration=longest:normalize=0,apad=whole_dur={duration.ToString("0.###", CultureInfo.InvariantCulture)},atrim=duration={duration.ToString("0.###", CultureInfo.InvariantCulture)},alimiter=limit=0.95[out]");
         foreach (var value in new[] { "-filter_complex", string.Join(';', filters), "-map", "[out]", "-c:a", "pcm_s24le", "-ar", sampleRate.ToString(CultureInfo.InvariantCulture), outputPath }) start.ArgumentList.Add(value);
 
         try
