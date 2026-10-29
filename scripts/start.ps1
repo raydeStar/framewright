@@ -56,7 +56,14 @@ function Invoke-NativeFramewright {
         Write-Host 'Local voice was not selected, so its worker remains stopped.'
     }
     if (Test-YuE2Enabled) {
-        try { & (Join-Path $scriptRoot 'start-yue2-worker.ps1') }
+        try {
+            & (Join-Path $scriptRoot 'start-yue2-worker.ps1')
+            # Docker passes these through compose.yaml; the native studio reads them
+            # from its own environment, so music would otherwise stay "disabled".
+            $env:YuE2__Enabled = 'true'
+            if ([string]::IsNullOrWhiteSpace($env:YuE2__Endpoint)) { $env:YuE2__Endpoint = 'http://127.0.0.1:5182' }
+            if ($env:YUE2_WORKER_TOKEN) { $env:YuE2__WorkerToken = $env:YUE2_WORKER_TOKEN }
+        }
         catch {
             Write-Warning "The selected YuE2 worker is unavailable: $($_.Exception.Message)"
             Write-Warning 'Framewright will continue without music rendering. Existing audio remains playable.'

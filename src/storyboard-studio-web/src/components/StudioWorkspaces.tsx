@@ -725,7 +725,7 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
       throw error
     } finally { setEndpointBusy(false) }
   }
-  if (canvasMode === 'sketch') return <Suspense fallback={<main className="workspace workspace-loading" role="status"><LoaderCircle className="spin" /><p>Opening composition lab</p></main>}><SketchWorkspace key={`${shot.id}-${sketchPurpose}`} shot={shot} references={references} purpose={sketchPurpose} launch={sketchLaunch} onLaunchConsumed={onSketchLaunchConsumed} onOpenFrame={() => setCanvasMode('frame')} onJobQueued={onJobQueued} /></Suspense>
+  if (canvasMode === 'sketch') return <Suspense fallback={<main className="workspace workspace-loading" role="status"><LoaderCircle className="spin" /><p>Opening composition lab</p></main>}><SketchWorkspace key={`${shot.id}-${sketchPurpose}`} shot={shot} references={references} purpose={sketchPurpose} launch={sketchLaunch} deliveryAspect={studio.project.deliveryWidth / studio.project.deliveryHeight} onLaunchConsumed={onSketchLaunchConsumed} onOpenFrame={() => setCanvasMode('frame')} onJobQueued={onJobQueued} /></Suspense>
   return <main className={`workspace shot-workspace${directorMode ? ' director-mode' : ''}`} data-testid="shot-workspace" style={{
     '--project-aspect': `${studio.project.deliveryWidth} / ${studio.project.deliveryHeight}`,
     // Full view fits the frame to whichever container edge binds first, so the

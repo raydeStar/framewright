@@ -482,7 +482,7 @@ function JobsDock({ jobs, scopeShotId, onOpen, onRetry, dismissed, onDismiss }: 
     {failed ? <CircleAlert size={15} /> : <CircleSlash size={15} />}
     <span>
       <strong>{stalled.shotCode} · {stalled.kind} {failed ? 'failed' : 'cancelled'}</strong>
-      <small>{stalled.error || (failed ? 'The renderer did not return a version.' : 'This job was stopped before it finished.')}</small>
+      <small title={stalled.error}>{stalled.error || (failed ? 'The renderer did not return a version.' : 'This job was stopped before it finished.')}</small>
     </span>
     <span className="jobs-dock-attempt">Attempt {stalled.attempt}</span>
     <button onClick={() => { setRetrying(true); void onRetry(stalled).finally(() => setRetrying(false)) }} disabled={retrying} className="jobs-dock-action">{retrying ? 'Queuing…' : 'Retry'}</button>
