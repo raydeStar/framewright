@@ -759,6 +759,81 @@ public sealed class GenerationAdapterContractTests : IDisposable
     }
 
     [Fact]
+    public async Task ComfyUIAdapterFailsAPromptComfyUINoLongerHasInsteadOfWaitingOutTheTimeout()
+    {
+        // After ComfyUI or the workstation restarts, a persisted prompt id is in
+        // neither the queue nor the history. Holding the job lane for the full
+        // 45-minute image timeout would stall every job behind it.
+        var workflowPath = Path.Combine(root, "lost-workflow.json");
+        await File.WriteAllTextAsync(workflowPath, """{"text":"{{PROMPT}}","seed":"{{SEED}}"}""");
+        var promptId = Guid.NewGuid().ToString();
+        var calls = new List<string>();
+        var handler = new FakeHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            lock (calls) calls.Add(path);
+            if (path == "/queue") return Task.FromResult(Json("{\"queue_running\":[[0,\"someone-else\"]],\"queue_pending\":[]}"));
+            if (path == $"/history/{promptId}") return Task.FromResult(Json("{}"));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        var adapter = new ComfyUiGenerationAdapter(new FakeFactory(handler), Configuration(new Dictionary<string, string?>
+        {
+            ["Integrations:ComfyUi:SubmissionEnabled"] = "true",
+            ["Integrations:ComfyUi:Endpoint"] = "http://127.0.0.1:8188",
+            ["Integrations:ComfyUi:ExternalWorkflowPath"] = workflowPath,
+            ["Integrations:ComfyUi:ExternalTextWorkflowPath"] = workflowPath,
+            ["Integrations:ComfyUi:PollIntervalMilliseconds"] = "1",
+            ["Integrations:ComfyUi:LostPromptGraceSeconds"] = "0"
+        }));
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var failure = await Assert.ThrowsAsync<GenerationDispatchException>(() => adapter.ExecuteAsync(Context(string.Empty) with
+        {
+            Composition = null,
+            CompositionPath = null,
+            ExistingProviderRequestId = promptId
+        }, cancellation.Token));
+
+        Assert.Contains("no longer has this image job", failure.Message);
+        Assert.Contains("Nothing was resubmitted", failure.Message);
+        Assert.DoesNotContain("/prompt", calls);
+    }
+
+    [Fact]
+    public async Task ComfyUIAdapterKeepsWaitingForAPromptThatIsStillQueued()
+    {
+        // The lost-prompt check must not fire for a prompt that is simply behind
+        // someone else's work: listed in the queue means healthy, however long.
+        var workflowPath = Path.Combine(root, "queued-workflow.json");
+        await File.WriteAllTextAsync(workflowPath, """{"text":"{{PROMPT}}","seed":"{{SEED}}"}""");
+        var promptId = Guid.NewGuid().ToString();
+        var handler = new FakeHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/queue") return Task.FromResult(Json(JsonSerializer.Serialize(new { queue_running = new object[] { new object[] { 0, "someone-else" } }, queue_pending = new object[] { new object[] { 1, promptId } } })));
+            if (path == $"/history/{promptId}") return Task.FromResult(Json("{}"));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        var adapter = new ComfyUiGenerationAdapter(new FakeFactory(handler), Configuration(new Dictionary<string, string?>
+        {
+            ["Integrations:ComfyUi:SubmissionEnabled"] = "true",
+            ["Integrations:ComfyUi:Endpoint"] = "http://127.0.0.1:8188",
+            ["Integrations:ComfyUi:ExternalWorkflowPath"] = workflowPath,
+            ["Integrations:ComfyUi:ExternalTextWorkflowPath"] = workflowPath,
+            ["Integrations:ComfyUi:PollIntervalMilliseconds"] = "1",
+            ["Integrations:ComfyUi:LostPromptGraceSeconds"] = "0"
+        }));
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(1_100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => adapter.ExecuteAsync(Context(string.Empty) with
+        {
+            Composition = null,
+            CompositionPath = null,
+            ExistingProviderRequestId = promptId
+        }, cancellation.Token));
+    }
+
+    [Fact]
     public async Task ComfyUIAdapterNeverHarvestsAPromptItDidNotSubmit()
     {
         var imagePath = Path.Combine(root, "composition.png");
