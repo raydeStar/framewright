@@ -834,7 +834,7 @@ h1, h2, h3, p { text-wrap: pretty; }
 .export-all-clear { padding: 9px; border-top: 1px solid var(--line); color: var(--authority); }
 .export-working-note { padding-top: 9px; border-top: 1px solid var(--line); color: var(--quiet); }
 .viewer-row { min-height: 0; display: grid; grid-template-columns: minmax(480px, 1fr) 290px; gap: 18px; padding: 18px 24px; }
-.sequence-viewer { position: relative; min-height: 0; box-shadow: 0 14px 32px rgba(0,0,0,.3); }.viewer-timecode { position: absolute; right: 9px; bottom: 8px; background: rgba(0,0,0,.58); padding: 4px 7px; border-radius: 4px; font: var(--text-xs) ui-monospace; }
+.sequence-viewer { position: relative; min-height: 0; box-shadow: 0 14px 32px rgba(0,0,0,.3); }.sequence-viewer .shot-asset { object-fit: contain; background: #050606; }.viewer-timecode { position: absolute; right: 9px; bottom: 8px; background: rgba(0,0,0,.58); padding: 4px 7px; border-radius: 4px; font: var(--text-xs) ui-monospace; }
 .sequence-notes { border-left: 1px solid var(--line); padding: 7px 0 0 18px; }.sequence-notes h3 { margin: 0 0 8px; font-size: var(--text-sm); }.sequence-notes > p { color: var(--muted); line-height: 1.5; font-size: var(--text-sm); margin: 0 0 15px; }
 .sequence-notes dl { margin: 0; }.sequence-notes dl div { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding: 8px 0; font-size: var(--text-xs); }.sequence-notes dt { color: var(--quiet); }.sequence-notes dd { margin: 0; color: var(--muted); }
 .timeline-shell { min-height: 0; background: var(--surface-0); border-top: 1px solid var(--line); display: grid; grid-template-rows: 42px 42px minmax(0, 1fr); }
@@ -1084,6 +1084,8 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
 .jobs-queue-panel li button { grid-column: 3; min-height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--text-2xs); font-weight: 650; cursor: pointer; }
 .jobs-queue-panel > p { margin: 0; color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
 .workspace-shot .jobs-dock { right: 326px; }
+/* The queue wrapper is what floats; keep it clear of the shot inspector's action buttons. */
+.workspace-shot .jobs-queue { right: 346px; }
 .workspace-review .jobs-dock { right: calc(26% + 16px); }
 .toast { position: fixed; z-index: 80; left: 50%; bottom: 18px; transform: translateX(-50%); min-height: 42px; max-width: min(600px, calc(100vw - 30px)); border-radius: 8px; padding: 0 13px; display: flex; align-items: center; gap: 8px; background: var(--accent-bg); border: 1px solid var(--accent-line); box-shadow: 0 12px 30px rgba(0,0,0,.35); color: var(--text); font-size: var(--text-sm); }.toast.error { background: var(--red-bg); border-color: var(--red-line); }.toast button { border: 0; background: transparent; color: inherit; margin-left: auto; }
 
@@ -1149,6 +1151,7 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
 
 @media (max-width: 1180px) {
   .shot-workspace { grid-template-columns: 142px minmax(350px,1fr) 290px; }
+  .workspace-shot .jobs-queue { right: 306px; }
   .shot-wall { grid-template-columns: repeat(2,minmax(250px,1fr)); }
   .authority-wall { grid-template-columns: repeat(2,minmax(250px,1fr)); }
   .context-center { display: none; }
@@ -1184,7 +1187,7 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
   .sketch-workspace .shot-center { padding-bottom: 310px; }.sketch-workspace .shot-inspector { height: 310px; grid-template-rows: minmax(0,1fr) auto; }.sketch-inspector > header { display: none; }.sketch-inspector .inspector-scroll { display: grid; grid-template-columns: minmax(240px,.9fr) minmax(330px,1.1fr); gap: 14px; overflow-x: auto; }.sketch-inspector .prompt-helper { align-self: end; }.sketch-inspector .route-section { grid-column: 2; grid-row: 1 / span 2; margin: 0; padding: 0; border: 0; }.sketch-inspector .packet-preview { display: none; }.route-card { min-height: 67px; }.sketch-submit { grid-template-columns: 1fr auto auto; align-items: center; }.sketch-submit > p { margin: 0; }.sketch-submit button { min-height: 44px; }.sketch-controls { overflow-x: auto; }.sketch-controls > button { flex: 0 0 auto; }.sketch-stage-shell { padding: 12px; }.sketch-stage { width: 100%; }
   .review-workspace { grid-template-rows: 54px minmax(250px,1fr) 280px; }.review-header { grid-template-columns: 1fr auto; }.review-header .linked { display: none; }.review-header > .segmented button { padding: 0 7px; font-size: var(--text-2xs); }.review-bottom { grid-template-columns: 1fr 1fr; }.decision-panel { position: absolute; left: 0; right: 0; bottom: 0; height: 90px; background: var(--surface-2); border-top: 1px solid var(--line); flex-direction: row; align-items: center; overflow: hidden; }.decision-panel h2 { font-size: var(--text-lg); margin: 5px 0; }.decision-panel p { display: none; }.decision-actions { min-width: 260px; }.feedback-panel, .continuity-panel { padding-bottom: 95px; }
   .sequence-workspace { grid-template-rows: 60px minmax(170px,.7fr) minmax(330px,1.3fr); }.sequence-header { padding: 0 13px; }.sequence-header h1 { font-size: var(--text-xl); }.sequence-policy small { display: none; }.sequence-export > summary span { max-width: 104px; overflow: hidden; text-overflow: ellipsis; }.viewer-row { padding: 12px; grid-template-columns: 1fr; }.sequence-notes { display: none; }.timeline-shell { grid-template-rows: 48px 44px minmax(0,1fr); }.timeline-toolbar > button { width: 44px; height: 44px; }.overview-track { padding-left: 92px; }.timeline-grid { grid-template-columns: 92px minmax(0,1fr); }.playhead { left: calc(92px + (100% - 92px) * var(--playhead-ratio)); }.track-header { padding: 0 6px; }
-  .jobs-dock { bottom: 68px; right: 10px; }.jobs-dock.idle { display: none; }.workspace-shot .jobs-dock { bottom: 338px; right: 10px; }.toast { bottom: 70px; }
+  .jobs-dock { bottom: 68px; right: 10px; }.jobs-dock.idle { display: none; }.workspace-shot .jobs-dock { bottom: 338px; right: 10px; }.workspace-shot .jobs-queue { bottom: 338px; right: 10px; }.toast { bottom: 70px; }
 }
 
 @media (max-width: 560px) {

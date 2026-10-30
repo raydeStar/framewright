@@ -46,6 +46,9 @@ function Invoke-NativeFramewright {
     if (Test-LocalVoiceEnabled) {
         try {
             & (Join-Path $scriptRoot 'start-voice-worker.ps1')
+            # The worker exports its endpoint and token; enablement is the studio's own
+            # setting, which Docker maps from the same selection in compose.yaml.
+            $env:QwenTts__Enabled = 'true'
         }
         catch {
             Write-Warning "The selected local voice worker is unavailable: $($_.Exception.Message)"
