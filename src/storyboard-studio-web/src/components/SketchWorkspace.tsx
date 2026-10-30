@@ -47,7 +47,7 @@ function buildPrompt(shot: ShotSummary, references: ReferenceSummary[]) {
   return `${shot.description} ${shot.action} Camera: ${shot.camera}. Treat the sketch as composition and blocking, not finished anatomy.${authorityDirection} Keep all locked shot constraints intact.`
 }
 
-export default function SketchWorkspace({ shot, references, purpose = 'Draft', launch, assetDraft, authorityTarget, onLaunchConsumed, onOpenFrame, onJobQueued, onAssetJobQueued }: { shot: ShotSummary; references: ReferenceSummary[]; purpose?: GenerationPurpose; launch?: { id: number; prompt?: string; route?: DraftRoute; underlayAssetId?: string }; assetDraft?: AssetGenerationDraft; authorityTarget?: { referenceId: string; expectedVersion: number; description: string; lockedConstraint: string }; onLaunchConsumed?: () => void; onOpenFrame: () => void; onJobQueued: () => void; onAssetJobQueued?: (job: import('../types').JobSummary) => void }) {
+export default function SketchWorkspace({ shot, references, purpose = 'Draft', launch, assetDraft, authorityTarget, deliveryAspect, onLaunchConsumed, onOpenFrame, onJobQueued, onAssetJobQueued }: { shot: ShotSummary; references: ReferenceSummary[]; purpose?: GenerationPurpose; launch?: { id: number; prompt?: string; route?: DraftRoute; underlayAssetId?: string }; assetDraft?: AssetGenerationDraft; authorityTarget?: { referenceId: string; expectedVersion: number; description: string; lockedConstraint: string }; deliveryAspect?: number; onLaunchConsumed?: () => void; onOpenFrame: () => void; onJobQueued: () => void; onAssetJobQueued?: (job: import('../types').JobSummary) => void }) {
   const subjectId = assetDraft?.id ?? shot.id
   const subjectCode = assetDraft?.destination === 'authority' ? 'AUTHORITY' : assetDraft ? 'ASSET' : shot.code
   const [history, setHistory] = useState<SketchDocument[]>(() => [restoreDocument(subjectId)])
@@ -146,22 +146,26 @@ export default function SketchWorkspace({ shot, references, purpose = 'Draft', l
     return () => { cancelled = true }
   }, [assetDraft, shot.id, subjectId])
 
+  // A shot is composed in its project's delivery shape, so the exported composition
+  // and the frame it guides match what the video will deliver. Asset drafts keep
+  // their source image's shape instead.
+  const stageAspect = assetDraft ? sourceAspect : deliveryAspect
   useLayoutEffect(() => {
     const shell = stageShellRef.current
-    if (!shell || !assetDraft || !sourceAspect) { setSourceStageSize(undefined); return }
+    if (!shell || !stageAspect) { setSourceStageSize(undefined); return }
     const resize = () => {
       const rect = shell.getBoundingClientRect()
       const maxWidth = Math.min(rect.width, 1200)
       const maxHeight = rect.height
       if (maxWidth <= 0 || maxHeight <= 0) return
-      if (maxWidth / maxHeight > sourceAspect) setSourceStageSize({ width: maxHeight * sourceAspect, height: maxHeight })
-      else setSourceStageSize({ width: maxWidth, height: maxWidth / sourceAspect })
+      if (maxWidth / maxHeight > stageAspect) setSourceStageSize({ width: maxHeight * stageAspect, height: maxHeight })
+      else setSourceStageSize({ width: maxWidth, height: maxWidth / stageAspect })
     }
     resize()
     const observer = new ResizeObserver(resize)
     observer.observe(shell)
     return () => observer.disconnect()
-  }, [assetDraft, sourceAspect])
+  }, [stageAspect])
 
   useEffect(() => {
     if (!hydrated || !launch) return
@@ -354,7 +358,7 @@ export default function SketchWorkspace({ shot, references, purpose = 'Draft', l
       setImportedUnderlay(asset.contentUrl)
       setUnderlayAssetId(asset.id)
       setSourceAspect(undefined)
-      setSourceStageSize(undefined)
+      if (assetDraft) setSourceStageSize(undefined)
       setCompositionAssetId(undefined)
       setShowUnderlay(true)
       setSaveState({ phase: 'dirty' })
@@ -375,7 +379,12 @@ export default function SketchWorkspace({ shot, references, purpose = 'Draft', l
     context.fillStyle = '#ded7c7'
     context.fillRect(0, 0, width, height)
     const finish = () => {
+      // Ink is light so it reads on the dark sketch surface, but the composition is
+      // exported on light paper; draw strokes as their dark counterpart so the
+      // image model can actually see them.
+      context.filter = 'invert(1) hue-rotate(180deg)'
       context.drawImage(source, 0, 0)
+      context.filter = 'none'
       drawBlockingObjects(context, sketchDoc.objects, width, height)
       const scale = window.devicePixelRatio || 1
       context.font = `${Math.round(15 * scale)}px system-ui, sans-serif`
@@ -569,7 +578,7 @@ export default function SketchWorkspace({ shot, references, purpose = 'Draft', l
       {blockingKitOpen && <BlockingPalette onAdd={addBlockingObject} />}
 
       <div className="sketch-stage-shell" ref={stageShellRef}>
-        <div className={`sketch-stage ${assetDraft && sourceAspect ? 'source-aspect' : ''}`} style={sourceStageSize} data-testid="sketch-canvas" onDragOver={event => { if (event.dataTransfer.types.includes('application/x-framewright-blocker')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDrop={dropBlockingObject}>
+        <div className={`sketch-stage ${assetDraft && sourceAspect ? 'source-aspect' : ''} ${sourceStageSize ? 'fitted' : ''}`} style={sourceStageSize} data-testid="sketch-canvas" onDragOver={event => { if (event.dataTransfer.types.includes('application/x-framewright-blocker')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDrop={dropBlockingObject}>
           {showUnderlay && (importedUnderlay ? <img className={assetDraft ? 'revision-source-image' : ''} src={importedUnderlay} onLoad={event => { if (assetDraft && event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0) setSourceAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight) }} alt={assetDraft?.revisionSource ? `${assetDraft.revisionSource.label} version ${assetDraft.revisionSource.version} selected as revision source` : 'Imported sketch underlay'} /> : assetDraft?.revisionSource ? <Artwork className="revision-source-image" variant={assetDraft.revisionSource.visualVariant} label={`${assetDraft.revisionSource.label} version ${assetDraft.revisionSource.version} text reference preview`} /> : <Artwork variant={shot.visualVariant} muted label="Current frame underlay" />)}
           <div className="sketch-paper" />
           {showGrid && <div className="sketch-grid" aria-hidden="true"><i /><i /><i /><i /></div>}

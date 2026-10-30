@@ -1,5 +1,6 @@
 using StoryboardStudio.Core;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace StoryboardStudio.Api.Services;
 
@@ -78,7 +79,7 @@ public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfigur
             var timeout = TimeSpan.FromMinutes(Math.Clamp(configuration.GetValue("Integrations:Codex:ImageTimeoutMinutes", 12), 2, 30));
             var result = await runtime.RunAsync(arguments, root, timeout, cancellationToken, BuildPrompt(context, outputPath, attachmentMap, textOnlyMap));
             if (!result.Started) throw new GenerationDispatchException($"Codex ImageGen could not start: {Bound(result.StandardError)}", false);
-            if (result.ExitCode != 0) throw new GenerationDispatchException($"Codex ImageGen failed: {Bound(result.StandardError.Length > 0 ? result.StandardError : result.StandardOutput)}", true, context.JobId.ToString("N"));
+            if (result.ExitCode != 0) throw new GenerationDispatchException($"Codex ImageGen failed: {Diagnose(result.StandardError.Length > 0 ? result.StandardError : result.StandardOutput)}", true, context.JobId.ToString("N"));
             await context.ReportAsync(90, "Validating Codex ImageGen result", cancellationToken);
             var generated = FindGeneratedImage(root, images) ?? throw new GenerationDispatchException("Codex completed without writing a PNG or JPEG result in its isolated job directory.", true, context.JobId.ToString("N"));
             var info = new FileInfo(generated);
@@ -285,6 +286,21 @@ public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfigur
             return header[0] == 0xff && header[1] == 0xd8 && header[2] == 0xff ? "image/jpeg" : null;
         }
         catch { return null; }
+    }
+
+    /// <summary>Codex echoes its banner and the whole prompt before it fails, so the cause is
+    /// in its trailing ERROR lines. Report their messages, or the tail when there are none.</summary>
+    internal static string Diagnose(string output)
+    {
+        var errors = output.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith("ERROR:", StringComparison.Ordinal))
+            .Select(line => Regex.Match(line, "\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"") is { Success: true } match ? match.Groups[1].Value : line["ERROR:".Length..].Trim())
+            .Distinct()
+            .ToArray();
+        if (errors.Length > 0) return Bound(string.Join(" ", errors));
+        var normalized = output.Trim();
+        return normalized.Length <= 1200 ? Bound(normalized) : "…" + normalized[^1100..];
     }
 
     private static string Bound(string value)

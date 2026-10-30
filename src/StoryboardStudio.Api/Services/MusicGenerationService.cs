@@ -183,7 +183,8 @@ public sealed class MusicGenerationService(
         try
         {
             using var request = CreateRequest(HttpMethod.Post, path);
-            request.Content = JsonContent.Create(body, options: Json);
+            // A sized body: the worker reads Content-Length and rejects chunked uploads as empty.
+            request.Content = new StringContent(JsonSerializer.Serialize(body, Json), System.Text.Encoding.UTF8, "application/json");
             using var response = await clients.CreateClient("yue2-generation").SendAsync(request, cancellationToken);
             var text = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)

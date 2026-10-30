@@ -1,7 +1,7 @@
 import { Armchair, ArrowRight, Copy, DoorOpen, Move, RotateCw, Square, TableProperties, Trash2, UserRound } from 'lucide-react'
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { PosePresetSummary, ReferenceSummary, SketchJoint, SketchObject, SketchObjectKind } from '../types'
-import { HUMAN_CONNECTIONS, HUMAN_POSES, applyPose, clamp, cloneJoints, jointMap } from './blockingKitModel'
+import { HUMAN_CONNECTIONS, HUMAN_POSES, applyPose, clamp, cloneJoints, jointMap, screenInk } from './blockingKitModel'
 
 export function BlockingPalette({ onAdd }: { onAdd: (kind: SketchObjectKind) => void }) {
   const items: Array<[SketchObjectKind, typeof UserRound, string]> = [['Human', UserRound, 'Poseable person'], ['Chair', Armchair, 'Chair'], ['Table', TableProperties, 'Table'], ['Doorway', DoorOpen, 'Doorway'], ['Arrow', ArrowRight, 'Movement arrow'], ['Block', Square, 'Mass / object']]
@@ -50,7 +50,7 @@ export function BlockingLayer({ objects, selectedId, interactive, onSelect, onCo
   }
   const end = () => { if (!drag.current) return; drag.current = undefined; onCommit(workingRef.current) }
   return <div ref={rootRef} className={`blocking-layer ${interactive ? 'interactive' : ''}`} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onPointerDown={event => { if (event.target === event.currentTarget) onSelect(undefined) }}>
-    {working.map(item => <div key={item.id} className={`blocking-object ${item.kind.toLowerCase()} ${selectedId === item.id ? 'selected' : ''}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, transform: `translate(-50%, -50%) rotate(${item.rotation}deg)`, color: item.color }} role="group" aria-label={`${item.label || item.kind}, ${item.kind} blocker`} onPointerDown={event => begin(event, item, 'move')} onClick={event => { event.stopPropagation(); onSelect(item.id) }}>
+    {working.map(item => <div key={item.id} className={`blocking-object ${item.kind.toLowerCase()} ${selectedId === item.id ? 'selected' : ''}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, transform: `translate(-50%, -50%) rotate(${item.rotation}deg)`, color: screenInk(item.color) }} role="group" aria-label={`${item.label || item.kind}, ${item.kind} blocker`} onPointerDown={event => begin(event, item, 'move')} onClick={event => { event.stopPropagation(); onSelect(item.id) }}>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{item.kind === 'Human' ? <HumanSvg item={item} /> : <ObjectSvg kind={item.kind} />}</svg>
       <span className="blocker-label">{item.label || item.kind}</span>
       {selectedId === item.id && <><button type="button" className="blocker-rotate" aria-label={`Rotate ${item.label || item.kind}`} onPointerDown={event => begin(event, item, 'rotate')}><RotateCw size={13} /></button><button type="button" className="blocker-resize" aria-label={`Resize ${item.label || item.kind}`} onPointerDown={event => begin(event, item, 'resize')}><Move size={13} /></button>{item.kind === 'Human' && item.joints.map(joint => <span key={joint.name} className="joint-handle" data-joint={joint.name} aria-hidden="true" style={{ left: `${joint.x * 100}%`, top: `${joint.y * 100}%` }} onPointerDown={event => begin(event, item, 'joint', joint.name)} />)}</>}

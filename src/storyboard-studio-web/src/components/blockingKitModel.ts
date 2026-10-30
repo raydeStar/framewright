@@ -39,6 +39,15 @@ export function applyPose(item: SketchObject, pose: string): SketchObject {
   return { ...item, pose, ...(nextDimensions ?? (item.pose === 'Prone' ? { width: .14, height: .5 } : {})), joints: cloneJoints(HUMAN_POSES[pose] ?? item.joints) }
 }
 
+// Blockers keep a dark ink because the exported composition sits on light paper.
+// The sketch surface on screen is dark, so dark ink is shown in light paper tone there.
+export function screenInk(color: string) {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color)?.[1]
+  if (!hex) return color
+  const [r, g, b] = [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < .35 ? '#eadfc6' : color
+}
+
 export function drawBlockingObjects(context: CanvasRenderingContext2D, objects: SketchObject[], width: number, height: number) {
   for (const item of objects) {
     context.save()

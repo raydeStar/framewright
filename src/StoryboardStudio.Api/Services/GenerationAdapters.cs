@@ -224,7 +224,8 @@ internal static class ComfyUi
 {
     internal const long MaxControlJsonBytes = 5L * 1024 * 1024;
     internal const long MaxWorkflowBytes = 5L * 1024 * 1024;
-    internal readonly record struct QueueState(bool Running, int Ahead, int Pending, bool Known);
+    /// <param name="Listed">The prompt appears in ComfyUI's running or pending queue.</param>
+    internal readonly record struct QueueState(bool Running, int Ahead, int Pending, bool Known, bool Listed = false);
 
     internal static Task<string> ReadControlJsonAsync(
         HttpContent content,
@@ -246,9 +247,9 @@ internal static class ComfyUi
         var running = Ids(root, "queue_running");
         var pending = Ids(root, "queue_pending");
         if (promptId is null) return new(false, 0, pending.Count, true);
-        if (running.Contains(promptId)) return new(true, 0, pending.Count, true);
+        if (running.Contains(promptId)) return new(true, 0, pending.Count, true, true);
         var index = pending.IndexOf(promptId);
-        return new(false, index < 0 ? 0 : running.Count + index, pending.Count, true);
+        return new(false, index < 0 ? 0 : running.Count + index, pending.Count, true, index >= 0);
     }
 
     private static List<string> Ids(JsonElement root, string property)
@@ -378,6 +379,12 @@ internal static class ComfyUiPolling
     /// at a fixed attempt count would abandon a job that is still perfectly
     /// healthy. Timing out here never cancels the ComfyUI-side job — we simply
     /// stop watching, because we do not cancel work we cannot safely reclaim.
+    ///
+    /// A prompt ComfyUI lists in neither its queue nor its history is not
+    /// waiting behind anyone: ComfyUI (or the machine) restarted after we
+    /// submitted it. Once that has held for the grace period the job fails
+    /// with that explanation instead of holding the job lane for the whole
+    /// timeout. Nothing is resubmitted; Retry stays the artist's decision.
     /// </summary>
     internal static async Task<(string FileName, string Subfolder, string Type)> AwaitOutputAsync(
         HttpClient client,
@@ -394,13 +401,17 @@ internal static class ComfyUiPolling
         var interval = TimeSpan.FromMilliseconds(Math.Clamp(configuration.GetValue("Integrations:ComfyUi:PollIntervalMilliseconds", 2_000), 250, 10_000));
         var timeout = TimeSpan.FromMinutes(Math.Clamp(defaultTimeoutMinutes, 1, 720));
         var deadline = DateTimeOffset.UtcNow + timeout;
+        var lostGrace = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Integrations:ComfyUi:LostPromptGraceSeconds", 30), 0, 600));
         var lastPhase = string.Empty;
         var everRan = false;
+        DateTimeOffset? missingSince = null;
+        var missingPolls = 0;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
             await Task.Delay(interval, cancellationToken);
 
+            var inHistory = true;
             using (var history = await client.GetAsync(new Uri(endpoint, $"/history/{Uri.EscapeDataString(promptId)}"), cancellationToken))
             {
                 if (history.IsSuccessStatusCode)
@@ -408,6 +419,7 @@ internal static class ComfyUiPolling
                     using var json = JsonDocument.Parse(await ComfyUi.ReadControlJsonAsync(
                         history.Content, "The ComfyUI history response exceeded the 5 MB safety limit.", true,
                         requestId ?? promptId, cancellationToken));
+                    inHistory = json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty(promptId, out _);
                     if (locate(json.RootElement, promptId, out var file)) return file;
                     if (json.RootElement.TryGetProperty(promptId, out var failedEntry)
                         && failedEntry.TryGetProperty("status", out var failedStatus)
@@ -441,6 +453,16 @@ internal static class ComfyUiPolling
 
             var state = await ComfyUi.ReadQueueAsync(client, endpoint, promptId, cancellationToken);
             if (state.Running) everRan = true;
+            if (state.Known && !state.Listed && !inHistory)
+            {
+                missingSince ??= DateTimeOffset.UtcNow;
+                missingPolls++;
+                if (missingPolls >= 2 && DateTimeOffset.UtcNow - missingSince >= lostGrace)
+                    throw new GenerationDispatchException(
+                        $"ComfyUI no longer has this {kind} job: it is in neither its queue nor its history, so ComfyUI or the computer most likely restarted before it finished. Nothing was resubmitted; choose Retry to render it again.",
+                        true, requestId ?? promptId);
+            }
+            else { missingSince = null; missingPolls = 0; }
             var phase = ComfyUi.DescribeWait(state);
             if (phase != lastPhase)
             {
