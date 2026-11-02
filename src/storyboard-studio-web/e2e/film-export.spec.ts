@@ -47,4 +47,14 @@ test('export film shows each shot’s picture, sends the chosen options, and off
   await expect(ready).toContainText('Film ready')
   await expect(ready.getByRole('link', { name: 'Download film' })).toHaveAttribute('href', '/api/assets/f/content')
   await expect(dialog.getByRole('button', { name: 'Render again' })).toBeEnabled()
+
+  // Closing and reopening, or reloading, keeps the choices just made.
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'Export film' }).click()
+  await expect(dialog.getByRole('checkbox', { name: /Fade in and out/ })).not.toBeChecked()
+  await expect(dialog.getByRole('checkbox', { name: /English captions/ })).toBeChecked()
+  await page.reload()
+  await page.getByRole('button', { name: 'Sequence' }).click()
+  await page.getByRole('button', { name: 'Export film' }).click()
+  await expect(dialog.getByRole('checkbox', { name: /Fade in and out/ })).not.toBeChecked()
 })

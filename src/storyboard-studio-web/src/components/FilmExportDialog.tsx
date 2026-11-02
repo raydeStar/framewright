@@ -5,6 +5,16 @@ import type { FilmExportRequest, FilmExportStatus, FilmShotSource, JobSummary, S
 import Dialog from './Dialog'
 
 const SOURCE_LABELS: Record<FilmShotSource['source'], string> = { Production: 'Max take', Take: 'Video take', Still: 'Still held', Missing: 'No picture' }
+const DEFAULT_OPTIONS: FilmExportRequest = { fades: true, captions: true, normalizeLoudness: true }
+const optionsKey = (projectId: string) => `framewright.film-options.${projectId}`
+
+// The last choices for this project, so closing the dialog does not undo them.
+function rememberedOptions(projectId: string): FilmExportRequest {
+  try {
+    const saved = JSON.parse(localStorage.getItem(optionsKey(projectId)) ?? 'null') as Partial<FilmExportRequest> | null
+    return { fades: saved?.fades ?? DEFAULT_OPTIONS.fades, captions: saved?.captions ?? DEFAULT_OPTIONS.captions, normalizeLoudness: saved?.normalizeLoudness ?? DEFAULT_OPTIONS.normalizeLoudness }
+  } catch { return DEFAULT_OPTIONS }
+}
 
 /**
  * Renders the sequence as one finished film. The dialog says, shot by shot,
@@ -13,7 +23,8 @@ const SOURCE_LABELS: Record<FilmShotSource['source'], string> = { Production: 'M
  */
 export default function FilmExportDialog({ studio, onClose, onJobQueued }: { studio: StudioSnapshot; onClose: () => void; onJobQueued: (job: JobSummary) => void }) {
   const [status, setStatus] = useState<FilmExportStatus>()
-  const [options, setOptions] = useState<FilmExportRequest>({ fades: true, captions: true, normalizeLoudness: true })
+  const [options, setOptions] = useState<FilmExportRequest>(() => rememberedOptions(studio.project.id))
+  useEffect(() => { try { localStorage.setItem(optionsKey(studio.project.id), JSON.stringify(options)) } catch { /* Remembered choices are a convenience. */ } }, [options, studio.project.id])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   // The snapshot is replaced on every poll while a job runs; ask again only when the cut or its takes change.
