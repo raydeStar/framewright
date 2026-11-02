@@ -1285,6 +1285,39 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
 .frame-generation-state.has-warning .eyebrow { color: var(--amber); }
 .frame-generation-state.has-warning > small { color: var(--amber-soft); }
 
+/* Export film: which picture each shot uses, the options, and the result. */
+/* One full-width column: the shared drawer rule right-aligns tracks, which
+   otherwise shrinks a dialog whose content is narrower than its frame. */
+dialog.studio-dialog.edit-dialog.film-export-dialog { width: min(640px, calc(100vw - 28px)); }
+dialog.studio-dialog.edit-dialog.film-export-dialog[open] { grid-template-columns: minmax(0, 1fr); }
+.film-summary, .film-ready, .film-latest { margin: 0; display: grid; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.film-summary span, .film-ready span, .film-latest span { display: grid; gap: 2px; min-width: 0; }
+.film-summary strong, .film-ready strong, .film-latest strong { color: var(--text); font-size: var(--text-sm); }
+.film-summary small, .film-ready small, .film-latest small { color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
+.film-sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.film-sources li { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.film-sources li > span:nth-child(2) { display: grid; gap: 1px; min-width: 0; }
+.film-sources strong { color: var(--text); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-sources small { color: var(--quiet); font-size: var(--text-2xs); }
+.film-sources em { font-style: normal; font-size: var(--text-2xs); font-weight: 650; color: var(--authority); white-space: nowrap; }
+.film-source-icon { color: var(--authority); display: grid; }
+.film-sources li.source-take em, .film-sources li.source-take .film-source-icon { color: var(--accent-strong); }
+.film-sources li.source-still em, .film-sources li.source-still .film-source-icon, .film-sources li.source-missing em, .film-sources li.source-missing .film-source-icon { color: var(--amber); }
+.film-sources li.source-missing { border-color: var(--amber-line); }
+.film-options { display: grid; gap: 6px; }
+.edit-dialog-body label.film-option { display: grid; grid-template-columns: 18px minmax(0,1fr); gap: 9px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.film-option input { margin-top: 2px; accent-color: var(--accent); }
+.film-option span { display: grid; gap: 2px; }
+.film-option strong { color: var(--text); font-size: var(--text-xs); }
+.film-option small { color: var(--quiet); font-size: var(--text-2xs); font-weight: 400; line-height: 1.4; }
+.film-readiness { margin: 0; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: var(--text-xs); }
+.film-readiness.is-blocked { color: var(--amber); }
+.film-ready { border-color: color-mix(in srgb, var(--success) 40%, var(--line)); }
+.film-ready > svg { color: var(--success); }
+.film-ready a { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.film-latest.state-failed { border-color: var(--red-line); }
+.film-latest.state-failed > svg { color: var(--red); }
+
 /* Create Last Frame: a later moment, or a camera move across one image. */
 .last-frame-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 14px 18px 0; }
 .last-frame-mode button, .camera-move-picker button { min-width: 0; min-height: 56px; padding: 9px 10px; display: grid; gap: 3px; align-content: start; border: 1px solid var(--line-control); border-radius: 8px; background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }
