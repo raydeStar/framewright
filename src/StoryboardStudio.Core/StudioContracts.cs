@@ -1470,6 +1470,25 @@ public sealed record PrepareVideoManifestRequest(
     VideoQuality Quality = VideoQuality.Low,
     string? TakeId = null);
 
+/// <summary>Options for rendering the sequence as one finished film.</summary>
+public sealed record FilmExportRequest(bool Fades = true, bool Captions = true, bool NormalizeLoudness = true);
+
+/// <param name="Source">Production (the shot's Max take), Take (its latest video
+/// take), Still (its current image held), or Missing (black).</param>
+public sealed record FilmShotSource(Guid ShotId, string Code, string Title, int DurationFrames, string Source, string Detail, Guid? AssetId);
+
+public sealed record FilmExportStatus(
+    bool CanRender,
+    string Detail,
+    int TotalFrames,
+    int FramesPerSecond,
+    int DeliveryWidth,
+    int DeliveryHeight,
+    IReadOnlyList<FilmShotSource> Shots,
+    int AudioClips,
+    int Captions,
+    int ApprovedShots);
+
 /// <summary>
 /// Video endpoints made by moving the camera across one approved image rather
 /// than generating a new moment. The browser crops the windows and uploads

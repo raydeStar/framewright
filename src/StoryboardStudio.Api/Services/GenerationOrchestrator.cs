@@ -918,6 +918,8 @@ public sealed partial class GenerationJobWorker(GenerationJobSignal queue, IServ
             // same job afterwards, by the same identity.
             var modelPending = await scope.ServiceProvider.GetRequiredService<ModelGenerationService>().RecoverableJobsAsync(stoppingToken);
             foreach (var jobId in modelPending) await queue.QueueAsync(jobId, stoppingToken);
+            var filmPending = await scope.ServiceProvider.GetRequiredService<FilmExportService>().RecoverableJobsAsync(stoppingToken);
+            foreach (var jobId in filmPending) await queue.QueueAsync(jobId, stoppingToken);
         }
 
         // Always scan once on startup, including when there was no state change
@@ -976,6 +978,8 @@ public sealed partial class GenerationJobWorker(GenerationJobSignal queue, IServ
                 await scope.ServiceProvider.GetRequiredService<AudioGenerationJobService>().RunAsync(lease.JobId, cancellationToken);
             else if (string.Equals(lease.WorkType, ModelGenerationService.ModelWorkType, StringComparison.Ordinal))
                 await scope.ServiceProvider.GetRequiredService<ModelGenerationService>().RunAsync(lease.JobId, cancellationToken);
+            else if (string.Equals(lease.WorkType, FilmExportService.WorkType, StringComparison.Ordinal))
+                await scope.ServiceProvider.GetRequiredService<FilmExportService>().RunAsync(lease.JobId, cancellationToken);
             else
                 await scope.ServiceProvider.GetRequiredService<GenerationOrchestrator>().RunAsync(lease.JobId, cancellationToken);
 

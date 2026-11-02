@@ -1,5 +1,36 @@
 # Framewright implementation handoff
 
+## Export film (2026-11-02)
+
+Finishing the Skychasers film needed scripts outside the app to cut the takes
+together with the mix, fades, loudness and captions. The Sequence now has
+**Export film**: a durable `Film` job (`FilmExportService`, run by the worker,
+recovered after a restart, retried from its frozen packet) that renders one
+H.264/AAC MP4 at the project's delivery size, frame rate and exact frame count.
+
+- Each shot uses its Max production take, else its latest video take, else
+  its current image held, else black. The dialog lists which before anything
+  is rendered, and the job records it.
+- The packet freezes asset ids and content hashes, clip placements and caption
+  text; a changed asset fails the render rather than substituting.
+- `FfmpegFilmEncoder` covers and centre-crops every shot, conforms the frame
+  rate, holds a short take's last frame, applies the shared editorial mix
+  (`AudioMasteringService.RenderMixAsync`) with two-pass linear loudness to
+  -16 LUFS, optional fades, and a soft English `mov_text` track from the
+  Dialogue and Voice clips' text. BT.709 projects are tagged in the stream.
+- The result is probed against the delivery contract before it is imported as
+  a video asset. Video is rate-capped at 12 Mb/s, which bounds a film to about
+  five minutes under the asset store's media limit; longer cuts are refused.
+
+Evidence: nine `FilmExportTests`, including an end-to-end render with real
+FFmpeg (exact 120 frames, BT.709, audio and subtitle streams) that is skipped,
+not passed, where FFmpeg is absent. Removing the last-frame hold failed both
+the argument test and the real render. A Playwright journey covers the dialog
+in desktop Chromium and iPad WebKit. In the built app against the stand-in
+ComfyUI, a three-shot cut (two stills, one H3 take, score and two dialogue
+lines) rendered to exactly 360 frames at 1920×1080, -16.4 LUFS, with both
+caption cues. Not covered: effects lane, titles, grading.
+
 ## ComfyUI and H3 live feedback (2026-11-01)
 
 Found while making a short film end to end: an H3 Max render sat at "Rendering
@@ -275,7 +306,7 @@ ComfyUI is an external service. Its workflows are supplied by an explicit filesy
 9. Promote a ratified draft to a precision final. A ratified final with a real image asset can freeze a visual-only video packet.
 10. Reorder named shot slots on the sequence timeline. Add dialogue, voice, and music clips as separate durable records.
 11. Attach recorded audio or synthesize a saved Voice clip through a protected preset-voice route. Review playback and decoded waveform evidence. Browser decoding is capped at 8 MB per source; larger media keeps streaming playback and uses an explicitly labeled guide waveform rather than consuming unbounded browser memory.
-12. Export a production package and, when FFmpeg is available and media exists, a separate 48 kHz/24-bit WAV editorial mix.
+12. Export a production package and, when FFmpeg is available and media exists, a separate 48 kHz/24-bit WAV editorial mix, or render the whole cut as one finished MP4 with **Export film**.
 
 Production packages are assembled into a delete-on-close temporary file rather than a process-wide memory buffer, so real video assets do not multiply application memory use during export.
 
@@ -569,7 +600,7 @@ No agent should commission or probe the active Skychasers render environment wit
 ## 15. Known limitations and next product decisions
 
 - Built-in continuity is deterministic metadata evidence plus human visual review, not vision-model inspection.
-- Final picture/audio mux and delivery transcodes are intentionally left to the existing video/NLE lane; the app exports production evidence and a separate WAV mix.
+- **Export film** renders a review or delivery MP4 of the cut (H.264/AAC at the project format). Grading, transitions other than the overall fade, titles, and other delivery transcodes remain the editing application's job.
 - Automated continuity is deterministic contract evidence. It checks project aspect/dimensions, reference capacity, multi-subject prompting, and first/last-frame compatibility, but visual identity and anatomy still require the artist's eyes.
 - HTTPS tablet setup requires certificate trust on each tablet; HTTP remains an acknowledged private-LAN fallback, not a secure equivalent.
 - Consent records are attestations, not a legal-document management system. Store the primary consent artifact in the organization’s approved records system and reference it accurately.

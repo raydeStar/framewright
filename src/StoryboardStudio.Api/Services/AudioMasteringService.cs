@@ -8,6 +8,9 @@ namespace StoryboardStudio.Api.Services;
 
 public sealed record AudioMixExport(Stream Content, string FileName);
 
+/// <summary>One placed audio clip, resolved to its file, for the editorial mix.</summary>
+internal sealed record AudioMixInput(string Path, int StartFrame, int DurationFrames, double TrimStartSeconds, double Volume);
+
 public sealed class AudioMasteringService(
     StudioDbContext db,
     AssetStore assets,
@@ -54,39 +57,12 @@ public sealed class AudioMasteringService(
         Directory.CreateDirectory(outputRoot);
         var outputPath = Path.Combine(outputRoot, $"audio-mix-{Guid.NewGuid():N}.wav");
 
-        var start = new ProcessStartInfo { FileName = ffmpeg, UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true };
-        foreach (var value in new[] { "-nostdin", "-hide_banner", "-loglevel", "error", "-y" }) start.ArgumentList.Add(value);
-        foreach (var input in inputs)
-        {
-            start.ArgumentList.Add("-i");
-            start.ArgumentList.Add(assets.ResolveContentPath(input.Asset));
-        }
-        var filters = inputs.Select((input, index) =>
-        {
-            var trim = input.Clip.TrimStartSeconds.ToString("0.###", CultureInfo.InvariantCulture);
-            var length = (input.Clip.DurationFrames / (double)fps).ToString("0.###", CultureInfo.InvariantCulture);
-            var volume = input.Clip.Volume.ToString("0.###", CultureInfo.InvariantCulture);
-            var delay = Math.Max(0, (int)Math.Round(input.Clip.StartFrame * 1000d / fps));
-            return $"[{index}:a]atrim=start={trim}:duration={length},asetpts=PTS-STARTPTS,volume={volume},adelay={delay}:all=1[a{index}]";
-        }).ToList();
-        filters.Add($"{string.Concat(inputs.Select((_, i) => $"[a{i}]"))}amix=inputs={inputs.Length}:duration=longest:normalize=0,apad=whole_dur={duration.ToString("0.###", CultureInfo.InvariantCulture)},atrim=duration={duration.ToString("0.###", CultureInfo.InvariantCulture)},alimiter=limit=0.95[out]");
-        foreach (var value in new[] { "-filter_complex", string.Join(';', filters), "-map", "[out]", "-c:a", "pcm_s24le", "-ar", sampleRate.ToString(CultureInfo.InvariantCulture), outputPath }) start.ArgumentList.Add(value);
-
         try
         {
-            using var process = new Process { StartInfo = start };
-            if (!process.Start()) return RepositoryResult<AudioMixExport>.Invalid("FFmpeg could not be started.");
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromMinutes(10));
-            var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-            var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            try { await process.WaitForExitAsync(timeout.Token); }
-            catch (OperationCanceledException) { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
-            var error = await errorTask; _ = await outputTask;
-            if (process.ExitCode != 0 || !File.Exists(outputPath))
-            {
-                if (File.Exists(outputPath)) File.Delete(outputPath);
-                return RepositoryResult<AudioMixExport>.Invalid($"FFmpeg mix failed: {Bound(error)}");
-            }
+            var mixed = await RenderMixAsync(ffmpeg,
+                inputs.Select(input => new AudioMixInput(assets.ResolveContentPath(input.Asset), input.Clip.StartFrame, input.Clip.DurationFrames, input.Clip.TrimStartSeconds, input.Clip.Volume)).ToArray(),
+                fps, sampleRate, duration, outputPath, cancellationToken);
+            if (mixed is not null) return RepositoryResult<AudioMixExport>.Invalid(mixed);
             db.AuditEvents.Add(new AuditEventRecord { Id = Guid.NewGuid(), Type = "EditorialAudioMixExported", TargetType = "Project", TargetId = projectScope.ProjectId.ToString(), PayloadJson = System.Text.Json.JsonSerializer.Serialize(new { mediaClips = inputs.Length, guideClips = Math.Max(0, clips.Count - inputs.Length), sampleRate, bitDepth = 24 }), CreatedAt = timeProvider.GetUtcNow() });
             await db.SaveChangesAsync(cancellationToken);
             var stream = new FileStream(outputPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81_920, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
@@ -95,7 +71,47 @@ public sealed class AudioMasteringService(
         catch { if (File.Exists(outputPath)) File.Delete(outputPath); throw; }
     }
 
-    private string? ResolveFfmpeg()
+    /// <summary>
+    /// Mixes placed clips onto one timeline of exactly <paramref name="durationSeconds"/>,
+    /// padded with silence, into a 24-bit WAV. Returns why it failed, or null.
+    /// Shared by the WAV export and the film render, so both hear the same mix.
+    /// </summary>
+    internal static async Task<string?> RenderMixAsync(
+        string ffmpeg, IReadOnlyList<AudioMixInput> inputs, int fps, int sampleRate, double durationSeconds, string outputPath, CancellationToken cancellationToken)
+    {
+        var start = new ProcessStartInfo { FileName = ffmpeg, UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true };
+        foreach (var value in new[] { "-nostdin", "-hide_banner", "-loglevel", "error", "-y" }) start.ArgumentList.Add(value);
+        foreach (var input in inputs)
+        {
+            start.ArgumentList.Add("-i");
+            start.ArgumentList.Add(input.Path);
+        }
+        var filters = inputs.Select((input, index) =>
+        {
+            var trim = input.TrimStartSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+            var length = (input.DurationFrames / (double)fps).ToString("0.###", CultureInfo.InvariantCulture);
+            var volume = input.Volume.ToString("0.###", CultureInfo.InvariantCulture);
+            var delay = Math.Max(0, (int)Math.Round(input.StartFrame * 1000d / fps));
+            return $"[{index}:a]atrim=start={trim}:duration={length},asetpts=PTS-STARTPTS,volume={volume},adelay={delay}:all=1[a{index}]";
+        }).ToList();
+        var duration = durationSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+        filters.Add($"{string.Concat(inputs.Select((_, i) => $"[a{i}]"))}amix=inputs={inputs.Count}:duration=longest:normalize=0,apad=whole_dur={duration},atrim=duration={duration},alimiter=limit=0.95[out]");
+        foreach (var value in new[] { "-filter_complex", string.Join(';', filters), "-map", "[out]", "-c:a", "pcm_s24le", "-ar", sampleRate.ToString(CultureInfo.InvariantCulture), outputPath }) start.ArgumentList.Add(value);
+
+        using var process = new Process { StartInfo = start };
+        if (!process.Start()) return "FFmpeg could not be started.";
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromMinutes(10));
+        var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+        var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException) { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
+        var error = await errorTask; _ = await outputTask;
+        if (process.ExitCode == 0 && File.Exists(outputPath)) return null;
+        if (File.Exists(outputPath)) File.Delete(outputPath);
+        return $"FFmpeg mix failed: {Bound(error)}";
+    }
+
+    internal string? ResolveFfmpeg()
     {
         var configured = configuration["Studio:Tools:FfmpegPath"];
         if (!string.IsNullOrWhiteSpace(configured)) { var full = Path.GetFullPath(configured); if (File.Exists(full)) return full; }

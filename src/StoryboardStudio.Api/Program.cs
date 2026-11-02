@@ -88,6 +88,8 @@ builder.Services.AddScoped<TimelineService>();
 builder.Services.AddScoped<QwenVoiceService>();
 builder.Services.AddScoped<VoiceSynthesisService>();
 builder.Services.AddScoped<AudioMasteringService>();
+builder.Services.AddSingleton<IFilmEncoder, FfmpegFilmEncoder>();
+builder.Services.AddScoped<FilmExportService>();
 builder.Services.AddScoped<ProductionExportService>();
 builder.Services.AddScoped<PortableProjectImportService>();
 builder.Services.AddSingleton<IProviderCredentialStore, ProviderCredentialStore>();
@@ -359,11 +361,18 @@ app.MapGet("/api/jobs/{jobId:guid}", async Task<IResult> (
 app.MapPost("/api/jobs/{jobId:guid}/retry", async Task<IResult> (
     Guid jobId, GenerationOrchestrator orchestrator, AssetImageGenerationService assetGeneration,
     AudioGenerationJobService audioGeneration, SceneRenderService sceneRenders,
-    ModelGenerationService models,
+    ModelGenerationService models, FilmExportService films,
     StudioRepository repository, StudioDbContext db, GenerationJobSignal queue,
     CancellationToken cancellationToken) =>
 {
     var workType = await db.Jobs.Where(x => x.Id == jobId).Select(x => x.WorkType).SingleOrDefaultAsync(cancellationToken);
+    if (string.Equals(workType, FilmExportService.WorkType, StringComparison.Ordinal))
+    {
+        var again = await films.RetryAsync(jobId, cancellationToken);
+        if (again.Kind != RepositoryResultKind.Ok || again.Value is null) return ToHttpResult(again);
+        await queue.QueueAsync(again.Value.Id, cancellationToken);
+        return Results.Accepted($"/api/jobs/{again.Value.Id}", again.Value);
+    }
     // A model job is retried as itself: the same frozen packet, the steps
     // already on disk adopted. The generic path below wants a manifest a
     // model job never had, and answered the dock's Retry button with 409.
@@ -610,6 +619,16 @@ app.MapGet("/api/export/audio-mix", async Task<IResult> (AudioMasteringService m
     return result.Kind == RepositoryResultKind.Ok && result.Value is not null
         ? Results.File(result.Value.Content, "audio/wav", result.Value.FileName, enableRangeProcessing: false)
         : ToHttpResult(result);
+});
+// The finished film: each shot's best picture, the editorial mix, fades and
+// soft captions, rendered as a durable job into the asset library.
+app.MapGet("/api/export/film/status", async (FilmExportService films, CancellationToken cancellationToken) => Results.Ok(await films.StatusAsync(cancellationToken)));
+app.MapPost("/api/export/film", async Task<IResult> (FilmExportRequest request, FilmExportService films, GenerationJobSignal queue, CancellationToken cancellationToken) =>
+{
+    var result = await films.EnqueueAsync(request, cancellationToken);
+    if (result.Kind != RepositoryResultKind.Ok || result.Value is null) return ToHttpResult(result);
+    await queue.QueueAsync(result.Value.Id, cancellationToken);
+    return Results.Accepted($"/api/jobs/{result.Value.Id}", result.Value);
 });
 app.MapGet("/api/maintenance/status", async (BackupService backup, CancellationToken cancellationToken) => Results.Ok(await backup.StatusAsync(cancellationToken)));
 app.MapGet("/api/maintenance/backup", async (BackupService backup, CancellationToken cancellationToken) => { var package = await backup.CreateAsync(cancellationToken); return Results.File(package.Content, "application/zip", package.FileName); });
