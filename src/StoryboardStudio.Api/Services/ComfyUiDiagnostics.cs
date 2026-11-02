@@ -68,16 +68,21 @@ public sealed class ComfyUiInstallCheck(IHttpClientFactory clients, IConfigurati
             return new(route, name, kind, "Unknown", $"Framewright could not read {Path.GetFileName(workflowPath)}: {ex.Message}", [], []);
         }
 
+        // Ask about the node types not already answered, a few at a time; the
+        // preflight runs this before every video dispatch.
         var client = clients.CreateClient("integration-probe");
-        var missingNodes = new List<string>();
-        var unknown = false;
-        foreach (var classType in needs.NodeTypes)
+        using (var gate = new SemaphoreSlim(6))
         {
-            if (!nodes.TryGetValue(classType, out var lookup))
-                nodes[classType] = lookup = await LookUpAsync(client, endpoint, classType, cancellationToken);
-            if (lookup.Failed) { unknown = true; break; }
-            if (lookup.Info is null) missingNodes.Add(classType);
+            var answers = await Task.WhenAll(needs.NodeTypes.Where(type => !nodes.ContainsKey(type)).Select(async type =>
+            {
+                await gate.WaitAsync(cancellationToken);
+                try { return (Type: type, Lookup: await LookUpAsync(client, endpoint, type, cancellationToken)); }
+                finally { gate.Release(); }
+            }));
+            foreach (var (type, lookup) in answers) nodes[type] = lookup;
         }
+        var unknown = needs.NodeTypes.Any(type => nodes[type].Failed);
+        var missingNodes = needs.NodeTypes.Where(type => nodes[type].Info is null).ToList();
         if (unknown)
             return new(route, name, kind, "Unknown", "ComfyUI did not answer the node check, so the installed models could not be confirmed.", [], []);
 

@@ -1207,6 +1207,13 @@ public sealed class StudioRepository(
             .Where(x => windowIds.Contains(x.Id) && x.Kind == AssetKind.Image.ToString())
             .ToDictionaryAsync(x => x.Id, cancellationToken);
         if (windows.Count != windowIds.Length) return RepositoryResult<ShotSummary>.Invalid("A camera window is not an uploaded image in this project.");
+        // Windows must already have the delivery shape: H3 centre-crops any
+        // other shape, which would break the constant framing of the move.
+        var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == projectScope.ProjectId, cancellationToken);
+        var deliveryAspect = (double)project.DeliveryWidth / project.DeliveryHeight;
+        if (windows.Values.Any(window => window.Width is not > 0 || window.Height is not > 0
+                || Math.Abs((double)window.Width!.Value / window.Height!.Value / deliveryAspect - 1) > 0.02))
+            return RepositoryResult<ShotSummary>.Invalid($"Each camera window must have the project's {project.DeliveryWidth} × {project.DeliveryHeight} shape.");
 
         // Windows sit beside the live frame like variants: reviewable and
         // selectable, without replacing what the shot currently shows.

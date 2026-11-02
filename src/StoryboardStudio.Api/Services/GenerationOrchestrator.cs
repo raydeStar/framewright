@@ -175,6 +175,9 @@ public sealed class GenerationOrchestrator(
         var attempts = await db.Jobs.AsNoTracking().Where(x => x.ManifestId == manifestId).ToListAsync(cancellationToken);
         var latest = attempts.OrderByDescending(x => x.Attempt).ThenByDescending(x => x.CreatedAt).FirstOrDefault();
         if (latest is null) return RepositoryResult<JobSummary>.Conflict($"This Max packet is {manifest.State.ToLowerInvariant()} but has no render attempt to resume.");
+        // A retry re-runs the attempt on its own engine; never report it as the one requested.
+        if (!string.Equals(latest.AdapterId, request.AdapterId, StringComparison.OrdinalIgnoreCase))
+            return RepositoryResult<JobSummary>.Conflict($"This Max render was started with {latest.Backend}. Promote it with that engine, or generate a fresh review take to change engines.");
         return latest.State switch
         {
             "Queued" or "Running" => RepositoryResult<JobSummary>.Ok(MapJob(latest)),

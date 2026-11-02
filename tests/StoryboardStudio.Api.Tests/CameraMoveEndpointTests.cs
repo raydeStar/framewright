@@ -17,8 +17,8 @@ public sealed class CameraMoveEndpointTests
         using var factory = new StudioApiFactory();
         using var client = factory.CreateClient();
         var (shot, source) = await ShotWithImageAsync(client, "SH-TRK");
-        var left = await AssetUploads.ImageAsync(client, "truck-left-window.png");
-        var right = await AssetUploads.ImageAsync(client, "truck-right-window.png");
+        var left = await WindowAsync(client, "truck-left-window.png");
+        var right = await WindowAsync(client, "truck-right-window.png");
 
         var response = await client.PostAsJsonAsync($"/api/shots/{shot.Id}/video-endpoints/camera-move",
             new CameraMoveEndpointsRequest(shot.UpdatedAt, source.Id, "TruckRight", 15, left.Id, right.Id));
@@ -55,7 +55,7 @@ public sealed class CameraMoveEndpointTests
         using var factory = new StudioApiFactory();
         using var client = factory.CreateClient();
         var (shot, source) = await ShotWithImageAsync(client, "SH-PSH");
-        var closer = await AssetUploads.ImageAsync(client, "push-in-window.png");
+        var closer = await WindowAsync(client, "push-in-window.png");
 
         var pushed = (await (await client.PostAsJsonAsync($"/api/shots/{shot.Id}/video-endpoints/camera-move",
             new CameraMoveEndpointsRequest(shot.UpdatedAt, source.Id, "PushIn", 20, EndAssetId: closer.Id)))
@@ -63,7 +63,7 @@ public sealed class CameraMoveEndpointTests
         Assert.Equal(source.Id, pushed.VideoFirstFrameCandidateId);
         Assert.NotEqual(source.Id, pushed.VideoLastFrameCandidateId);
 
-        var opening = await AssetUploads.ImageAsync(client, "pull-back-window.png");
+        var opening = await WindowAsync(client, "pull-back-window.png");
         var pulled = (await (await client.PostAsJsonAsync($"/api/shots/{shot.Id}/video-endpoints/camera-move",
             new CameraMoveEndpointsRequest(pushed.UpdatedAt, source.Id, "PullBack", 20, StartAssetId: opening.Id)))
             .Content.ReadFromJsonAsync<ShotSummary>())!;
@@ -78,7 +78,8 @@ public sealed class CameraMoveEndpointTests
         using var factory = new StudioApiFactory();
         using var client = factory.CreateClient();
         var (shot, source) = await ShotWithImageAsync(client, "SH-BAD");
-        var window = await AssetUploads.ImageAsync(client, "refused-window.png");
+        var window = await WindowAsync(client, "refused-window.png");
+        var square = await AssetUploads.ImageAsync(client, "square-window.png");
         var video = await AssetUploads.VideoAsync(client, "not-a-window.mp4");
         async Task<HttpStatusCode> MoveAsync(CameraMoveEndpointsRequest request)
             => (await client.PostAsJsonAsync($"/api/shots/{shot.Id}/video-endpoints/camera-move", request)).StatusCode;
@@ -90,11 +91,30 @@ public sealed class CameraMoveEndpointTests
         Assert.Equal(HttpStatusCode.BadRequest, await MoveAsync(new(shot.UpdatedAt, source.Id, "PushIn", 90, EndAssetId: window.Id)));
         Assert.Equal(HttpStatusCode.BadRequest, await MoveAsync(new(shot.UpdatedAt, source.Id, "PushIn", 15, EndAssetId: video.Id)));
         Assert.Equal(HttpStatusCode.BadRequest, await MoveAsync(new(shot.UpdatedAt, source.Id, "PushIn", 15, EndAssetId: source.AssetId)));
+        Assert.Equal(HttpStatusCode.BadRequest, await MoveAsync(new(shot.UpdatedAt, source.Id, "PushIn", 15, EndAssetId: square.Id)));
 
         // Nothing was bound or added by any refusal.
         var after = (await client.GetFromJsonAsync<StudioSnapshot>("/api/studio"))!.Shots.Single(item => item.Id == shot.Id);
         Assert.Null(after.VideoLastFrameCandidateId);
         Assert.Single((await client.GetFromJsonAsync<List<CandidateVersionSummary>>($"/api/shots/{shot.Id}/candidates"))!);
+    }
+
+    /// <summary>A real PNG in the project's delivery shape, as the browser crops it.</summary>
+    private static async Task<AssetSummary> WindowAsync(HttpClient client, string fileName)
+    {
+        var project = (await client.GetFromJsonAsync<StudioSnapshot>("/api/studio"))!.Project;
+        var png = StoryboardStudio.Api.Services.ProofPngRenderer.Render(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fileName))),
+            project.DeliveryWidth / 4, project.DeliveryHeight / 4);
+        using var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(png);
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+        content.Add(file, "file", fileName);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/assets/images") { Content = content };
+        request.Headers.Add("X-Storyboard-Studio", "1");
+        using var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<AssetSummary>())!;
     }
 
     private static async Task<(ShotSummary Shot, CandidateVersionSummary Source)> ShotWithImageAsync(HttpClient client, string code)

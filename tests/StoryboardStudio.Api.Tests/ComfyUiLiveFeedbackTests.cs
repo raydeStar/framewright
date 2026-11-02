@@ -334,10 +334,19 @@ public sealed class ComfyUiLiveFeedbackTests : IDisposable
         Assert.Equal("Ready", ready.State);
         Assert.Contains($"all {entry.RequiredNodeTypes.Length} node types and 3 model files", ready.Detail);
 
+        // When ComfyUI stops answering, the remaining workflows are not asked again.
+        var textDraft = Path.Combine(Path.GetDirectoryName(H3WorkflowPath())!, "text-draft.json");
         await using var failing = await FakeComfyUi.StartAsync((app, _) => app.MapGet("/object_info/{node}", () => Results.StatusCode(500)));
-        var unknown = Assert.Single(await new ComfyUiInstallCheck(new ProbeFactory(), configuration).CheckConfiguredAsync(failing.Endpoint, CancellationToken.None));
-        Assert.Equal("Unknown", unknown.State);
-        Assert.Single(failing.Requests);
+        var both = Configuration(new Dictionary<string, string?>
+        {
+            ["Integrations:ComfyUi:ExternalTextWorkflowPath"] = textDraft,
+            ["Integrations:ComfyUi:ExternalVideoWorkflowPath"] = H3WorkflowPath(),
+        });
+        var unknown = await new ComfyUiInstallCheck(new ProbeFactory(), both).CheckConfiguredAsync(failing.Endpoint, CancellationToken.None);
+        Assert.Equal(2, unknown.Count);
+        Assert.All(unknown, item => Assert.Equal("Unknown", item.State));
+        Assert.NotEmpty(failing.Requests);
+        Assert.DoesNotContain(failing.Requests, request => request.EndsWith("/MiniMaxH3ImageToVideo", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -424,6 +433,10 @@ public sealed class ComfyUiLiveFeedbackTests : IDisposable
         await RunAsync(factory, first.Id);
         var failed = await JobAsync(client, first.Id);
         Assert.Equal(JobState.Failed, failed.State);
+
+        // A retry re-runs the attempt's own engine, so naming another is refused, not silently ignored.
+        var otherEngine = await client.PostAsJsonAsync($"/api/shots/{shot.Id}/video-jobs/{lowJob.Id}/promote", new PromoteVideoTakeRequest(take.Version, "comfyui-h3-video"));
+        Assert.Equal(HttpStatusCode.Conflict, otherEngine.StatusCode);
 
         video.FailMax = false;
         var retried = await PromoteAsync(client, shot.Id, lowJob.Id, take.Version, video);
