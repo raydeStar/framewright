@@ -9,7 +9,7 @@ public sealed record CodexGenerationSetup(bool OneClickImages, IReadOnlyList<str
 public sealed record GenerationSetupSummary(bool CanManageHere, ComfyUiGenerationSetup ComfyUi, CodexGenerationSetup Codex);
 public sealed record GenerationSetupChange(string ComfyUiEndpoint, bool ComfyUiImagesEnabled, bool ComfyUiVideoEnabled, bool CodexOneClickImages);
 public sealed record ComfyUiConnectionTestRequest(string Endpoint);
-public sealed record ComfyUiConnectionTest(bool Reachable, string Detail);
+public sealed record ComfyUiConnectionTest(bool Reachable, string Detail, IReadOnlyList<ComfyUiWorkflowReadiness>? Workflows = null);
 
 /// <summary>
 /// The generation switches an artist sets from Production setup, kept beside the

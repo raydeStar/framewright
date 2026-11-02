@@ -14,6 +14,10 @@ namespace StoryboardStudio.Api.Services;
 /// queue, so the artist sees "waiting behind 2 jobs" instead of a stalled bar.</summary>
 public delegate Task GenerationProgressReporter(int percent, string phase, string? providerRequestId, CancellationToken cancellationToken);
 
+/// <summary>Raises or clears a warning on a job that is still running, such as
+/// a render that has stopped making progress. A warning never fails the job.</summary>
+public delegate Task GenerationAttentionReporter(string? warning, CancellationToken cancellationToken);
+
 public sealed record GenerationExecutionContext(
     Guid JobId,
     Guid ManifestId,
@@ -37,10 +41,14 @@ public sealed record GenerationExecutionContext(
     string? ExistingProviderRequestId = null,
     bool IsCurrentFrameEdit = false,
     int? VideoFramesPerSecond = null,
-    int? VideoFrameCount = null)
+    int? VideoFrameCount = null,
+    GenerationAttentionReporter? Attention = null)
 {
     public Task ReportAsync(int percent, string phase, CancellationToken cancellationToken)
         => Report?.Invoke(percent, phase, null, cancellationToken) ?? Task.CompletedTask;
+
+    public Task ReportAttentionAsync(string? warning, CancellationToken cancellationToken)
+        => Attention?.Invoke(warning, cancellationToken) ?? Task.CompletedTask;
 
     public Task ReportSubmittedAsync(int percent, string phase, string providerRequestId, CancellationToken cancellationToken)
         => Report?.Invoke(percent, phase, providerRequestId, cancellationToken) ?? Task.CompletedTask;
@@ -218,7 +226,9 @@ public interface IRecoverableGenerationAdapter
 ///   * POST /interrupt
 ///   * read, cancel, or download outputs for a prompt id it did not submit
 /// Ownership is enforced by only ever reading /history/{our prompt_id} and only
-/// downloading files listed under that entry.
+/// downloading files listed under that entry. Live step progress comes from
+/// ComfyUI's websocket under the job's own client id (see ComfyUiProgress.cs),
+/// which only receives.
 /// </summary>
 internal static class ComfyUi
 {
@@ -385,6 +395,11 @@ internal static class ComfyUiPolling
     /// submitted it. Once that has held for the grace period the job fails
     /// with that explanation instead of holding the job lane for the whole
     /// timeout. Nothing is resubmitted; Retry stays the artist's decision.
+    ///
+    /// While the prompt runs, a progress watch (when one is available) turns
+    /// ComfyUI's own step reports into the phase, and a render that reports
+    /// nothing for StallWarningSeconds raises a warning on the job. The
+    /// warning only informs: the job keeps waiting and ComfyUI is not touched.
     /// </summary>
     internal static async Task<(string FileName, string Subfolder, string Type)> AwaitOutputAsync(
         HttpClient client,
@@ -396,13 +411,17 @@ internal static class ComfyUiPolling
         ComfyOutputLocator locate,
         string kind,
         string? requestId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IComfyUiProgressWatch? watch = null)
     {
         var interval = TimeSpan.FromMilliseconds(Math.Clamp(configuration.GetValue("Integrations:ComfyUi:PollIntervalMilliseconds", 2_000), 250, 10_000));
         var timeout = TimeSpan.FromMinutes(Math.Clamp(defaultTimeoutMinutes, 1, 720));
         var deadline = DateTimeOffset.UtcNow + timeout;
         var lostGrace = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Integrations:ComfyUi:LostPromptGraceSeconds", 30), 0, 600));
+        var stallAfter = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("Integrations:ComfyUi:StallWarningSeconds", 600), 1, 14_400));
         var lastPhase = string.Empty;
+        var lastPercent = 0;
+        string? lastWarning = null;
         var everRan = false;
         DateTimeOffset? missingSince = null;
         var missingPolls = 0;
@@ -463,11 +482,24 @@ internal static class ComfyUiPolling
                         true, requestId ?? promptId);
             }
             else { missingSince = null; missingPolls = 0; }
-            var phase = ComfyUi.DescribeWait(state);
-            if (phase != lastPhase)
+            var live = state.Running && watch is not null
+                ? ComfyUiProgressText.Describe(watch.Snapshot(), DateTimeOffset.UtcNow, stallAfter, kind)
+                : null;
+            var phase = live?.Phase ?? ComfyUi.DescribeWait(state);
+            // A later node can map to a lower band than the sampler; the bar
+            // never moves backwards.
+            var percent = Math.Max(lastPercent, live?.Percent ?? (state.Running ? 62 : 44));
+            if (phase != lastPhase || percent != lastPercent)
             {
                 lastPhase = phase;
-                await context.ReportAsync(state.Running ? 62 : 44, phase, cancellationToken);
+                lastPercent = percent;
+                await context.ReportAsync(percent, phase, cancellationToken);
+            }
+            var warning = live?.Warning;
+            if (!string.Equals(warning, lastWarning, StringComparison.Ordinal))
+            {
+                lastWarning = warning;
+                await context.ReportAttentionAsync(warning, cancellationToken);
             }
         }
 
@@ -669,7 +701,7 @@ public sealed class OpenAiImageGenerationAdapter(IHttpClientFactory clients, ICo
     private static string Bound(string value) => value.Length <= 800 ? value : value[..800] + "…";
 }
 
-public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfiguration configuration, GenerationSettingsStore? settings = null) : IGenerationAdapter, IRecoverableGenerationAdapter
+public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfiguration configuration, GenerationSettingsStore? settings = null, IComfyUiProgressSource? progress = null) : IGenerationAdapter, IRecoverableGenerationAdapter
 {
     public const string AdapterId = "comfyui-fast-draft";
     // The artist's Production setup switch, unless the launcher pinned it.
@@ -712,7 +744,9 @@ public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfig
         if (context.ExistingProviderRequestId is { Length: > 0 } existingPromptId)
         {
             await context.ReportAsync(40, "Reconnected to the existing ComfyUI image job", cancellationToken);
-            return await DownloadExistingImageAsync(client, endpoint, existingPromptId, context, cancellationToken);
+            await using var resumed = progress?.Watch(endpoint, ComfyUiWorkflowNodes.ClientIdFor(context.JobId), new Dictionary<string, ComfyUiNodeInfo>());
+            resumed?.Track(existingPromptId);
+            return await DownloadExistingImageAsync(client, endpoint, existingPromptId, context, resumed, cancellationToken);
         }
 
         string? uploadedName = null;
@@ -763,31 +797,34 @@ public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfig
 
         // Join whatever queue already exists and wait our turn. Any work already
         // queued or running belongs to someone else and is left completely alone.
-        var clientId = Guid.NewGuid().ToString("N");
+        // Listen before submitting so the first steps are not missed.
+        var clientId = ComfyUiWorkflowNodes.ClientIdFor(context.JobId);
+        await using var watch = progress?.Watch(endpoint, clientId, ComfyUiWorkflowNodes.Map(workflow));
         using var submit = await client.PostAsJsonAsync(new Uri(endpoint, "/prompt"), new { prompt = workflow, client_id = clientId }, cancellationToken);
         var requestId = submit.Headers.TryGetValues("x-request-id", out var requestIds) ? requestIds.FirstOrDefault() : null;
         var submitBody = await ComfyUi.ReadControlJsonAsync(
             submit.Content, "The ComfyUI submission response exceeded the 5 MB safety limit.", true, requestId, cancellationToken);
-        if (!submit.IsSuccessStatusCode) throw new GenerationDispatchException($"ComfyUI rejected the workflow with {(int)submit.StatusCode}: {ComfyUi.Bound(submitBody)}", true, requestId);
+        if (!submit.IsSuccessStatusCode) throw new GenerationDispatchException(ComfyUiRejection.Describe((int)submit.StatusCode, submitBody, "image"), true, requestId);
         string promptId;
         try { using var json = JsonDocument.Parse(submitBody); promptId = json.RootElement.GetProperty("prompt_id").GetString() ?? throw new JsonException(); }
         catch (Exception ex) { throw new GenerationDispatchException("ComfyUI did not return a prompt id.", true, requestId, ex); }
 
         // Persist the provider id before polling. If Framewright restarts now, it
         // reconnects to this exact owned prompt instead of paying for a duplicate.
+        watch?.Track(promptId);
         await context.ReportSubmittedAsync(38, "Submitted to ComfyUI", promptId, cancellationToken);
 
-        return await DownloadExistingImageAsync(client, endpoint, promptId, context, cancellationToken);
+        return await DownloadExistingImageAsync(client, endpoint, promptId, context, watch, cancellationToken);
     }
 
     private async Task<GenerationAdapterOutput> DownloadExistingImageAsync(
-        HttpClient client, Uri endpoint, string promptId, GenerationExecutionContext context, CancellationToken cancellationToken)
+        HttpClient client, Uri endpoint, string promptId, GenerationExecutionContext context, IComfyUiProgressWatch? watch, CancellationToken cancellationToken)
     {
 
         var file = await ComfyUiPolling.AwaitOutputAsync(
             client, endpoint, promptId, context, configuration,
             configuration.GetValue("Integrations:ComfyUi:ImageTimeoutMinutes", 45),
-            TryFindImage, "image", promptId, cancellationToken);
+            TryFindImage, "image", promptId, cancellationToken, watch);
 
         var view = new Uri(endpoint, $"/view?filename={Uri.EscapeDataString(file.FileName)}&subfolder={Uri.EscapeDataString(file.Subfolder)}&type={Uri.EscapeDataString(file.Type)}");
         using var image = await client.GetAsync(view, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -931,7 +968,7 @@ public sealed class ComfyUiGenerationAdapter(IHttpClientFactory clients, IConfig
     private static string Bound(string value) => value.Length <= 800 ? value : value[..800] + "…";
 }
 
-public sealed class ComfyUiVideoGenerationAdapter(IHttpClientFactory clients, IConfiguration configuration, GenerationSettingsStore? settings = null) : IGenerationAdapter, IRecoverableGenerationAdapter
+public sealed class ComfyUiVideoGenerationAdapter(IHttpClientFactory clients, IConfiguration configuration, GenerationSettingsStore? settings = null, IComfyUiProgressSource? progress = null) : IGenerationAdapter, IRecoverableGenerationAdapter
 {
     public const string AdapterId = "comfyui-h3-video";
     private bool Enabled => settings?.ComfyUiVideoEnabled ?? configuration.GetValue("Integrations:ComfyUi:VideoSubmissionEnabled", false);
@@ -958,7 +995,9 @@ public sealed class ComfyUiVideoGenerationAdapter(IHttpClientFactory clients, IC
         if (context.ExistingProviderRequestId is { Length: > 0 } existingPromptId)
         {
             await context.ReportAsync(40, "Reconnected to the existing ComfyUI video job", cancellationToken);
-            return await DownloadExistingVideoAsync(client, endpoint, existingPromptId, context, cancellationToken);
+            await using var resumed = progress?.Watch(endpoint, ComfyUiWorkflowNodes.ClientIdFor(context.JobId), new Dictionary<string, ComfyUiNodeInfo>());
+            resumed?.Track(existingPromptId);
+            return await DownloadExistingVideoAsync(client, endpoint, existingPromptId, context, resumed, cancellationToken);
         }
         if (new FileInfo(WorkflowPath!).Length > ComfyUi.MaxWorkflowBytes) throw new GenerationDispatchException("The configured H3 workflow exceeds the 5 MB safety limit.");
         var raw = await File.ReadAllTextAsync(WorkflowPath!, cancellationToken);
@@ -1009,26 +1048,28 @@ public sealed class ComfyUiVideoGenerationAdapter(IHttpClientFactory clients, IC
                 if (graph["7"]?["inputs"] is JsonObject inputs) inputs.Remove("last_frame");
             }
         }
-        var clientId = Guid.NewGuid().ToString("N");
+        var clientId = ComfyUiWorkflowNodes.ClientIdFor(context.JobId);
+        await using var watch = progress?.Watch(endpoint, clientId, ComfyUiWorkflowNodes.Map(workflow));
         using var submit = await client.PostAsJsonAsync(new Uri(endpoint, "/prompt"), new { prompt = workflow, client_id = clientId }, cancellationToken);
         var requestId = submit.Headers.TryGetValues("x-request-id", out var requestIds) ? requestIds.FirstOrDefault() : null;
         var body = await ComfyUi.ReadControlJsonAsync(
             submit.Content, "The ComfyUI video submission response exceeded the 5 MB safety limit.", true, requestId, cancellationToken);
-        if (!submit.IsSuccessStatusCode) throw new GenerationDispatchException($"ComfyUI rejected the H3 workflow with {(int)submit.StatusCode}: {ComfyUi.Bound(body)}", true, requestId);
+        if (!submit.IsSuccessStatusCode) throw new GenerationDispatchException(ComfyUiRejection.Describe((int)submit.StatusCode, body, "H3 video"), true, requestId);
         string promptId; try { using var json = JsonDocument.Parse(body); promptId = json.RootElement.GetProperty("prompt_id").GetString() ?? throw new JsonException(); } catch (Exception ex) { throw new GenerationDispatchException("ComfyUI did not return a video prompt id.", true, requestId, ex); }
 
+        watch?.Track(promptId);
         await context.ReportSubmittedAsync(38, "Submitted to ComfyUI", promptId, cancellationToken);
-        return await DownloadExistingVideoAsync(client, endpoint, promptId, context, cancellationToken);
+        return await DownloadExistingVideoAsync(client, endpoint, promptId, context, watch, cancellationToken);
     }
 
     private async Task<GenerationAdapterOutput> DownloadExistingVideoAsync(
-        HttpClient client, Uri endpoint, string promptId, GenerationExecutionContext context, CancellationToken cancellationToken)
+        HttpClient client, Uri endpoint, string promptId, GenerationExecutionContext context, IComfyUiProgressWatch? watch, CancellationToken cancellationToken)
     {
 
         var file = await ComfyUiPolling.AwaitOutputAsync(
             client, endpoint, promptId, context, configuration,
             configuration.GetValue("Integrations:ComfyUi:VideoTimeoutMinutes", 120),
-            TryFindVideo, "video", promptId, cancellationToken);
+            TryFindVideo, "video", promptId, cancellationToken, watch);
 
         var view = new Uri(endpoint, $"/view?filename={Uri.EscapeDataString(file.FileName)}&subfolder={Uri.EscapeDataString(file.Subfolder)}&type={Uri.EscapeDataString(file.Type)}"); using var response = await client.GetAsync(view, HttpCompletionOption.ResponseHeadersRead, cancellationToken); if (!response.IsSuccessStatusCode) throw new GenerationDispatchException("ComfyUI completed but its video could not be downloaded.", true, promptId); var buffered = await BoundedContentBuffer.CopyToTemporaryFileAsync(response.Content, AssetStore.MaxMediaBytes, "The ComfyUI video exceeded the local 500 MB safety limit.", promptId, cancellationToken); var extension = Path.GetExtension(file.FileName); var mime = extension.Equals(".webm", StringComparison.OrdinalIgnoreCase) ? "video/webm" : "video/mp4"; return new(buffered, file.FileName, mime, true, promptId, AssetKind.Video);
     }

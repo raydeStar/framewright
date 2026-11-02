@@ -144,7 +144,7 @@ Modelling, rigging, and texture work is done by the separate [Reference Asset Co
 | **Fast Draft**       | Composition loops and reference-guided working frames                     | Your existing local ComfyUI service with a validated Framewright workflow    |
 | **Codex ImageGen**   | High-fidelity generation or edits using the current shot packet           | Official Codex CLI and the workstation's ChatGPT/Codex login                 |
 | **Direct GPT Image** | Optional direct OpenAI image generation and editing (preview)             | A separate OpenAI Platform project API key                                   |
-| **Video**            | Text- or image-to-video with an approved start frame and optional last frame | Allowlisted external ComfyUI video workflow (H3)                          |
+| **Video**            | Text- or image-to-video with an approved start frame and optional last frame, generated or set up as a camera move (push in, truck, crane) across one image | Allowlisted external ComfyUI video workflow (H3)                          |
 | **3D models**        | Props from reference images, runtime preparation, and humanoid rigging    | Local [Reference Asset Compiler](docs/REFERENCE_ASSET_COMPILER.md) and Blender |
 | **Local voice**      | Character voice auditions and approved voice profiles                     | Optional authenticated native Windows worker                                 |
 | **Music**            | Editable compositions rendered to audio, kept separate from picture (preview) | Optional local [YuE2 service](docs/YUE2_MUSIC.md)                         |
@@ -179,7 +179,7 @@ Framewright sends image and video jobs to your own ComfyUI and ships no models. 
 | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | `text_encoders` | 14.6 | H3 video |
 | `minimax_h3_video_vae_fp16.safetensors` | `vae` | 4.9 | H3 video |
 
-The image routes need about 49 GB and H3 video about 39 GB. Framewright checks that ComfyUI answers before it submits anything, but it does not check which models are installed, so a missing file shows up as a failed job. To use other models, see the [workflow templates](workflows/README.md).
+The image routes need about 49 GB and H3 video about 39 GB. **Test connection** in Production setup asks ComfyUI, read-only, whether it has every node and model file each configured workflow uses, and names any missing file with the folder it belongs in. The video preflight runs the same check before a render is sent. To use other models, see the [workflow templates](workflows/README.md).
 
 From a source checkout, `.\scripts\install-local.ps1 -PublishPath <extracted folder>` installs the same package under `%LOCALAPPDATA%\Framewright`. It adds Start Menu shortcuts (Framewright, Stop Framewright, and Framewright with local voice) and applies updates atomically, keeping your work.
 

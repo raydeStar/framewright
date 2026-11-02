@@ -390,6 +390,12 @@ public sealed class JobRecord
     /// the tab it was seen in.
     /// </summary>
     public DateTimeOffset? AcknowledgedAt { get; set; }
+    /// <summary>
+    /// Something about a job that is still running and needs the artist's
+    /// attention, such as a ComfyUI render that has stopped making progress.
+    /// Cleared when progress resumes or the job ends; never an error by itself.
+    /// </summary>
+    public string? Warning { get; set; }
     public string? Error { get; set; }
     public Guid? ManifestId { get; set; }
     public string? AdapterId { get; set; }

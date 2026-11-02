@@ -33,6 +33,7 @@ public static class StudioDatabaseInitializer
     private const string PersonStandInMigration = "20261008-person-stand-in-pose-v22";
     private const string ImageCardMigration = "20261008-image-card-stand-in-v23";
     private const string BlockoutPersonCardMigration = "20261008-blockout-person-and-card-v24";
+    private const string JobWarningMigration = "20261101-job-warnings-v25";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -345,6 +346,16 @@ public static class StudioDatabaseInitializer
             }, cancellationToken);
         }
 
+        // A running job can now carry a warning, such as a ComfyUI render that
+        // stopped making progress. No earlier job had one, so it starts empty.
+        if (!await HasMigrationAsync(db, JobWarningMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, JobWarningMigration, cancellationToken);
+            await RunMigrationAsync(db, JobWarningMigration,
+                () => EnsureColumnAsync(db, "Jobs", "Warning", "TEXT NULL", cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -497,6 +508,7 @@ public static class StudioDatabaseInitializer
             PersonStandInMigration => "person-stand-in-pose-preset-on-scene-instances",
             ImageCardMigration => "card-stand-in-showing-a-project-image-asset-on-scene-instances",
             BlockoutPersonCardMigration => "blockout-plan-items-carry-a-person-pose-and-a-card-project-image",
+            JobWarningMigration => "a-running-job-carries-an-attention-warning-that-never-fails-it",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

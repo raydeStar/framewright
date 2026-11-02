@@ -108,7 +108,12 @@ builder.Services.AddScoped<MusicCompositionService>();
 builder.Services.AddScoped<AudioGenerationJobService>();
 builder.Services.AddScoped<AssetImageGenerationService>();
 builder.Services.AddSingleton(sp => new WorkflowLibrary(sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<IWebHostEnvironment>()));
+builder.Services.AddSingleton<ComfyUiInstallCheck>();
 builder.Services.AddSingleton<GenerationSettingsStore>();
+// Step-by-step progress for Framewright's own ComfyUI prompts, read from the
+// websocket under the job's client id. Without it jobs show queue position only.
+if (builder.Configuration.GetValue("Integrations:ComfyUi:LiveProgress", true))
+    builder.Services.AddSingleton<IComfyUiProgressSource, WebSocketComfyUiProgressSource>();
 builder.Services.AddSingleton<IGenerationAdapter, LocalProofGenerationAdapter>();
 builder.Services.AddSingleton<IGenerationAdapter, ComfyUiGenerationAdapter>();
 builder.Services.AddSingleton<IGenerationAdapter, ComfyUiVideoGenerationAdapter>();
@@ -287,13 +292,14 @@ app.MapPut("/api/setup/generation", (GenerationSetupChange change, HttpContext c
     var problem = settings.Save(change);
     return problem is null ? Results.Ok(settings.Describe(true)) : Results.BadRequest(new { error = problem });
 });
-app.MapPost("/api/setup/comfyui/test", async (ComfyUiConnectionTestRequest request, HttpContext context, GenerationSettingsStore settings, IHttpClientFactory clients, CancellationToken cancellationToken) =>
+app.MapPost("/api/setup/comfyui/test", async (ComfyUiConnectionTestRequest request, HttpContext context, GenerationSettingsStore settings, IHttpClientFactory clients, ComfyUiInstallCheck installCheck, CancellationToken cancellationToken) =>
 {
     var trustedLocal = IsTrustedLocalCaller(context.Connection.RemoteIpAddress, app.Configuration);
     if (!trustedLocal || context.Request.Headers["X-Storyboard-Studio"] != "1") return Results.StatusCode(StatusCodes.Status403Forbidden);
     var problem = settings.ValidateEndpoint(request.Endpoint);
     if (problem is not null) return Results.Ok(new ComfyUiConnectionTest(false, problem));
     // Read-only: the queue listing is the same probe discovery already makes.
+    string detail;
     try
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -304,11 +310,28 @@ app.MapPost("/api/setup/comfyui/test", async (ComfyUiConnectionTestRequest reque
         using var json = await System.Text.Json.JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(timeout.Token), cancellationToken: timeout.Token);
         var running = json.RootElement.TryGetProperty("queue_running", out var r) && r.ValueKind == System.Text.Json.JsonValueKind.Array ? r.GetArrayLength() : 0;
         var pending = json.RootElement.TryGetProperty("queue_pending", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.Array ? p.GetArrayLength() : 0;
-        return Results.Ok(new ComfyUiConnectionTest(true, running + pending == 0 ? "Connected. ComfyUI's queue is idle." : $"Connected. ComfyUI is busy with {running} running and {pending} waiting."));
+        detail = running + pending == 0 ? "Connected. ComfyUI's queue is idle." : $"Connected. ComfyUI is busy with {running} running and {pending} waiting.";
     }
     catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
     {
         return Results.Ok(new ComfyUiConnectionTest(false, "Nothing answered at this address. Start ComfyUI, then test again."));
+    }
+    // Then ask, still read-only, whether it has every node and model file the
+    // configured workflows select, so a missing file shows up here rather than
+    // as a failed render.
+    using var inventory = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    inventory.CancelAfter(TimeSpan.FromSeconds(20));
+    try
+    {
+        var workflows = await installCheck.CheckConfiguredAsync(new Uri(request.Endpoint.Trim().TrimEnd('/') + "/"), inventory.Token);
+        var missing = workflows.Count(item => item.State == "Missing");
+        if (missing > 0) detail += $" {missing} of {workflows.Count} workflows need files or nodes that ComfyUI doesn't have yet.";
+        else if (workflows.Count > 0 && workflows.All(item => item.State == "Ready")) detail += " It has everything the configured workflows use.";
+        return Results.Ok(new ComfyUiConnectionTest(true, detail, workflows));
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        return Results.Ok(new ComfyUiConnectionTest(true, detail + " The model check took too long and was skipped."));
     }
 });
 app.MapGet("/api/generation/adapters", (GenerationOrchestrator orchestrator) => Results.Ok(orchestrator.ListAdapters()));
@@ -1126,6 +1149,11 @@ app.MapGet("/api/shots/{shotId:guid}/candidates", async (Guid shotId, StudioRepo
 app.MapPut("/api/shots/{shotId:guid}/video-endpoints", async Task<IResult> (
     Guid shotId, UpdateVideoEndpointsRequest request, StudioRepository repository, CancellationToken cancellationToken) =>
     ToHttpResult(await repository.UpdateVideoEndpointsAsync(shotId, request, cancellationToken)));
+// Endpoints for a deliberate camera move across one image (push in, truck,
+// crane). The browser crops and uploads the windows; nothing is generated.
+app.MapPost("/api/shots/{shotId:guid}/video-endpoints/camera-move", async Task<IResult> (
+    Guid shotId, CameraMoveEndpointsRequest request, StudioRepository repository, CancellationToken cancellationToken) =>
+    ToHttpResult(await repository.CreateCameraMoveEndpointsAsync(shotId, request, cancellationToken)));
 
 // Bin a draft that went nowhere. The live candidate and anything ratified are
 // append-only evidence and are refused; this only removes discarded attempts.
@@ -1288,9 +1316,11 @@ app.MapPost("/api/shots/{shotId:guid}/video-jobs/{jobId:guid}/promote", async Ta
 {
     var prepared = await repository.PrepareVideoPromotionManifestAsync(shotId, jobId, request.ExpectedShotVersion, cancellationToken);
     if (prepared.Kind != RepositoryResultKind.Ok || prepared.Value is null) return ToHttpResult(prepared);
-    var dispatched = await orchestrator.DispatchAsync(prepared.Value.Id,
+    var dispatched = await orchestrator.DispatchPromotionAsync(prepared.Value.Id,
         new DispatchManifestRequest(prepared.Value.ManifestHash, request.AdapterId), cancellationToken);
     if (dispatched.Kind != RepositoryResultKind.Ok || dispatched.Value is null) return ToHttpResult(dispatched);
+    // Queueing an id that is already queued or running is harmless: the worker
+    // runs only Queued jobs and holds a lease while it does.
     await queue.QueueAsync(dispatched.Value.Id, cancellationToken);
     return Results.Accepted($"/api/jobs/{dispatched.Value.Id}", dispatched.Value);
 });

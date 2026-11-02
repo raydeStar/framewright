@@ -1,5 +1,62 @@
 # Framewright implementation handoff
 
+## ComfyUI and H3 live feedback (2026-11-01)
+
+Found while making a short film end to end: an H3 Max render sat at "Rendering
+in ComfyUI 62%" for an hour while ComfyUI thrashed a partly offloaded model;
+pressing Promote to Max after it failed answered 409; and a missing model file
+only ever showed up as a failed job quoting ComfyUI's JSON.
+
+- **Live progress.** ComfyUI image and video jobs now show the node stage and
+  sampler step from ComfyUI's websocket, heard under the job's own client id
+  (`framewright-{jobId}`), with time left from the median of recent steps.
+- **Stall warning.** A running prompt that reports nothing for
+  `StallWarningSeconds` (600) carries a job `Warning` (schema v25,
+  `20261101-job-warnings-v25`, with a pre-migration backup). The frame, the
+  inspector, the shot card and, away from that shot, the dock show it in amber
+  with what to do. The job keeps waiting; nothing in ComfyUI is touched.
+- **Install check.** Production setup's Test connection and the video
+  preflight ask `/object_info` whether each configured workflow's node types and
+  loader model files exist, naming a missing file with its `models/` folder. A
+  blocked video packet offers Check again instead of a Generate that would fail.
+- **Plain rejections.** A `/prompt` refusal names the missing model file and
+  folder, or the missing node, leading with the file so the clamped failure dock
+  shows it.
+- **Promote after a failed Max** retries the same frozen packet (attempt 2, with
+  lineage); pressing it while a Max render is underway returns that job.
+- A built app dispatches its own copy of the workflow files beside the
+  binaries; preflight and the install check now recognise an identical copy as
+  the library entry, so "Workflow contract is valid" and workflow names return
+  in that layout.
+- **Camera-move endpoints.** Create Last Frame can also move the camera across
+  the live image: push in, pull back, truck left or right, crane up or down.
+  The browser crops delivery-shaped windows at the source resolution and
+  uploads them; `POST /api/shots/{id}/video-endpoints/camera-move` adds them as
+  working revisions beside the live frame and binds Start and Last Frame in one
+  change (audited as `VideoEndpointsCameraMove`). Nothing is generated, the
+  live frame is untouched, and the next video brief opens with the matching
+  move. This replaces the out-of-app crop script used for the film's lateral
+  dolly, the fix for a shot H3 had turned into a push-in.
+
+Evidence, on `feat/video-pipeline-ux` from main `e672d03`: 20 new backend tests
+(`ComfyUiLiveFeedbackTests`, `CameraMoveEndpointTests`, one in
+`WorkflowLibraryTests`) including a real websocket and `/object_info` against a
+loopback stand-in, the v25 old-schema upgrade, the promote-retry API path and
+the camera-move endpoint; sabotage of the promotion dispatch, the
+status-broadcast filter, the model-file match, the median estimate and the
+start-window binding each failed its test. Six window-geometry unit tests and
+three Playwright journeys pass in desktop Chromium and iPad WebKit. A real-app
+journey ran the built app with an isolated data root against a stand-in ComfyUI
+on another port (labelled, ffmpeg-rendered clips; no GPU, no real ComfyUI):
+install list with one missing file, blocked then re-checked video preflight, a
+stalled Low render warning and recovering, a failed Max retried by pressing
+Promote again and passing the 1920×1080/24 fps/48-frame delivery probe, a
+one-click draft refused with the plain-language message, and truck-right
+endpoints cut from the film's SH-040 frame feeding the video dialog. The full
+`scripts/verify.ps1` gate passed. Not run: a live H3 render against the
+workstation's ComfyUI (not authorized for this pass), and human review of the
+amber states and camera-move stage on a physical tablet.
+
 ## Offline reviewed-sequence delivery and audio padding (2026-10-10)
 
 `tools/media/assemble_sequence.py` adds a small offline utility for combining
@@ -337,6 +394,10 @@ The application includes separate still and H3 video adapters. A route is dispat
 - placeholders required by the route resolve.
 
 The adapter appends its work to the shared queue, reports the real number of running and pending jobs ahead, uploads only manifest-owned inputs, polls only its returned prompt ID, and downloads only that prompt's output. It never clears, interrupts, reorders, cancels, or harvests other work. Control JSON is capped at 5 MB, and provider media is streamed through a bounded delete-on-close file instead of being accumulated in memory: 25 MB for images and 500 MB for video.
+
+While a prompt runs, the adapter listens on ComfyUI's websocket under a client id derived from the Framewright job (`framewright-{jobId}`), so it hears its own prompt's node and sampler-step reports and nothing else, including after a Framewright restart. The phase reads, for example, `Sampling · step 12 of 32 · about 2 min left`; time left comes from the last few steps only. If a running prompt reports nothing for `Integrations:ComfyUi:StallWarningSeconds` (default 600), the job carries a `Warning` (schema v25) that the dock and the frame show in amber with what to do; the job keeps waiting and ComfyUI is not touched. The listener only receives, discards preview frames, reconnects quietly, and can be switched off with `Integrations:ComfyUi:LiveProgress=false`, leaving queue-position progress.
+
+`POST /api/setup/comfyui/test` and the video preflight ask `/object_info/{node}` whether ComfyUI has every node type and loader model file the configured workflow files select (`ComfyUiInstallCheck`). A `/prompt` refusal is translated into the missing file and its `models/` folder or the missing node. Pressing Promote to Max again after a Max attempt failed retries that same frozen packet (append-only, attempt 2 and onward) instead of answering 409; a Max render already underway is returned rather than duplicated.
 
 ### OpenAI GPT Image
 

@@ -160,6 +160,29 @@ public sealed class GenerationOrchestrator(
         return RepositoryResult<JobSummary>.Ok(MapJob(job));
     }
 
+    /// <summary>
+    /// Starts the Max render of a promoted take. The promotion packet is
+    /// deterministic, so pressing Promote again after a Max attempt failed finds
+    /// the same frozen packet: that becomes a Retry of the failed attempt rather
+    /// than a refusal, and a Max render already underway is returned as is
+    /// instead of queueing a duplicate.
+    /// </summary>
+    public async Task<RepositoryResult<JobSummary>> DispatchPromotionAsync(Guid manifestId, DispatchManifestRequest request, CancellationToken cancellationToken)
+    {
+        var manifest = await db.GenerationManifests.AsNoTracking().SingleOrDefaultAsync(x => x.Id == manifestId, cancellationToken);
+        if (manifest is null) return RepositoryResult<JobSummary>.NotFound();
+        if (manifest.State == ManifestState.Prepared.ToString()) return await DispatchAsync(manifestId, request, cancellationToken);
+        var attempts = await db.Jobs.AsNoTracking().Where(x => x.ManifestId == manifestId).ToListAsync(cancellationToken);
+        var latest = attempts.OrderByDescending(x => x.Attempt).ThenByDescending(x => x.CreatedAt).FirstOrDefault();
+        if (latest is null) return RepositoryResult<JobSummary>.Conflict($"This Max packet is {manifest.State.ToLowerInvariant()} but has no render attempt to resume.");
+        return latest.State switch
+        {
+            "Queued" or "Running" => RepositoryResult<JobSummary>.Ok(MapJob(latest)),
+            "Failed" or "Cancelled" => await RetryAsync(latest.Id, cancellationToken),
+            _ => RepositoryResult<JobSummary>.Conflict("This take was already rendered at Max quality.")
+        };
+    }
+
     /// <summary>Retries a terminal job from its original immutable manifest.
     /// History is append-only: the failed attempt remains visible and a new job
     /// records its lineage instead of rewriting the old row.</summary>
@@ -324,6 +347,7 @@ public sealed class GenerationOrchestrator(
                 job.State = JobState.Failed.ToString();
                 job.Progress = 100;
                 job.Phase = "Needs an explicit retry after restart";
+                job.Warning = null;
                 job.Error = "Framewright restarted after this provider accepted the request, but that provider cannot be reconnected safely. Retry when ready; no duplicate was submitted automatically.";
                 job.CompletedAt = now;
                 job.LeaseOwner = null;
@@ -338,6 +362,7 @@ public sealed class GenerationOrchestrator(
             job.State = JobState.Queued.ToString();
             job.Progress = canResume ? Math.Max(job.Progress, 35) : 0;
             job.Phase = canResume ? "Reconnecting to provider after restart" : "Recovered before provider submission";
+            job.Warning = null;
             job.LastHeartbeatAt = now;
             job.LeaseOwner = null;
             job.LeaseExpiresAt = null;
@@ -382,7 +407,7 @@ public sealed class GenerationOrchestrator(
             await db.SaveChangesAsync(cancellationToken);
             var output = await adapter.ExecuteAsync(context, cancellationToken);
             await using var outputContent = output.Content;
-            job.Progress = 82; job.Phase = "Validating and importing candidate"; job.LastHeartbeatAt = timeProvider.GetUtcNow();
+            job.Progress = 82; job.Phase = "Validating and importing candidate"; job.Warning = null; job.LastHeartbeatAt = timeProvider.GetUtcNow();
             await db.SaveChangesAsync(cancellationToken);
             var imported = output.Kind == AssetKind.Image
                 ? await assets.ImportGeneratedImageAsync(outputContent, output.FileName, outputContent.CanSeek ? outputContent.Length : null, cancellationToken)
@@ -531,6 +556,14 @@ public sealed class GenerationOrchestrator(
             await db.SaveChangesAsync(ct);
         }
 
+        async Task Attention(string? warning, CancellationToken ct)
+        {
+            if (string.Equals(job.Warning, warning, StringComparison.Ordinal)) return;
+            job.Warning = warning;
+            job.LastHeartbeatAt = timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+        }
+
         var bindings = packet.Authorities;
         var referenceImages = frozen.AuthorityImages;
         var authorityCanon = frozen.AuthorityCanon;
@@ -597,7 +630,7 @@ public sealed class GenerationOrchestrator(
             }
         }
         catch (JsonException ex) { throw new GenerationDispatchException("The frozen manifest payload cannot be read.", false, null, ex); }
-        return new(job.Id, manifest.Id, manifest.ShotCode, Enum.Parse<GenerationRoute>(packet.Route), Enum.Parse<GenerationPurpose>(packet.Purpose), prompt.ToString(), manifest.ManifestHash, composition, compositionPath, referenceImages, lastFrame, lastFramePath, Report, videoQuality, videoSeed, videoWidth, videoHeight, deliveryWidth, deliveryHeight, job.ProviderRequestId, currentFrameEdit, videoFramesPerSecond, videoFrameCount);
+        return new(job.Id, manifest.Id, manifest.ShotCode, Enum.Parse<GenerationRoute>(packet.Route), Enum.Parse<GenerationPurpose>(packet.Purpose), prompt.ToString(), manifest.ManifestHash, composition, compositionPath, referenceImages, lastFrame, lastFramePath, Report, videoQuality, videoSeed, videoWidth, videoHeight, deliveryWidth, deliveryHeight, job.ProviderRequestId, currentFrameEdit, videoFramesPerSecond, videoFrameCount, Attention);
     }
 
     private async Task<ResolvedGenerationManifest> ResolveFrozenManifestAsync(
@@ -827,7 +860,7 @@ public sealed class GenerationOrchestrator(
 
     private async Task FailAsync(JobRecord job, GenerationManifestRecord? manifest, string error, bool providerCallMade, string? providerRequestId, CancellationToken cancellationToken)
     {
-        job.State = JobState.Failed.ToString(); job.Progress = 100; job.Phase = "Generation failed"; job.Error = error; job.ProviderRequestId = providerRequestId ?? job.ProviderRequestId; job.CompletedAt = timeProvider.GetUtcNow(); job.LastHeartbeatAt = job.CompletedAt;
+        job.State = JobState.Failed.ToString(); job.Progress = 100; job.Phase = "Generation failed"; job.Error = error; job.Warning = null; job.ProviderRequestId = providerRequestId ?? job.ProviderRequestId; job.CompletedAt = timeProvider.GetUtcNow(); job.LastHeartbeatAt = job.CompletedAt;
         if (manifest is not null) { manifest.State = ManifestState.Failed.ToString(); manifest.ProviderCallMade = providerCallMade; }
         AddAudit("GenerationFailed", manifest is null ? "Job" : "GenerationManifest", manifest?.Id.ToString() ?? job.Id.ToString(), new { job.Id, error, providerCallMade, providerRequestId });
         await db.SaveChangesAsync(cancellationToken);
@@ -856,7 +889,7 @@ public sealed class GenerationOrchestrator(
         shot.VideoLastFrameCandidateId = candidate.Id;
     }
 
-    private static JobSummary MapJob(JobRecord x) => new(x.Id, x.ShotId, x.ShotCode, x.Kind, Enum.Parse<JobState>(x.State), x.Progress, x.Phase, x.Backend, x.CreatedAt, x.CompletedAt, x.Error, x.ManifestId, x.AdapterId, x.OutputAssetId, x.OutputAssetId is null ? null : $"/api/assets/{x.OutputAssetId}/content", x.ProviderRequestId, x.Attempt, x.RetryOfJobId, x.LastHeartbeatAt, x.WorkType);
+    private static JobSummary MapJob(JobRecord x) => new(x.Id, x.ShotId, x.ShotCode, x.Kind, Enum.Parse<JobState>(x.State), x.Progress, x.Phase, x.Backend, x.CreatedAt, x.CompletedAt, x.Error, x.ManifestId, x.AdapterId, x.OutputAssetId, x.OutputAssetId is null ? null : $"/api/assets/{x.OutputAssetId}/content", x.ProviderRequestId, x.Attempt, x.RetryOfJobId, x.LastHeartbeatAt, x.WorkType, x.AcknowledgedAt, x.Warning);
 }
 
 public sealed partial class GenerationJobWorker(GenerationJobSignal queue, IServiceScopeFactory scopeFactory, ILogger<GenerationJobWorker> logger) : BackgroundService

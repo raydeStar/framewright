@@ -43,9 +43,8 @@ public sealed record WorkflowValidation(
 /// reference points at a node that exists in the same file, and the models named
 /// in <c>requiredModels</c> match what the workflow actually selects.
 ///
-/// Whether the models are *installed* is a live question that nothing answers
-/// yet: dispatch only confirms ComfyUI answers <c>/queue</c>, so a missing node
-/// or model surfaces as a failed ComfyUI job.
+/// Whether the models are *installed* is a live question that
+/// <see cref="ComfyUiInstallCheck"/> answers from ComfyUI's own node list.
 /// </summary>
 public sealed class WorkflowLibrary
 {
@@ -109,6 +108,24 @@ public sealed class WorkflowLibrary
             .Where(x => x is not null)
             .Select(x => x!)
             .ToArray();
+    }
+
+    /// <summary>
+    /// The library entry for a workflow file resolved for dispatch. A built app
+    /// dispatches its own copy of the library files beside the binaries while
+    /// this index may be the repository's, so a file with the entry's name and
+    /// identical bytes is the same workflow.
+    /// </summary>
+    public WorkflowEntry? FindEntry(string workflowPath)
+    {
+        var full = Path.GetFullPath(workflowPath);
+        var entries = LoadIndex();
+        var exact = entries.FirstOrDefault(item => string.Equals(Path.GetFullPath(Path.Combine(root, item.File)), full, StringComparison.OrdinalIgnoreCase));
+        if (exact is not null) return exact;
+        var named = entries.FirstOrDefault(item => string.Equals(Path.GetFileName(item.File), Path.GetFileName(full), StringComparison.OrdinalIgnoreCase));
+        if (named is null) return null;
+        var indexed = Path.Combine(root, named.File);
+        return File.Exists(indexed) && File.Exists(full) && File.ReadAllBytes(indexed).AsSpan().SequenceEqual(File.ReadAllBytes(full)) ? named : null;
     }
 
     public IReadOnlyList<WorkflowValidation> ValidateAll()

@@ -14,7 +14,9 @@ public sealed class GenerationPreflightService(
     StudioDbContext db,
     GenerationOrchestrator orchestrator,
     WorkflowLibrary workflows,
-    IConfiguration configuration)
+    IConfiguration configuration,
+    ComfyUiInstallCheck? installCheck = null,
+    GenerationSettingsStore? settings = null)
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
@@ -64,6 +66,25 @@ public sealed class GenerationPreflightService(
         AddCheck(checks, manifest.State == ManifestState.Prepared.ToString(), "Packet has not been dispatched", $"Current manifest state: {manifest.State}.");
         if (validation is not null)
             AddCheck(checks, validation.Valid, "Workflow contract is valid", validation.Valid ? validation.Summary : string.Join("; ", validation.Problems));
+        // Only once the artist has turned the route on: ask ComfyUI, read-only,
+        // whether it has the nodes and model files this exact file selects. A
+        // missing file would make ComfyUI refuse the prompt anyway.
+        if (installCheck is not null && workflowPath is not null && adapter.CanDispatch
+            && Uri.TryCreate(settings?.ComfyUiEndpoint ?? configuration["Integrations:ComfyUi:Endpoint"], UriKind.Absolute, out var endpoint))
+        {
+            const string title = "ComfyUI has this workflow's nodes and models";
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(TimeSpan.FromSeconds(8));
+            try
+            {
+                var installed = await installCheck.CheckFileAsync(endpoint, workflowPath, adapter.Name, manifest.Purpose == nameof(GenerationPurpose.Video) ? "Video" : "Image", budget.Token);
+                checks.Add(new(installed.State switch { "Ready" => "Pass", "Missing" => "Block", _ => "Review" }, title, installed.Detail));
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                checks.Add(new("Review", title, "ComfyUI took too long to describe its nodes, so the installed models were not confirmed."));
+            }
+        }
         if (references.Count(item => item.HasApprovedImage) > maxReferences && maxReferences > 0)
             checks.Add(new("Review", "Visual reference capacity is bounded", $"{references.Count(item => item.HasApprovedImage)} approved images are available; {maxReferences} fit this workflow. All textual canon still travels."));
         checks.Add(new("Pass", "Project delivery contract attached", $"{project.DeliveryWidth} × {project.DeliveryHeight} at {project.FramesPerSecond} fps ({project.AspectRatio}), {project.ColorSpace}; audio {project.AudioSampleRate / 1000d:0.#} kHz."));
@@ -113,14 +134,7 @@ public sealed class GenerationPreflightService(
     }
 
     private WorkflowEntry? ResolveWorkflow(string? workflowPath)
-    {
-        if (workflowPath is null) return null;
-        return workflows.LoadIndex().FirstOrDefault(item =>
-            string.Equals(
-                Path.GetFullPath(Path.Combine(workflows.Root, item.File)),
-                workflowPath,
-                StringComparison.OrdinalIgnoreCase));
-    }
+        => workflowPath is null ? null : workflows.FindEntry(workflowPath);
 
     private static void AddCheck(List<GenerationPreflightCheck> checks, bool pass, string title, string detail)
         => checks.Add(new(pass ? "Pass" : "Block", title, detail));

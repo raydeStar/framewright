@@ -24,6 +24,29 @@ public sealed class WorkflowLibraryTests
         Assert.Contains(results, result => result.Id == "h3-video-i2v" && result.Capabilities!.Contains("last-frame-optional"));
     }
 
+    [Fact]
+    public void ABuiltAppsIdenticalCopyOfAWorkflowIsTheSameLibraryEntryButAnEditedOneIsNot()
+    {
+        // A built app dispatches the copy of the library beside its binaries,
+        // while the index can be the repository's.
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "workflows"));
+        var library = new WorkflowLibrary(root);
+        var copy = Path.Combine(Path.GetTempPath(), "framewright-workflow-copy", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(copy);
+        try
+        {
+            var built = Path.Combine(copy, "h3-video-i2v.json");
+            File.Copy(Path.Combine(root, "h3-video-i2v.json"), built);
+            Assert.Equal("h3-video-i2v", library.FindEntry(Path.Combine(root, "h3-video-i2v.json"))?.Id);
+            Assert.Equal("h3-video-i2v", library.FindEntry(built)?.Id);
+
+            File.AppendAllText(built, " ");
+            Assert.Null(library.FindEntry(built));
+            Assert.Null(library.FindEntry(Path.Combine(copy, "custom-video.json")));
+        }
+        finally { Directory.Delete(copy, recursive: true); }
+    }
+
     [Theory]
     [InlineData("h3-video-i2v.json", "19", "16")]
     [InlineData("h3-video-t2v.json", "17", "16")]

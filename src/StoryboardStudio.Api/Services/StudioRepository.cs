@@ -1150,11 +1150,100 @@ public sealed class StudioRepository(
             return RepositoryResult<ShotSummary>.Ok(MapShot(shot, unchangedComments));
         }
 
-        shot.VideoFirstFrameCandidateId = request.FirstFrameCandidateId;
-        shot.VideoLastFrameCandidateId = request.LastFrameCandidateId;
-        // Changing either motion anchor invalidates the previously selected
-        // production take. The media remains in history; it simply cannot be
-        // mistaken for the reviewed delivery for these new endpoints.
+        var reopenedRatifiedVideo = await RebindVideoEndpointsAsync(shot, request.FirstFrameCandidateId, request.LastFrameCandidateId, cancellationToken);
+        AddAudit("VideoEndpointsUpdated", "Shot", shot.Id.ToString(), new
+        {
+            firstFrameCandidateId = shot.VideoFirstFrameCandidateId,
+            lastFrameCandidateId = shot.VideoLastFrameCandidateId,
+            reopenedRatifiedVideo
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        var comments = await db.Comments.CountAsync(x => x.ShotId == shotId && x.Version == shot.Version && x.State == "Open", cancellationToken);
+        return RepositoryResult<ShotSummary>.Ok(MapShot(shot, comments));
+    }
+
+    private static readonly Dictionary<string, (bool NewStart, bool NewEnd)> CameraMoves = new(StringComparer.Ordinal)
+    {
+        ["PushIn"] = (false, true),
+        ["PullBack"] = (true, false),
+        ["TruckLeft"] = (true, true),
+        ["TruckRight"] = (true, true),
+        ["CraneUp"] = (true, true),
+        ["CraneDown"] = (true, true),
+    };
+
+    /// <summary>
+    /// Makes video endpoints that move the camera across one image instead of
+    /// generating a later moment: a push-in ends on a closer window, a truck
+    /// starts and ends on two windows offset sideways. H3 then interpolates a
+    /// deliberate camera move rather than inventing one. The windows become
+    /// working revisions beside the live frame, which stays as it was; nothing
+    /// is generated and no provider is called.
+    /// </summary>
+    public async Task<RepositoryResult<ShotSummary>> CreateCameraMoveEndpointsAsync(Guid shotId, CameraMoveEndpointsRequest request, CancellationToken cancellationToken)
+    {
+        var shot = await db.Shots.SingleOrDefaultAsync(x => x.Id == shotId, cancellationToken);
+        if (shot is null) return RepositoryResult<ShotSummary>.NotFound();
+        if (shot.UpdatedAt != request.ExpectedUpdatedAt)
+            return RepositoryResult<ShotSummary>.Conflict("The shot changed in another session. Refresh before setting a camera move.");
+        if (!CameraMoves.TryGetValue(request.Move ?? "", out var needs))
+            return RepositoryResult<ShotSummary>.Invalid("Choose push in, pull back, truck left or right, or crane up or down.");
+        if (request.Amount is < 3 or > 50)
+            return RepositoryResult<ShotSummary>.Invalid("A camera move travels between 3% and 50% of the frame.");
+        if ((request.StartAssetId is not null) != needs.NewStart || (request.EndAssetId is not null) != needs.NewEnd)
+            return RepositoryResult<ShotSummary>.Invalid(needs switch
+            {
+                (false, true) => "A push-in keeps the source as its Start Frame and needs one closer window for its Last Frame.",
+                (true, false) => "A pull-back starts on one closer window and ends on the source image.",
+                _ => "A truck or crane move needs both a start window and an end window."
+            });
+
+        var source = await db.CandidateVersions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.SourceCandidateId && x.ShotId == shotId, cancellationToken);
+        if (source?.AssetId is null) return RepositoryResult<ShotSummary>.Invalid("The camera move needs an image revision of this shot as its source.");
+        var windowIds = new[] { request.StartAssetId, request.EndAssetId }.Where(id => id is not null).Select(id => id!.Value).ToArray();
+        if (windowIds.Contains(source.AssetId.Value) || windowIds.Distinct().Count() != windowIds.Length)
+            return RepositoryResult<ShotSummary>.Invalid("Each camera window must be its own image, different from the source.");
+        var windows = await db.Assets.AsNoTracking()
+            .Where(x => windowIds.Contains(x.Id) && x.Kind == AssetKind.Image.ToString())
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        if (windows.Count != windowIds.Length) return RepositoryResult<ShotSummary>.Invalid("A camera window is not an uploaded image in this project.");
+
+        // Windows sit beside the live frame like variants: reviewable and
+        // selectable, without replacing what the shot currently shows.
+        var now = timeProvider.GetUtcNow();
+        var version = Math.Max(shot.Version, await db.CandidateVersions.Where(x => x.ShotId == shotId).MaxAsync(x => (int?)x.Version, cancellationToken) ?? 0);
+        var stage = source.Stage is nameof(ShotStage.Final) ? nameof(ShotStage.Final) : nameof(ShotStage.Draft);
+        CandidateVersionRecord Window(Guid assetId) => new()
+        {
+            Id = Guid.NewGuid(), ShotId = shotId, Version = ++version, Stage = stage,
+            Approval = nameof(ApprovalState.Working), IsCurrent = false, AssetId = assetId,
+            CreatedAt = now, SupersededAt = now
+        };
+        var start = request.StartAssetId is { } startAssetId ? Window(startAssetId) : null;
+        var end = request.EndAssetId is { } endAssetId ? Window(endAssetId) : null;
+        if (start is not null) db.CandidateVersions.Add(start);
+        if (end is not null) db.CandidateVersions.Add(end);
+        var reopenedRatifiedVideo = await RebindVideoEndpointsAsync(shot, start?.Id ?? source.Id, end?.Id ?? source.Id, cancellationToken);
+        AddAudit("VideoEndpointsCameraMove", "Shot", shot.Id.ToString(), new
+        {
+            request.Move, request.Amount, sourceCandidateId = source.Id, sourceAssetId = source.AssetId,
+            startCandidateId = shot.VideoFirstFrameCandidateId, startAssetId = request.StartAssetId,
+            endCandidateId = shot.VideoLastFrameCandidateId, endAssetId = request.EndAssetId,
+            reopenedRatifiedVideo
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        var comments = await db.Comments.CountAsync(x => x.ShotId == shotId && x.Version == shot.Version && x.State == "Open", cancellationToken);
+        return RepositoryResult<ShotSummary>.Ok(MapShot(shot, comments));
+    }
+
+    /// <summary>Points the shot's video at new endpoints. Changing either motion
+    /// anchor invalidates the previously selected production take: the media
+    /// stays in history, but it cannot be mistaken for the reviewed delivery for
+    /// these new endpoints. Returns whether an approved video was reopened.</summary>
+    private async Task<bool> RebindVideoEndpointsAsync(ShotRecord shot, Guid? firstFrameCandidateId, Guid? lastFrameCandidateId, CancellationToken cancellationToken)
+    {
+        shot.VideoFirstFrameCandidateId = firstFrameCandidateId;
+        shot.VideoLastFrameCandidateId = lastFrameCandidateId;
         shot.ProductionVideoJobId = null;
         shot.ProductionVideoAssetId = null;
         var reopenedRatifiedVideo = shot.Stage == nameof(ShotStage.Video) &&
@@ -1170,15 +1259,7 @@ public sealed class StudioRepository(
                 currentCandidate.Approval = nameof(ApprovalState.Working);
         }
         shot.UpdatedAt = timeProvider.GetUtcNow();
-        AddAudit("VideoEndpointsUpdated", "Shot", shot.Id.ToString(), new
-        {
-            firstFrameCandidateId = shot.VideoFirstFrameCandidateId,
-            lastFrameCandidateId = shot.VideoLastFrameCandidateId,
-            reopenedRatifiedVideo
-        });
-        await db.SaveChangesAsync(cancellationToken);
-        var comments = await db.Comments.CountAsync(x => x.ShotId == shotId && x.Version == shot.Version && x.State == "Open", cancellationToken);
-        return RepositoryResult<ShotSummary>.Ok(MapShot(shot, comments));
+        return reopenedRatifiedVideo;
     }
 
     /// <summary>
@@ -2341,7 +2422,7 @@ public sealed class StudioRepository(
         return job is null ? RepositoryResult<JobSummary>.NotFound() : RepositoryResult<JobSummary>.Ok(MapJob(job));
     }
 
-    private static JobSummary MapJob(JobRecord x) => new(x.Id, x.ShotId, x.ShotCode, x.Kind, Enum.Parse<JobState>(x.State), x.Progress, x.Phase, x.Backend, x.CreatedAt, x.CompletedAt, x.Error, x.ManifestId, x.AdapterId, x.OutputAssetId, x.OutputAssetId is null ? null : $"/api/assets/{x.OutputAssetId}/content", x.ProviderRequestId, x.Attempt, x.RetryOfJobId, x.LastHeartbeatAt, x.WorkType, x.AcknowledgedAt);
+    private static JobSummary MapJob(JobRecord x) => new(x.Id, x.ShotId, x.ShotCode, x.Kind, Enum.Parse<JobState>(x.State), x.Progress, x.Phase, x.Backend, x.CreatedAt, x.CompletedAt, x.Error, x.ManifestId, x.AdapterId, x.OutputAssetId, x.OutputAssetId is null ? null : $"/api/assets/{x.OutputAssetId}/content", x.ProviderRequestId, x.Attempt, x.RetryOfJobId, x.LastHeartbeatAt, x.WorkType, x.AcknowledgedAt, x.Warning);
 }
 
 public enum RepositoryResultKind { Ok, NotFound, Invalid, Conflict, Unavailable }

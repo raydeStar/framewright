@@ -1252,7 +1252,8 @@ public sealed record JobSummary(
     Guid? RetryOfJobId = null,
     DateTimeOffset? LastHeartbeatAt = null,
     string WorkType = "Shot",
-    DateTimeOffset? AcknowledgedAt = null);
+    DateTimeOffset? AcknowledgedAt = null,
+    string? Warning = null);
 
 public sealed record GenerationAdapterSummary(
     string Id,
@@ -1468,6 +1469,19 @@ public sealed record PrepareVideoManifestRequest(
     Guid? LastFrameCandidateId = null,
     VideoQuality Quality = VideoQuality.Low,
     string? TakeId = null);
+
+/// <summary>
+/// Video endpoints made by moving the camera across one approved image rather
+/// than generating a new moment. The browser crops the windows and uploads
+/// them; a missing asset means that endpoint is the source image itself.
+/// </summary>
+public sealed record CameraMoveEndpointsRequest(
+    DateTimeOffset ExpectedUpdatedAt,
+    Guid SourceCandidateId,
+    string Move,
+    int Amount,
+    Guid? StartAssetId = null,
+    Guid? EndAssetId = null);
 
 public sealed record PromoteVideoTakeRequest(
     int ExpectedShotVersion,
