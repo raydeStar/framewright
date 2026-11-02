@@ -7,7 +7,7 @@ test('export film shows each shot’s picture, sends the chosen options, and off
   let requested: unknown
   let rendered = false
   await page.route('**/api/export/film/status', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-    canRender: true, detail: 'Ready to render. 1 of 3 shots have no video yet and will hold a still or black.', totalFrames: 360, framesPerSecond: 24,
+    canRender: true, detail: 'Ready to render. 1 of 3 shots will hold a still or black instead of video.', totalFrames: 360, framesPerSecond: 24,
     deliveryWidth: 1920, deliveryHeight: 1080, audioClips: 2, captions: 1, approvedShots: 1,
     shots: [
       { shotId: 'a', code: 'SH-010', title: 'The Impossible Wind', durationFrames: 120, source: 'Production', detail: 'Approved Max take', assetId: 'x' },

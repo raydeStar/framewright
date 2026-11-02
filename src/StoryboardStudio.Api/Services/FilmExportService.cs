@@ -163,7 +163,11 @@ public sealed class FilmExportService(
         var job = await db.Jobs.SingleOrDefaultAsync(job => job.Id == jobId, cancellationToken);
         if (job is null || job.State != JobState.Running.ToString()) return;
 
-        var work = Path.Combine(StudioPaths.ResolveDataRoot(configuration, environment), "exports", $"film-{job.Id:N}");
+        // Each attempt gets its own folder: if the app died mid-render, the old
+        // attempt's FFmpeg can outlive it and still be writing its film.
+        var exports = Path.Combine(StudioPaths.ResolveDataRoot(configuration, environment), "exports");
+        var work = Path.Combine(exports, $"film-{job.Id:N}-{Guid.NewGuid():N}");
+        RemoveEarlierAttempts(exports, job.Id);
         try
         {
             var packet = JsonSerializer.Deserialize<FilmPacket>(job.RequestJson ?? "", Json) ?? throw new InvalidOperationException("The frozen film packet is unreadable.");
@@ -211,7 +215,7 @@ public sealed class FilmExportService(
                 var percent = 15 + (int)(73 * fraction);
                 if (percent <= lastPercent) return;
                 lastPercent = percent;
-                await ReportAsync(job, percent, $"Encoding the film · {(int)(fraction * 100)}%", cancellationToken);
+                await ReportAsync(job, percent, $"Encoding frame {(int)(fraction * packet.TotalFrames)} of {packet.TotalFrames}", cancellationToken);
             }, cancellationToken);
             if (!encoded.Succeeded) throw new InvalidOperationException(encoded.Detail);
 
@@ -259,8 +263,20 @@ public sealed class FilmExportService(
         }
         finally
         {
-            try { if (Directory.Exists(work)) Directory.Delete(work, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            TryDelete(work);
         }
+    }
+
+    /// <summary>Clears what an interrupted attempt left; a folder still in use is left for the next run.</summary>
+    private static void RemoveEarlierAttempts(string exports, Guid jobId)
+    {
+        if (!Directory.Exists(exports)) return;
+        foreach (var folder in Directory.EnumerateDirectories(exports, $"film-{jobId:N}*")) TryDelete(folder);
+    }
+
+    private static void TryDelete(string folder)
+    {
+        try { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     /// <summary>
@@ -360,7 +376,7 @@ public sealed class FilmExportService(
         var stills = sources.Count(source => source.Summary.Source is "Still" or "Missing");
         return stills == 0
             ? $"Ready to render {sources.Count} shot{(sources.Count == 1 ? "" : "s")} from video."
-            : $"Ready to render. {stills} of {sources.Count} shot{(sources.Count == 1 ? "" : "s")} have no video yet and will hold a still or black.";
+            : $"Ready to render. {stills} of {sources.Count} shot{(sources.Count == 1 ? "" : "s")} will hold a still or black instead of video.";
     }
 
     private async Task<AssetRecord?> FrozenAssetAsync(Guid id, string? hash, CancellationToken cancellationToken)

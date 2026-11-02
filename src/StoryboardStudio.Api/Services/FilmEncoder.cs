@@ -146,10 +146,18 @@ public sealed class FfmpegFilmEncoder(IConfiguration configuration) : IFilmEncod
             start.ArgumentList.Add(argument);
         using var process = new Process { StartInfo = start };
         if (!process.Start()) return null;
-        var errors = process.StandardError.ReadToEndAsync(cancellationToken);
-        _ = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        return ParseLoudness(await errors);
+        try
+        {
+            var errors = process.StandardError.ReadToEndAsync(cancellationToken);
+            _ = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            return ParseLoudness(await errors);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            throw;
+        }
     }
 
     /// <summary>Reads loudnorm's JSON report. Silence measures as -inf, which

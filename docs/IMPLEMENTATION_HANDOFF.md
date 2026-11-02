@@ -31,6 +31,20 @@ ComfyUI, a three-shot cut (two stills, one H3 take, score and two dialogue
 lines) rendered to exactly 360 frames at 1920×1080, -16.4 LUFS, with both
 caption cues. Not covered: effects lane, titles, grading.
 
+A later real-app pass (isolated app, stand-in ComfyUI, five shots covering
+every source: still, current H3 take, approved Max take, a take made stale by
+a newer still, and no picture) drove the dialog in the app and on iPad-sized
+WebKit. The film was exactly 384 frames at 1920×1080 with BT.709, both caption
+cues at the right times and -16.3 LUFS. Each shot showed its expected picture,
+and the stale take's newer still was used. With the options off, the film had
+no subtitle track, no fade in and an unnormalized mix. A double click and two
+simultaneous requests each made one job. Killing the app mid-encode left
+FFmpeg running on as an orphan, still writing the attempt's file. Each attempt
+now writes to its own folder and clears an interrupted attempt's folder, and
+the loudness pass is killed on cancel like the encode. The killed render was
+reclaimed when its five-minute lease expired (the shared rule for every job
+type) and completed. Until then it showed as still rendering.
+
 ## ComfyUI and H3 live feedback (2026-11-01)
 
 Found while making a short film end to end: an H3 Max render sat at "Rendering

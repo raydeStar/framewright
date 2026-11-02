@@ -100,7 +100,7 @@ public sealed class FilmExportTests
         Assert.Contains("held for 5 s", status.Shots[2].Detail);
         Assert.Null(status.Shots[3].AssetId);
         Assert.Equal(1, status.ApprovedShots);
-        Assert.Contains("2 of 4 shots have no video yet", status.Detail);
+        Assert.Contains("2 of 4 shots will hold a still or black", status.Detail);
         _ = missing;
     }
 
@@ -173,6 +173,54 @@ public sealed class FilmExportTests
         Assert.Equal(2, second.Attempt);
         Assert.Equal(first.Id, second.RetryOfJobId);
         Assert.Equal(encoder.Plans[0].Segments.Select(segment => segment.Kind), encoder.Plans[1].Segments.Select(segment => segment.Kind));
+    }
+
+    [Fact]
+    public async Task ARenderInterruptedByARestartResumesInAFreshFolderAndClearsTheOldOne()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "framewright-film-restart", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Guid jobId;
+            string stray;
+            var first = new FakeFilmEncoder();
+            using (var factory = new StudioApiFactory(root, deleteDataRoot: false, configureServices: services => { services.RemoveAll<IFilmEncoder>(); services.AddSingleton<IFilmEncoder>(first); }))
+            {
+                using var client = factory.CreateClient();
+                var project = await NewProjectAsync(client);
+                await FourShotsAsync(factory, client, project);
+                jobId = (await WaitAsync(client, (await (await client.PostAsJsonAsync("/api/export/film", new FilmExportRequest())).Content.ReadFromJsonAsync<JobSummary>())!.Id)).Id;
+
+                // As if the app died mid-encode: the job is still running and
+                // the attempt's folder, possibly still being written, remains.
+                using var scope = factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+                var job = await db.Jobs.IgnoreQueryFilters().SingleAsync(item => item.Id == jobId);
+                job.State = JobState.Running.ToString(); job.Progress = 40; job.CompletedAt = null; job.OutputAssetId = null;
+                job.LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+                await db.SaveChangesAsync();
+                stray = Path.Combine(factory.DataRoot, "exports", $"film-{jobId:N}-interrupted");
+                Directory.CreateDirectory(stray);
+                await File.WriteAllTextAsync(Path.Combine(stray, "film.mp4"), "half a film");
+            }
+
+            var second = new FakeFilmEncoder();
+            using (var restarted = new StudioApiFactory(root, deleteDataRoot: false, configureServices: services => { services.RemoveAll<IFilmEncoder>(); services.AddSingleton<IFilmEncoder>(second); }))
+            {
+                using var client = restarted.CreateClient();
+                var resumed = await WaitAsync(client, jobId);
+
+                Assert.Equal(JobState.Completed, resumed.State);
+                Assert.NotNull(resumed.OutputAssetId);
+                var output = Assert.Single(second.OutputPaths);
+                Assert.NotEqual(stray, Path.GetDirectoryName(output));
+                Assert.False(Directory.Exists(stray));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -366,13 +414,14 @@ public sealed class FilmExportTests
         public bool FailFirst { get; set; }
         public List<FilmPlan> Plans { get; } = [];
         public HashSet<string> ExistedAtEncode { get; } = [];
+        public List<string> OutputPaths { get; } = [];
         public string Captions { get; private set; } = "";
 
         public FilmEncoderReadiness Inspect() => Ready ? new(true, "Test encoder ready.") : new(false, "FFmpeg was not found. Install it to render a film.");
 
         public async Task<FilmEncodeResult> EncodeAsync(FilmPlan plan, string outputPath, Func<double, Task> progress, CancellationToken cancellationToken)
         {
-            lock (Plans) Plans.Add(plan);
+            lock (Plans) { Plans.Add(plan); OutputPaths.Add(outputPath); }
             foreach (var segment in plan.Segments.Where(segment => segment.Path is not null && File.Exists(segment.Path))) ExistedAtEncode.Add(segment.Path!);
             if (plan.CaptionsPath is not null) Captions = await File.ReadAllTextAsync(plan.CaptionsPath, cancellationToken);
             await progress(.5);
