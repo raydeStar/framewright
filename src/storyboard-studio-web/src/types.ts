@@ -42,7 +42,7 @@ export interface ShippingTargetSummary { name: string; path: string; available: 
 export interface ShipmentItemPreview { assetId: string; revisionId: string; displayName: string; kind: 'Image' | 'Video' | 'Audio' | 'Model'; decision: AssetReviewDecision; ships: boolean; reason: string | null }
 export interface ShipmentPreview { sourceName: string; includePending: boolean; items: ShipmentItemPreview[]; shipCount: number; skippedCount: number }
 export interface ShipmentReceipt { shipmentId: string; target: string | null; folder: string | null; bundleName: string; itemCount: number; skippedCount: number; files: string[]; createdAt: string }
-export interface JobSummary { id: string; shotId: string; shotCode: string; kind: string; state: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'; progress: number; phase: string; backend: string; createdAt: string; completedAt?: string; error?: string; manifestId?: string; adapterId?: string; outputAssetId?: string; outputAssetUrl?: string; providerRequestId?: string; attempt: number; retryOfJobId?: string; lastHeartbeatAt?: string; workType: 'Shot' | 'Asset' | 'Voice' | 'Music' | 'VoiceDesign' | 'SceneRender'; acknowledgedAt?: string }
+export interface JobSummary { id: string; shotId: string; shotCode: string; kind: string; state: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'; progress: number; phase: string; backend: string; createdAt: string; completedAt?: string; error?: string; manifestId?: string; adapterId?: string; outputAssetId?: string; outputAssetUrl?: string; providerRequestId?: string; attempt: number; retryOfJobId?: string; lastHeartbeatAt?: string; workType: 'Shot' | 'Asset' | 'Voice' | 'Music' | 'VoiceDesign' | 'SceneRender'; acknowledgedAt?: string; warning?: string }
 export interface StudioSnapshot { project: ProjectSummary; shots: ShotSummary[]; references: ReferenceSummary[]; comments: CommentSummary[]; jobs: JobSummary[]; serverTime: string; demoMode: boolean }
 export interface IntegrationSummary { id: string; name: string; state: 'Connected' | 'Ready' | 'NeedsSetup' | 'Offline' | 'Protected'; headline: string; detail: string; endpoint?: string; canInspect: boolean; canSubmit: boolean; checkedAt: string }
 export interface CodexAssistResponse { mode: string; headline: string; message: string; findings: string[]; suggestedActions: string[]; live: boolean; completedAt: string }
@@ -112,7 +112,9 @@ export interface GenerationSetup {
   codex: { oneClickImages: boolean; locked: string[] }
 }
 export interface GenerationSetupChange { comfyUiEndpoint: string; comfyUiImagesEnabled: boolean; comfyUiVideoEnabled: boolean; codexOneClickImages: boolean }
-export interface ComfyUiConnectionTest { reachable: boolean; detail: string }
+export interface ComfyUiMissingModel { file: string; node: string; folder: string }
+export interface ComfyUiWorkflowReadiness { route: string; workflow: string; kind: 'Image' | 'Video'; state: 'Ready' | 'Missing' | 'Unknown'; detail: string; missingNodes: string[]; missingModels: ComfyUiMissingModel[] }
+export interface ComfyUiConnectionTest { reachable: boolean; detail: string; workflows?: ComfyUiWorkflowReadiness[] }
 export interface AudioMasteringStatus { toolAvailable: boolean; clipsWithMedia: number; guideClips: number; canMix: boolean; detail: string }
 export interface PairingStatusSummary { lanEnabled: boolean; isLoopback: boolean; isPaired: boolean; workstation: string; pairingCode?: string; codeExpiresAt?: string; securityNote: string }
 export interface BackupStatus { databaseIntegrity: string; assetCount: number; assetBytes: number; policy: string; scheduled: boolean; retainedBackups: number; latestBackupAt?: string; lastAttemptAt?: string; lastSuccessAt?: string; lastResult: string; lastError?: string; backupRootWritable: boolean; backupOverdue: boolean; backupHealth: 'Disabled' | 'Failed' | 'Overdue' | 'Running' | 'Healthy' }

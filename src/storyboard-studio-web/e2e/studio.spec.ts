@@ -637,6 +637,69 @@ test('long-running image jobs own the frame with durable progress', async ({ pag
   verifyConsole()
 })
 
+test('an H3 render shows its sampler steps, then warns in place when it stops moving', async ({ page }) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  const warning = 'ComfyUI hasn’t reported progress on this video for 12 minutes at step 1 of 32. That usually means it ran out of GPU memory and is swapping the model. Framewright is still waiting and won’t stop the render.'
+  let stalled = false
+  await page.route('**/api/studio', async route => {
+    const response = await route.fetch()
+    const body = await response.json()
+    const shot = body.shots.find((item: { code: string }) => item.code === 'SH-030')
+    body.jobs.unshift({
+      id: '00000000-0000-0000-0000-000000000031', shotId: shot.id, shotCode: shot.code, kind: 'Video', state: 'Running',
+      progress: stalled ? 50 : 66, phase: stalled ? 'No progress for 12 min at step 1 of 32' : 'Sampling · step 22 of 32 · about 2 min left',
+      backend: 'ComfyUI H3 video', adapterId: 'comfyui-h3-video', createdAt: new Date().toISOString(), attempt: 1, workType: 'Shot',
+      ...(stalled ? { warning } : {}),
+    })
+    await route.fulfill({ response, json: body })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: /Open SH-030,/ }).click()
+  const dock = page.getByTestId('jobs-dock')
+  await expect(dock).toContainText('Sampling · step 22 of 32 · about 2 min left')
+  await expect(page.getByRole('heading', { name: 'Rendering motion' })).toBeVisible()
+  await expect(page.getByTestId('jobs-dock-warning')).toHaveCount(0)
+
+  // The next poll brings the stall: the same running job, now with a warning.
+  stalled = true
+  await expect(dock).toHaveClass(/has-warning/)
+  await expect(dock).toContainText('No progress for 12 min at step 1 of 32')
+  const frame = page.getByTestId('frame-generation-state')
+  await expect(frame.getByRole('heading', { name: 'The render has stopped moving' })).toBeVisible()
+  await expect(frame).toContainText('ran out of GPU memory')
+  // On the job's own shot the frame explains it, so the dock does not repeat
+  // it over the controls; anywhere else the dock carries the explanation.
+  await expect(page.getByTestId('jobs-dock-warning')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Board', exact: true }).click()
+  await expect(page.getByTestId('jobs-dock-warning')).toContainText('won’t stop the render')
+  // Still running, so nothing offers to retry or dismiss it yet.
+  await expect(page.getByTestId('jobs-dock-stalled')).toHaveCount(0)
+  verifyConsole()
+})
+
+test('the ComfyUI connection test lists each workflow and names the missing files', async ({ page }) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  await page.route('**/api/setup/comfyui/test', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    reachable: true,
+    detail: 'Connected. ComfyUI’s queue is idle. 1 of 2 workflows need files or nodes that ComfyUI doesn’t have yet.',
+    workflows: [
+      { route: 'Draft from the shot card', workflow: 'ComfyUI Text Draft', kind: 'Image', state: 'Ready', detail: 'ComfyUI has all 10 node types and 4 model files this workflow uses.', missingNodes: [], missingModels: [] },
+      { route: 'H3 video', workflow: 'H3 video — image to video', kind: 'Video', state: 'Missing', detail: '1 model file is missing (minimax_h3_video_vae_fp16.safetensors in models/vae).', missingNodes: ['MiniMaxH3ImageToVideo'], missingModels: [{ file: 'minimax_h3_video_vae_fp16.safetensors', node: 'VAELoader', folder: 'vae' }] },
+    ],
+  }) }))
+  await page.goto('/?setup=1')
+  const drawer = page.getByTestId('setup-drawer')
+  await drawer.getByRole('button', { name: 'Test connection' }).click()
+  const check = drawer.getByTestId('workflow-install-check')
+  await expect(check.getByRole('listitem')).toHaveCount(2)
+  await expect(check.getByRole('listitem').filter({ hasText: 'Draft from the shot card' })).toContainText('Ready')
+  const video = check.getByRole('listitem').filter({ hasText: 'H3 video' })
+  await expect(video).toContainText('Missing files')
+  await expect(video).toContainText('models/vae/minimax_h3_video_vae_fp16.safetensors')
+  await expect(video).toContainText('node: MiniMaxH3ImageToVideo')
+  verifyConsole()
+})
+
 test('visual audit exposes explicit reconciliation choices and optional context', async ({ page }) => {
   const verifyConsole = failOnConsoleErrors(page)
   const auditId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'

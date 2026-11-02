@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
 import { BadgeCheck, Blocks, Bot, Check, CircleAlert, Download, LoaderCircle, LockKeyhole, PlugZap, RefreshCw, Sparkles, Unplug, WandSparkles, X } from 'lucide-react'
 import { studioApi } from '../api'
 import { DELIVERY_PRESETS } from '../projectFormats'
-import type { BackupStatus, ComfyUiConnectionTest, CredentialStatus, GenerationSetup, IntegrationSummary, PairingStatusSummary, ProjectSummary, RuntimeReadinessSummary } from '../types'
+import type { BackupStatus, ComfyUiConnectionTest, ComfyUiWorkflowReadiness, CredentialStatus, GenerationSetup, IntegrationSummary, PairingStatusSummary, ProjectSummary, RuntimeReadinessSummary } from '../types'
 import Dialog from './Dialog'
 
 /**
@@ -145,6 +145,7 @@ function GenerationSettings({ comfyUi, codex, onChanged }: { comfyUi?: Integrati
           </span>
         </label>
         {test && <p className={`setting-test ${test.reachable ? 'is-ok' : 'is-failed'}`} role="status">{test.reachable ? <Check size={14} /> : <Unplug size={14} />}{test.detail}</p>}
+        {test?.workflows && test.workflows.length > 0 && <WorkflowInstallCheck workflows={test.workflows} />}
         {lockedNote(setup?.comfyUi.locked, 'endpoint')}
         <Toggle label="Make draft images with ComfyUI" detail="Adds jobs to ComfyUI's queue when you press Generate. Never interrupts work Framewright didn't start." checked={imagesEnabled} disabled={!editable || isLocked(setup?.comfyUi.locked, 'imagesEnabled')} onChange={value => { setImagesEnabled(value); setSaved(false) }} />
         {lockedNote(setup?.comfyUi.locked, 'imagesEnabled')}
@@ -162,6 +163,26 @@ function GenerationSettings({ comfyUi, codex, onChanged }: { comfyUi?: Integrati
     {setup && editable && <div className="settings-save-row"><span className={dirty ? 'dirty' : ''}>{dirty ? 'Unsaved generation changes' : saved ? 'Generation settings saved' : 'Nothing is sent until you press Generate'}</span><button className="primary compact" disabled={saving || !dirty} onClick={() => void save()}>{saving ? 'Saving…' : 'Save generation settings'}</button></div>}
     {saveError && <p className="form-error" role="alert"><CircleAlert size={15} />{saveError}</p>}
   </div>
+}
+
+/**
+ * What ComfyUI said it has, per workflow Framewright will send. A missing
+ * model file is named with the folder it belongs in, so it can be fixed
+ * before a render fails on it.
+ */
+function WorkflowInstallCheck({ workflows }: { workflows: ComfyUiWorkflowReadiness[] }) {
+  return <ul className="workflow-install-check" aria-label="What ComfyUI has for each workflow" data-testid="workflow-install-check">
+    {workflows.map(item => <li key={item.route} className={`state-${item.state.toLowerCase()}`}>
+      <span aria-hidden="true">{item.state === 'Ready' ? <Check size={14} /> : <CircleAlert size={14} />}</span>
+      <div>
+        <strong>{item.route}<em>{item.state === 'Ready' ? 'Ready' : item.state === 'Missing' ? 'Missing files' : 'Not confirmed'}</em></strong>
+        <small>{item.workflow}</small>
+        {item.state !== 'Ready' && <p>{item.detail}</p>}
+        {item.missingModels.map(model => <code key={`${model.node}-${model.file}`} title={`Used by ${model.node}`}>models/{model.folder}/{model.file}</code>)}
+        {item.missingNodes.map(node => <code key={node}>node: {node}</code>)}
+      </div>
+    </li>)}
+  </ul>
 }
 
 // The switch is named by its label alone; the explanation is its description,

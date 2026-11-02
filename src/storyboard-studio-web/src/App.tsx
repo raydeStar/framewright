@@ -340,7 +340,7 @@ export default function App() {
         </ErrorBoundary>
       </div>
 
-      <JobsDock jobs={studio.jobs} scopeShotId={active === 'board' ? undefined : shotScoped ? selected?.id : null} onOpen={() => void refresh()} onRetry={async job => { try { const retry = await studioApi.retryJob(job.id); setToast(`${retry.shotCode} retry ${retry.attempt} queued.`); setDismissedJobs(current => current.filter(id => id !== job.id)); if (retry.workType === 'Shot') void followGeneration(retry.shotId, studio.shots.find(shot => shot.id === retry.shotId)?.version ?? 0); await refresh(true) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not retry this generation.') } }} dismissed={dismissedJobs} onDismiss={id => { setDismissedJobs(current => [...current, id]); void studioApi.acknowledgeJob(id).then(() => refresh(true)).catch(() => undefined) }} />
+      <JobsDock jobs={studio.jobs} scopeShotId={active === 'board' ? undefined : shotScoped ? selected?.id : null} frameShotId={active === 'shot' ? selected?.id : undefined} onOpen={() => void refresh()} onRetry={async job => { try { const retry = await studioApi.retryJob(job.id); setToast(`${retry.shotCode} retry ${retry.attempt} queued.`); setDismissedJobs(current => current.filter(id => id !== job.id)); if (retry.workType === 'Shot') void followGeneration(retry.shotId, studio.shots.find(shot => shot.id === retry.shotId)?.version ?? 0); await refresh(true) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not retry this generation.') } }} dismissed={dismissedJobs} onDismiss={id => { setDismissedJobs(current => [...current, id]); void studioApi.acknowledgeJob(id).then(() => refresh(true)).catch(() => undefined) }} />
     </section>
 
     {setupOpen && <SetupDrawer project={studio.project} integrations={integrations} pairing={pairing} busy={integrationBusy} onProjectSaved={() => void refresh()} onRefresh={() => { void inspectIntegrations(); void inspectPairing() }} onRotatePairing={async () => setPairing(await studioApi.rotatePairing())} onRevokePairing={async () => setPairing(await studioApi.revokePairing())} onClose={() => setSetupOpen(false)} onAskCodex={() => { setSetupOpen(false); void askCodex('Integration setup', 'Inspect the configured integration status shown by Framewright and recommend the next safe setup steps. Do not change files or submit jobs.') }} />}
@@ -421,7 +421,7 @@ function StudioSkeleton() {
   </div>
 }
 
-function JobsDock({ jobs, scopeShotId, onOpen, onRetry, dismissed, onDismiss }: { jobs: StudioSnapshot['jobs']; scopeShotId?: string | null; onOpen: () => void; onRetry: (job: JobSummary) => Promise<void>; dismissed: string[]; onDismiss: (id: string) => void }) {
+function JobsDock({ jobs, scopeShotId, frameShotId, onOpen, onRetry, dismissed, onDismiss }: { jobs: StudioSnapshot['jobs']; scopeShotId?: string | null; frameShotId?: string; onOpen: () => void; onRetry: (job: JobSummary) => Promise<void>; dismissed: string[]; onDismiss: (id: string) => void }) {
   const [retrying, setRetrying] = useState(false)
   const [open, setOpen] = useState(false)
   const underway = jobs.filter(x => x.state === 'Queued' || x.state === 'Running')
@@ -436,11 +436,16 @@ function JobsDock({ jobs, scopeShotId, onOpen, onRetry, dismissed, onDismiss }: 
     .slice(0, 8)
 
   if (active) return <div className="jobs-queue" data-testid="jobs-queue">
-    <button className="jobs-dock active" onClick={() => setOpen(value => !value)} data-testid="jobs-dock"
+    <button className={`jobs-dock active${active.warning ? ' has-warning' : ''}`} onClick={() => setOpen(value => !value)} data-testid="jobs-dock"
       aria-expanded={open}
-      aria-label={`${underway.length} job${underway.length === 1 ? '' : 's'} underway. ${active.shotCode} ${active.kind}: ${active.phase}, ${active.progress}%`}>
-      <LoaderCircle className="spin" size={15} /><span><strong>{active.shotCode} · {active.kind}</strong><small>{active.phase}{underway.length > 1 ? ` · ${underway.length - 1} waiting safely` : ''}</small></span><div className="job-progress" role="progressbar" aria-label="Generation progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={active.progress}><i style={{ width: `${active.progress}%` }} /></div><em>{active.progress}%</em><ChevronDown size={14} />
+      aria-label={`${underway.length} job${underway.length === 1 ? '' : 's'} underway. ${active.shotCode} ${active.kind}: ${active.warning ? 'needs attention, ' : ''}${active.phase}, ${active.progress}%`}>
+      {active.warning ? <CircleAlert size={15} /> : <LoaderCircle className="spin" size={15} />}<span><strong>{active.shotCode} · {active.kind}</strong><small>{active.phase}{underway.length > 1 ? ` · ${underway.length - 1} waiting safely` : ''}</small></span><div className="job-progress" role="progressbar" aria-label="Generation progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={active.progress}><i style={{ width: `${active.progress}%` }} /></div><em>{active.progress}%</em><ChevronDown size={14} />
     </button>
+    {/* A render that stopped moving says so where the artist is already
+        looking, with what to do; the job itself keeps waiting. On the job's
+        own shot the frame already carries the explanation, and repeating it
+        here would cover the controls beneath the dock. */}
+    {active.warning && active.shotId !== frameShotId && <p className="jobs-dock-warning" role="status" data-testid="jobs-dock-warning"><CircleAlert size={14} /><span>{active.warning}</span></p>}
     {open && <div className="jobs-queue-panel" data-testid="jobs-queue-panel" role="group" aria-label="Work queue">
       <header>
         <strong>Work queue</strong>
@@ -462,7 +467,7 @@ function JobsDock({ jobs, scopeShotId, onOpen, onRetry, dismissed, onDismiss }: 
                 onClick={() => { setRetrying(true); void onRetry(job).finally(() => setRetrying(false)) }}>Retry</button>}
         </li>)}
       </ul>
-      <p>Work continues if you leave this screen. Progress moves when a stage finishes, not on a timer.</p>
+      <p>Work continues if you leave this screen. Progress comes from the renderer itself, step by step where ComfyUI reports steps, never from a timer.</p>
     </div>}
   </div>
 

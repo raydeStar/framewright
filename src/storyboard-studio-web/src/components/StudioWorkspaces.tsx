@@ -1,7 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Aperture, ArrowLeft, ArrowRight, BadgeCheck, Check, CircleAlert, Clapperboard, Cpu, Download, Film, ImagePlus, Layers3, Library, LoaderCircle, LockKeyhole, Maximize2, MessageCircle, Minimize2, Music2, Pause, PenLine, Play, Plus, Redo2, RotateCcw, Scan, Sparkles, Trash2, Undo2, Volume2, WandSparkles, X } from 'lucide-react'
 import { studioApi } from '../api'
+import { canvasToPngBlob } from '../canvasExport'
 import { getSupersededJobIds } from '../jobState'
+import CameraMoveEndpoints from './CameraMoveEndpoints'
 import Artwork from './Artwork'
 import ConfirmDialog from './ConfirmDialog'
 import Dialog from './Dialog'
@@ -334,7 +336,7 @@ function ShotBoard({ studio, selectedId, onSelect, onOpen, onCreateShot, onChang
             <div className="shot-thumb">
               <ShotArtwork shot={shot} label={`${shot.code} ${shot.title}`} />
               <div className="safe-frame" />
-              {job && <div className="shot-job" role="status"><LoaderCircle className="spin" size={13} />{job.phase}</div>}
+              {job && <div className={`shot-job${job.warning ? ' has-warning' : ''}`} role="status">{job.warning ? <CircleAlert size={13} /> : <LoaderCircle className="spin" size={13} />}{job.phase}</div>}
               {failed && <div className="shot-job failed"><CircleAlert size={13} />Generation failed</div>}
             </div>
 
@@ -480,6 +482,11 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
   const [finalOpen, setFinalOpen] = useState(false)
   const [repairAudit, setRepairAudit] = useState<ShotVisualAuditSummary>()
   const [lastFrameOpen, setLastFrameOpen] = useState(false)
+  // The motion words for the camera move the artist just set up, so the next
+  // video brief describes the same move the endpoints encode. They apply only
+  // while those exact endpoints are still the selected ones.
+  const [cameraMove, setCameraMove] = useState<{ first?: string; last?: string; brief: string }>()
+  const cameraMoveHint = cameraMove && cameraMove.first === shot.videoFirstFrameCandidateId && cameraMove.last === shot.videoLastFrameCandidateId ? cameraMove.brief : undefined
   const [markupReady, setMarkupReady] = useState(false)
   const [intentDraft, setIntentDraft] = useState({ description: shot.description, action: shot.action, camera: shot.camera })
   const [intentSaving, setIntentSaving] = useState(false)
@@ -811,7 +818,7 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
           <div className="generation-state"><StageBadge shot={shot} /><span>v{shot.version} · {shot.openComments} open notes</span></div>
           {draftWorkflow && ((!activeJob && shot.stage === 'Sketch') || activeJob?.adapterId === 'comfyui-fast-draft') && <div className={`workflow-badge ${activeJob ? 'running' : ''}`} title={draftWorkflow.summary}><Cpu size={15} /><span><small>Fast local workflow</small><strong>{draftWorkflow.name}</strong></span><em>{draftWorkflow.mode}</em></div>}
           {activeJob?.adapterId === 'codex-imagegen' && <div className="workflow-badge running" title="High-fidelity image generation through your Codex ChatGPT login"><Sparkles size={15} /><span><small>Precision image engine</small><strong>Codex ImageGen</strong></span><em>ChatGPT login</em></div>}
-          {activeJob && <div className="active-job-note" role="status"><LoaderCircle className="spin" size={14} />{activeJob.phase}</div>}
+          {activeJob && <div className={`active-job-note${activeJob.warning ? ' has-warning' : ''}`} role="status">{activeJob.warning ? <CircleAlert size={14} /> : <LoaderCircle className="spin" size={14} />}{activeJob.phase}</div>}
           {shot.stage === 'Sketch' && <p className="inspector-footnote">Generate from the description now, or add a sketch when composition needs tighter control.</p>}
           {shot.stage === 'Sketch' ? <div className="generation-action-stack initial-draft-actions"><button className="primary" onClick={() => void generateInitialDraft('comfyui-fast-draft')} disabled={generationBusy || Boolean(quickGenerating) || engineBlocked('comfyui-fast-draft')}><WandSparkles size={18} />{quickGenerating === 'comfyui-fast-draft' ? 'Starting ComfyUI…' : 'Generate fast draft'}</button><button className="secondary" onClick={() => void generateInitialDraft('codex-imagegen')} disabled={generationBusy || Boolean(quickGenerating) || engineBlocked('codex-imagegen')}><Sparkles size={17} />{quickGenerating === 'codex-imagegen' ? 'Starting Codex ImageGen…' : 'Generate with Codex'}</button></div>
             : shot.stage === 'Video' && latestVideoTake ? <div className="video-take-actions"><div className="video-quality-status"><Film size={16} /><span><strong>{currentVideoQuality ?? 'Low'} quality take</strong><small>{currentVideoQuality === 'Max' ? shot.approval === 'Ratified' ? 'Immutable production video · approved' : 'Maximum production pass ready for approval' : 'Review motion, then promote this exact take or try another pass'}</small></span></div>{currentVideoQuality === 'Max' ? shot.approval === 'Ratified' ? <button className="primary" disabled><BadgeCheck size={18} />Max video approved</button> : <button className="primary" onClick={onRatify} disabled={generationBusy}><BadgeCheck size={18} />Approve max video</button> : <button className="primary" onClick={() => void promoteLatestVideo()} disabled={generationBusy || videoPromoting}><WandSparkles size={18} />{videoPromoting ? 'Promoting to max…' : `Promote ${currentVideoQuality ?? 'Low'} take to Max`}</button>}<button className="secondary" onClick={() => setVideoOpen(true)} disabled={generationBusy || videoPromoting}><Film size={17} />Generate another pass</button></div>
@@ -838,8 +845,9 @@ export function ShotWorkspace({ studio, shot, comments, references, tool, setToo
     {draftToDelete && <ConfirmDialog title={`Delete draft v${draftToDelete.version}?`} confirmLabel={`Delete v${draftToDelete.version}`} busy={candidateBusy} onCancel={() => setDraftToDelete(undefined)} onConfirm={() => void deleteCandidate(draftToDelete.id)}>
       <p>This removes draft <strong>v{draftToDelete.version}</strong> and its notes from this shot's version history. The current version is not affected.</p>
     </ConfirmDialog>}
-    {videoOpen && <VideoGenerationDialog shot={shot} project={studio.project} onSaveEndpoints={saveVideoEndpoints} onClose={() => setVideoOpen(false)} onQueued={() => { setVideoOpen(false); onJobQueued() }} />}
-    {lastFrameOpen && <LastFrameCreationDialog shot={shot} candidates={candidates} referenceCount={references.length} onClose={() => setLastFrameOpen(false)} onQueued={() => { setLastFrameOpen(false); onJobQueued() }} />}
+    {videoOpen && <VideoGenerationDialog shot={shot} project={studio.project} motionHint={cameraMoveHint} onSaveEndpoints={saveVideoEndpoints} onClose={() => setVideoOpen(false)} onQueued={() => { setVideoOpen(false); onJobQueued() }} />}
+    {lastFrameOpen && <LastFrameCreationDialog shot={shot} candidates={candidates} referenceCount={references.length} deliveryAspect={studio.project.deliveryWidth / studio.project.deliveryHeight} onClose={() => setLastFrameOpen(false)} onQueued={() => { setLastFrameOpen(false); onJobQueued() }}
+      onCameraMove={async (saved, brief) => { onShotSaved(saved); setCandidates(await studioApi.candidates(shot.id)); setCameraMove({ first: saved.videoFirstFrameCandidateId, last: saved.videoLastFrameCandidateId, brief }); setLastFrameOpen(false) }} />}
     {feedbackRequest !== undefined && <FeedbackRegenerationDialog shot={shot} comments={comments} references={references} initialDirection={feedbackRequest} markupGuide={markupGuide.current} compositionGuide={compositionGuide.current} onClose={() => setFeedbackRequest(undefined)} onQueued={() => { setFeedbackRequest(undefined); onJobQueued() }} />}
   </main>
 }
@@ -1072,11 +1080,14 @@ function VideoEndpointStrip({ shot, candidates, busy, error, onChange, onView, o
   </section>
 }
 
-function LastFrameCreationDialog({ shot, candidates, referenceCount, onClose, onQueued }: { shot: ShotSummary; candidates: CandidateVersionSummary[]; referenceCount: number; onClose: () => void; onQueued: () => void }) {
+function LastFrameCreationDialog({ shot, candidates, referenceCount, deliveryAspect, onClose, onQueued, onCameraMove }: { shot: ShotSummary; candidates: CandidateVersionSummary[]; referenceCount: number; deliveryAspect: number; onClose: () => void; onQueued: () => void; onCameraMove: (saved: ShotSummary, brief: string) => Promise<void> }) {
   const imageCandidates = candidates.filter(candidate => candidate.assetId && candidate.assetUrl && candidate.stage !== 'Video')
   const start = imageCandidates.find(candidate => candidate.id === shot.videoFirstFrameCandidateId)
     ?? imageCandidates.find(candidate => candidate.isCurrent)
     ?? imageCandidates.find(candidate => candidate.approval === 'Ratified')
+  // A camera move frames the live picture, not an earlier window of it.
+  const cameraSource = imageCandidates.find(candidate => candidate.isCurrent) ?? start
+  const [mode, setMode] = useState<'moment' | 'camera'>('moment')
   const [direction, setDirection] = useState(`By the end of the shot: ${shot.action} Keep the same camera setup and visual continuity unless the action requires a deliberate change.`)
   const [adapterId, setAdapterId] = useState('comfyui-fast-draft')
   const [sketchRevision, setSketchRevision] = useState<number>()
@@ -1140,7 +1151,12 @@ function LastFrameCreationDialog({ shot, candidates, referenceCount, onClose, on
   }
   return <Dialog className="modal-backdrop route-backdrop" onClose={onClose} labelledBy="last-frame-title" initialFocus="textarea">
     <section className="route-modal last-frame-modal">
-      <header><div><p className="eyebrow">Copy with directions</p><h2 id="last-frame-title">Create Last Frame</h2></div><button onClick={onClose} aria-label="Close Last Frame creator">×</button></header>
+      <header><div><p className="eyebrow">{mode === 'camera' ? 'Two windows of one image' : 'Copy with directions'}</p><h2 id="last-frame-title">Create Last Frame</h2></div><button onClick={onClose} aria-label="Close Last Frame creator">×</button></header>
+      <div className="last-frame-mode" role="radiogroup" aria-label="How the shot ends">
+        <button type="button" role="radio" aria-checked={mode === 'moment'} className={mode === 'moment' ? 'selected' : ''} onClick={() => setMode('moment')}><strong>Generate a later moment</strong><small>The action moves on; an image engine draws the end</small></button>
+        <button type="button" role="radio" aria-checked={mode === 'camera'} className={mode === 'camera' ? 'selected' : ''} disabled={!cameraSource} onClick={() => setMode('camera')}><strong>Move the camera</strong><small>Push in, truck or crane across this image · no generation</small></button>
+      </div>
+      {mode === 'camera' && cameraSource ? <CameraMoveEndpoints shot={shot} source={cameraSource} aspect={deliveryAspect} onCancel={onClose} onCreated={onCameraMove} /> : <>
       <div className="route-modal-body">
         <div className="feedback-source last-frame-source"><div>{start ? <CandidateArtwork candidate={start} fallbackVariant={shot.visualVariant} /> : <ShotArtwork shot={shot} muted />}<span>Start Frame · {start ? `v${start.version}` : 'unavailable'}</span></div><div><strong>Describe only what changes by the end</strong><p>Framewright carries the source image, style, camera, crop, {referenceCount} {referenceCount === 1 ? 'authority' : 'authorities'}, and every locked rule. The result becomes the selected working Last Frame automatically.</p></div></div>
         <label><span>What is different at the end?</span><textarea aria-label="Last Frame directions" maxLength={2500} value={direction} onChange={event => { setDirection(event.target.value); setRefinement(undefined) }} /></label>
@@ -1157,15 +1173,20 @@ function LastFrameCreationDialog({ shot, candidates, referenceCount, onClose, on
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
       <footer><button className="secondary" onClick={onClose}>Cancel</button><button className="primary feedback-regenerate-action" disabled={busy || refining || !ready} onClick={() => void generate()}>{refining ? 'Codex is refining…' : busy ? 'Creating Last Frame…' : ready ? `${autoRefine && !refinement ? 'Refine & generate' : 'Generate Last Frame'} with ${selected?.name ?? 'selected engine'}` : sketchRevision === undefined ? 'Loading continuity…' : `${selected?.name ?? 'Image engine'} needs setup`}<ArrowRight size={16} /></button></footer>
+      </>}
     </section>
   </Dialog>
 }
 
 function GenerationPacketProof({ summary }: { summary?: GenerationPreflightSummary }) {
+  const proof = useRef<HTMLDetailsElement>(null)
+  // A blocking check is the reason Generate is unavailable, and it usually
+  // lands below the fold of a long dialog. Bring it into view.
+  useEffect(() => { if (summary && !summary.ready) proof.current?.scrollIntoView({ block: 'nearest' }) }, [summary])
   if (!summary) return null
   const visual = summary.references.filter(reference => reference.willBindVisually).length
   const review = summary.checks.filter(check => check.state === 'Review').length
-  return <details className={`generation-packet-proof ${summary.ready ? 'ready' : 'blocked'}`} open={!summary.ready}>
+  return <details ref={proof} className={`generation-packet-proof ${summary.ready ? 'ready' : 'blocked'}`} open={!summary.ready}>
     <summary><span><strong>{summary.ready ? 'Generation packet verified' : 'Generation packet needs attention'}</strong><small>{summary.workflowName} · {visual}/{summary.references.length} visual references · {summary.deliveryWidth} × {summary.deliveryHeight} · {summary.colorSpace}</small></span><em>{summary.ready ? review ? `${review} review` : 'Ready' : 'Blocked'}</em></summary>
     <div>{summary.checks.map(check => <p key={`${check.state}-${check.title}`} className={`state-${check.state.toLowerCase()}`}><span>{check.state === 'Pass' ? <Check size={14} /> : <CircleAlert size={14} />}</span><span><strong>{check.title}</strong><small>{check.detail}</small></span></p>)}</div>
   </details>
@@ -1319,8 +1340,10 @@ function FeedbackRegenerationDialog({ shot, comments, references, initialDirecti
   </Dialog>
 }
 
-function VideoGenerationDialog({ shot, project, onSaveEndpoints, onClose, onQueued }: { shot: ShotSummary; project: StudioSnapshot['project']; onSaveEndpoints: (firstFrameCandidateId?: string, lastFrameCandidateId?: string) => Promise<void>; onClose: () => void; onQueued: () => void }) {
-  const [brief, setBrief] = useState(`${shot.action} Preserve the selected composition and camera: ${shot.camera}. Design a stable opening and a clean landing; prioritize believable motion over forcing an incompatible endpoint.`)
+function VideoGenerationDialog({ shot, project, motionHint, onSaveEndpoints, onClose, onQueued }: { shot: ShotSummary; project: StudioSnapshot['project']; motionHint?: string; onSaveEndpoints: (firstFrameCandidateId?: string, lastFrameCandidateId?: string) => Promise<void>; onClose: () => void; onQueued: () => void }) {
+  const [brief, setBrief] = useState(motionHint
+    ? `${motionHint} ${shot.action} Keep subjects, lighting and style identical between the two endpoints; the camera does the moving.`
+    : `${shot.action} Preserve the selected composition and camera: ${shot.camera}. Design a stable opening and a clean landing; prioritize believable motion over forcing an incompatible endpoint.`)
   const [quality, setQuality] = useState<Exclude<VideoQuality, 'Max'>>('Low')
   const [takeId] = useState(() => crypto.randomUUID())
   const [candidates, setCandidates] = useState<CandidateVersionSummary[]>([])
@@ -1365,6 +1388,9 @@ function VideoGenerationDialog({ shot, project, onSaveEndpoints, onClose, onQueu
     setPreflight(undefined)
   }
   const prepare = async () => { setBusy(true); setError(undefined); try { await onSaveEndpoints(firstFrameCandidateId, lastFrameCandidateId); const prepared = await studioApi.prepareVideoManifest(shot.id, { expectedShotVersion: shot.version, motionBrief: brief, firstFrameCandidateId, lastFrameCandidateId, confirmEndpointCompatibility: confirmed, quality, takeId }); setManifest(prepared); if (selectedAdapter) setPreflight(await studioApi.generationPreflight(prepared.id, selectedAdapter)) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not prepare the video packet.') } finally { setBusy(false) } }
+  // After a blocked check (a model file ComfyUI lacks, say) the artist fixes
+  // it outside Framewright and asks again; the frozen packet is unchanged.
+  const recheck = async () => { if (!manifest || !selectedAdapter) return; setBusy(true); setError(undefined); try { setPreflight(await studioApi.generationPreflight(manifest.id, selectedAdapter)) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not check the video packet again.') } finally { setBusy(false) } }
   const dispatch = async () => { if (!manifest || !selectedAdapter) return; setBusy(true); setError(undefined); try { const proof = await studioApi.generationPreflight(manifest.id, selectedAdapter); setPreflight(proof); if (!proof.ready) throw new Error(proof.checks.filter(check => check.state === 'Block').map(check => check.detail).join(' ')); await studioApi.dispatchManifest(manifest.id, manifest.manifestHash, selectedAdapter); onQueued() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not dispatch the video packet.'); setBusy(false) } }
   const selected = adapters.find(item => item.id === selectedAdapter)
   const hasFirstFrame = Boolean(firstAssetId)
@@ -1399,7 +1425,7 @@ function VideoGenerationDialog({ shot, project, onSaveEndpoints, onClose, onQueu
       <div className="adapter-picker" role="radiogroup" aria-label="Video generation engine">{adapters.map(adapter => <button type="button" role="radio" aria-checked={selectedAdapter === adapter.id} key={adapter.id} className={selectedAdapter === adapter.id ? 'selected' : ''} onClick={() => { setSelectedAdapter(adapter.id); setPreflight(undefined) }}><i><Film size={17} /></i><span><strong>{adapter.name}</strong><small>{adapter.detail}</small></span><em className={adapter.canDispatch ? 'ready' : 'protected'}>{adapter.canDispatch ? adapter.state : 'Setup'}</em></button>)}</div>
       {error && <p className="form-error" role="alert">{error}</p>}
     </div>
-    <footer><span /><span /><button className="secondary" onClick={onClose}>Cancel</button>{manifest ? <button className="primary" onClick={() => void dispatch()} disabled={busy || !selected?.canDispatch}>{busy ? 'Starting...' : selected?.canDispatch ? `Generate ${quality} pass` : 'Set up this engine'}</button> : <button className="primary" onClick={() => void prepare()} disabled={busy || !hasFirstFrame || !brief.trim() || Boolean(lastFrameCandidateId && !confirmed)}>{busy ? 'Preparing...' : !hasFirstFrame ? 'Choose a Start Frame' : `Review ${quality} settings`}</button>}</footer>
+    <footer><span /><span /><button className="secondary" onClick={onClose}>Cancel</button>{manifest && preflight?.ready === false ? <button className="primary" onClick={() => void recheck()} disabled={busy}>{busy ? 'Checking…' : 'Check again'}</button> : manifest ? <button className="primary" onClick={() => void dispatch()} disabled={busy || !selected?.canDispatch}>{busy ? 'Starting...' : selected?.canDispatch ? `Generate ${quality} pass` : 'Set up this engine'}</button> : <button className="primary" onClick={() => void prepare()} disabled={busy || !hasFirstFrame || !brief.trim() || Boolean(lastFrameCandidateId && !confirmed)}>{busy ? 'Preparing...' : !hasFirstFrame ? 'Choose a Start Frame' : `Review ${quality} settings`}</button>}</footer>
   </Dialog>
 }
 
@@ -1417,25 +1443,6 @@ function videoProxyCanvas(deliveryWidth: number, deliveryHeight: number, quality
   return { width, height }
 }
 
-function canvasToPngBlob(canvas: HTMLCanvasElement, failureMessage: string) {
-  return new Promise<Blob>((resolve, reject) => canvas.toBlob(value => {
-    if (value && value.size > 0) { resolve(value); return }
-    // WebKit can occasionally return a non-null zero-byte Blob for an
-    // otherwise valid canvas. Re-encode through its data URL before surfacing
-    // an error; a zero-byte guide must never reach the immutable manifest.
-    try {
-      const encoded = canvas.toDataURL('image/png')
-      const separator = encoded.indexOf(',')
-      if (separator < 0) throw new Error(failureMessage)
-      const binary = window.atob(encoded.slice(separator + 1))
-      const bytes = new Uint8Array(binary.length)
-      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-      const fallback = new Blob([bytes], { type: 'image/png' })
-      if (fallback.size === 0) throw new Error(failureMessage)
-      resolve(fallback)
-    } catch { reject(new Error(failureMessage)) }
-  }, 'image/png'))
-}
 
 function ShotCanvas({ shot, comments, references, displayVersion, readOnly, tool, placingReference, referenceDrop, onAddComment, onMoveComment, onResolveComment, onMarkupReady, onMarkupGuideReady, onCompositionGuideReady, deliveryWidth, deliveryHeight, videoUrl, previewCandidate, peeking = false, activeJob }: { shot: ShotSummary; comments: CommentSummary[]; references: ReferenceSummary[]; displayVersion: number; readOnly: boolean; tool: 'select' | 'draw' | 'comment'; placingReference?: ReferenceSummary; referenceDrop?: ReferenceSummary; onAddComment: (x: number, y: number) => void; onMoveComment: (id: string, x: number, y: number) => Promise<void>; onResolveComment: (id: string) => void; onMarkupReady: (ready: boolean) => void; onMarkupGuideReady: (guide?: { revision: number; exportAsset: () => Promise<string> }) => void; onCompositionGuideReady: (guide?: { exportAsset: () => Promise<string> }) => void; deliveryWidth: number; deliveryHeight: number; videoUrl?: string; previewCandidate?: CandidateVersionSummary; peeking?: boolean; activeJob?: JobSummary }) {
   const stageRef = useRef<HTMLDivElement>(null)
@@ -1603,11 +1610,11 @@ function ShotCanvas({ shot, comments, references, displayVersion, readOnly, tool
       : videoUrl && shot.stage === 'Video'
         ? <video className="shot-video" src={videoUrl} controls playsInline aria-label={`${shot.code} current video version ${shot.version}`} />
         : <ShotArtwork shot={shot} label={`${shot.code} current ${shot.stage} version ${shot.version}`} />}
-    {activeJob && <div className="frame-generation-state" role="status" aria-live="polite" data-testid="frame-generation-state">
-      <div className="generation-orbit"><LoaderCircle className="spin" /><Sparkles /></div>
-      <p className="eyebrow">{activeJob.backend}</p><h2>{activeJob.kind === 'Final still' ? 'Building the production frame' : activeJob.kind === 'Video' ? 'Rendering motion' : 'Generating a new draft'}</h2>
+    {activeJob && <div className={`frame-generation-state${activeJob.warning ? ' has-warning' : ''}`} role="status" aria-live="polite" data-testid="frame-generation-state">
+      <div className="generation-orbit">{activeJob.warning ? <CircleAlert /> : <><LoaderCircle className="spin" /><Sparkles /></>}</div>
+      <p className="eyebrow">{activeJob.backend}</p><h2>{activeJob.warning ? 'The render has stopped moving' : activeJob.kind === 'Final still' ? 'Building the production frame' : activeJob.kind === 'Video' ? 'Rendering motion' : 'Generating a new draft'}</h2>
       <p>{activeJob.phase}</p><div className="frame-job-progress" role="progressbar" aria-label={`${activeJob.kind} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={activeJob.progress}><i style={{ width: `${activeJob.progress}%` }} /></div>
-      <small>{activeJob.adapterId && ['openai-gpt-image', 'codex-imagegen'].includes(activeJob.adapterId) ? 'Precision image generation can take several minutes. This durable job keeps running if you leave the shot.' : 'This durable job keeps running if you leave the shot.'}</small>
+      <small>{activeJob.warning ?? (activeJob.adapterId && ['openai-gpt-image', 'codex-imagegen'].includes(activeJob.adapterId) ? 'Precision image generation can take several minutes. This durable job keeps running if you leave the shot.' : 'This durable job keeps running if you leave the shot.')}</small>
     </div>}
     {previewCandidate && <div className={`preview-banner ${peeking ? 'peeking' : ''}`}>{peeking ? `Live · v${shot.version}` : `Reviewing v${previewCandidate.version} · hold \\ for live`}</div>}
     <canvas ref={canvasRef} onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer} />
