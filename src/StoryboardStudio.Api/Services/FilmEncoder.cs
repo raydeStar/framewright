@@ -179,14 +179,7 @@ public sealed class FfmpegFilmEncoder(IConfiguration configuration) : IFilmEncod
         catch (JsonException) { return null; }
     }
 
-    private string? ResolveFfmpeg()
-    {
-        var configured = configuration["Studio:Tools:FfmpegPath"];
-        if (!string.IsNullOrWhiteSpace(configured)) { var full = Path.GetFullPath(configured); if (File.Exists(full)) return full; }
-        var executable = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(directory => Path.Combine(directory, executable)).FirstOrDefault(File.Exists);
-    }
+    private string? ResolveFfmpeg() => MediaTools.ResolveFfmpeg(configuration);
 
     private static string Bound(string value) => value.Length <= 1_000 ? value : value[..1_000] + "...";
 }

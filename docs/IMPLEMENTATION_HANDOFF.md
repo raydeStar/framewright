@@ -45,6 +45,25 @@ the loudness pass is killed on cancel like the encode. The killed render was
 reclaimed when its five-minute lease expired (the shared rule for every job
 type) and completed. Until then it showed as still rendering.
 
+Follow-ups from that pass:
+- Startup recovery for shot, asset-image, audio and film jobs treats a lease
+  as abandoned once the Framewright process on this workstation that took it
+  has exited (`GenerationJobLeaseService.IsAbandoned`). An unreadable owner, or
+  one from another workstation, still waits for the lease. In the isolated app,
+  a render killed mid-encode resumed at the next start and finished in seconds.
+  Model jobs are unchanged.
+- The dialog remembers its options per project in browser storage. Films are
+  numbered ("film 3"), so renders in the same minute are told apart.
+- The Sequence header fits at every width. The title shortens with an
+  ellipsis, the audio policy note hides below 1320 px, and Mix WAV, Voice
+  profiles and Music library become icons below 1180 px. Measured in the real
+  app at iPad Pro 11 portrait and landscape (WebKit), 1024 px Chromium and a
+  390 px phone. Before this, Add audio was off screen at 834 px and 1024 px.
+- FFmpeg and FFprobe lookup is shared (`MediaTools`).
+- The 12 moderate `npm audit` advisories are one `minimatch` issue reached
+  only through ESLint (development tooling). npm's fix downgrades ESLint, so
+  it is left as is.
+
 ## ComfyUI and H3 live feedback (2026-11-01)
 
 Found while making a short film end to end: an H3 Max render sat at "Rendering

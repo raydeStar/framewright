@@ -111,13 +111,7 @@ public sealed class AudioMasteringService(
         return $"FFmpeg mix failed: {Bound(error)}";
     }
 
-    internal string? ResolveFfmpeg()
-    {
-        var configured = configuration["Studio:Tools:FfmpegPath"];
-        if (!string.IsNullOrWhiteSpace(configured)) { var full = Path.GetFullPath(configured); if (File.Exists(full)) return full; }
-        var executable = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => Path.Combine(x, executable)).FirstOrDefault(File.Exists);
-    }
+    internal string? ResolveFfmpeg() => MediaTools.ResolveFfmpeg(configuration);
 
     private static string Bound(string value) => value.Length <= 1_000 ? value : value[..1_000] + "...";
 }

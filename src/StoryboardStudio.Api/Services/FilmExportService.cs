@@ -145,7 +145,7 @@ public sealed class FilmExportService(
             .Where(job => job.WorkType == WorkType && (job.State == JobState.Queued.ToString() || job.State == JobState.Running.ToString()))
             .ToListAsync(cancellationToken);
         var recoverable = new List<Guid>();
-        foreach (var job in jobs.Where(job => job.State == JobState.Queued.ToString() || job.LeaseExpiresAt is null || job.LeaseExpiresAt <= now))
+        foreach (var job in jobs.Where(job => job.State == JobState.Queued.ToString() || GenerationJobLeaseService.IsAbandoned(job, now)))
         {
             job.State = JobState.Queued.ToString(); job.Progress = 0; job.Phase = "Film render recovered after restart";
             job.LastHeartbeatAt = now; job.LeaseOwner = null; job.LeaseExpiresAt = null;
@@ -224,7 +224,9 @@ public sealed class FilmExportService(
             if (!probe.IsValid) throw new InvalidOperationException($"The rendered film does not match the delivery format. {probe.Detail}");
 
             await ReportAsync(job, 95, "Adding the film to the library", cancellationToken);
-            var fileName = $"{FileSafe(packet.Sequence)} film {timeProvider.GetLocalNow():yyyy-MM-dd HHmm}.mp4";
+            // Numbered, so two renders in the same minute are still told apart in the library.
+            var number = await db.Jobs.CountAsync(other => other.WorkType == WorkType && other.State == JobState.Completed.ToString() && other.Id != job.Id, cancellationToken) + 1;
+            var fileName = $"{FileSafe(packet.Sequence)} film {number} {timeProvider.GetLocalNow():yyyy-MM-dd HHmm}.mp4";
             AssetSummary film;
             await using (var stream = new FileStream(output, FileMode.Open, FileAccess.Read, FileShare.Read, 81_920, FileOptions.Asynchronous | FileOptions.SequentialScan))
             {

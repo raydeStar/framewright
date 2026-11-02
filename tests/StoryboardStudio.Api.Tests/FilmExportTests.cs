@@ -147,10 +147,15 @@ public sealed class FilmExportTests
 
         var film = (await client.GetFromJsonAsync<AssetSummary[]>("/api/assets"))!.Single(asset => asset.Id == job.OutputAssetId);
         Assert.Equal(AssetKind.Video, film.Kind);
-        Assert.Contains("The Impossible Wind film", film.DisplayName);
+        Assert.Contains("The Impossible Wind film 1 ", film.DisplayName);
         // Nothing about the cut itself changed.
         var shots = (await client.GetFromJsonAsync<StudioSnapshot>("/api/studio"))!.Shots;
         Assert.All(shots, shot => Assert.NotEqual(job.OutputAssetId, shot.CurrentAssetId));
+
+        // Rendering again, even within the same minute, gives a name of its own.
+        var again = await WaitAsync(client, (await (await client.PostAsJsonAsync("/api/export/film", new FilmExportRequest())).Content.ReadFromJsonAsync<JobSummary>())!.Id);
+        var second = (await client.GetFromJsonAsync<AssetSummary[]>("/api/assets"))!.Single(asset => asset.Id == again.OutputAssetId);
+        Assert.Contains("The Impossible Wind film 2 ", second.DisplayName);
     }
 
     [Fact]
@@ -191,13 +196,15 @@ public sealed class FilmExportTests
                 await FourShotsAsync(factory, client, project);
                 jobId = (await WaitAsync(client, (await (await client.PostAsJsonAsync("/api/export/film", new FilmExportRequest())).Content.ReadFromJsonAsync<JobSummary>())!.Id)).Id;
 
-                // As if the app died mid-encode: the job is still running and
-                // the attempt's folder, possibly still being written, remains.
+                // As if the app died mid-encode: the job is still running under
+                // an unexpired lease held by a process that has gone, and the
+                // attempt's folder, possibly still being written, remains.
                 using var scope = factory.Services.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
                 var job = await db.Jobs.IgnoreQueryFilters().SingleAsync(item => item.Id == jobId);
                 job.State = JobState.Running.ToString(); job.Progress = 40; job.CompletedAt = null; job.OutputAssetId = null;
-                job.LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+                job.LeaseOwner = $"{Environment.MachineName}:{await ExitedProcessIdAsync()}:crashed-worker";
+                job.LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(4);
                 await db.SaveChangesAsync();
                 stray = Path.Combine(factory.DataRoot, "exports", $"film-{jobId:N}-interrupted");
                 Directory.CreateDirectory(stray);
@@ -295,6 +302,15 @@ public sealed class FilmExportTests
         {
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
+    }
+
+    /// <summary>The id of a process that has already exited, as a crashed app's would be.</summary>
+    private static async Task<int> ExitedProcessIdAsync()
+    {
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet", "--version") { RedirectStandardOutput = true, UseShellExecute = false })!;
+        await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        return process.Id;
     }
 
     private static StudioApiFactory Factory(FakeFilmEncoder encoder)

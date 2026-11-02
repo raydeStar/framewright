@@ -212,6 +212,20 @@ public sealed class GenerationJobLeaseServiceTests
         WorkType = "Shot"
     };
 
+    [Fact]
+    public void ALeaseIsAbandonedOnlyWhenItsFramewrightProcessHasGone()
+    {
+        var here = Environment.MachineName;
+        Assert.True(GenerationJobLeaseService.OwnerHasExited($"{here}:4242:worker", _ => null));
+        Assert.True(GenerationJobLeaseService.OwnerHasExited($"{here}:4242:worker", _ => "notepad"));
+        Assert.False(GenerationJobLeaseService.OwnerHasExited($"{here}:4242:worker", _ => "dotnet"));
+        Assert.False(GenerationJobLeaseService.OwnerHasExited($"{here}:4242:worker", _ => "Framewright Studio"));
+        Assert.False(GenerationJobLeaseService.OwnerHasExited($"{here}:{Environment.ProcessId}:worker", _ => null));
+        Assert.False(GenerationJobLeaseService.OwnerHasExited("another-workstation:4242:worker", _ => null));
+        Assert.False(GenerationJobLeaseService.OwnerHasExited("unreadable", _ => null));
+        Assert.False(GenerationJobLeaseService.OwnerHasExited(null, _ => null));
+    }
+
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;

@@ -32,6 +32,40 @@ public sealed class GenerationJobLeaseService(
     // lease every minute while provider work is active.
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Whether a running job's lease no longer protects live work: it has
+    /// expired, or the Framewright process on this workstation that took it has
+    /// exited. A crash then resumes at the next start instead of after the lease.
+    /// </summary>
+    public static bool IsAbandoned(JobRecord job, DateTimeOffset now) =>
+        job.LeaseExpiresAt is null || job.LeaseExpiresAt <= now || OwnerHasExited(job.LeaseOwner, RunningProcessName);
+
+    /// <summary>
+    /// Owners are "machine:processId:worker". Only an owner on this machine whose
+    /// process is gone, or whose id now belongs to something that is not
+    /// Framewright, has exited; anything unreadable is treated as still alive.
+    /// </summary>
+    internal static bool OwnerHasExited(string? owner, Func<int, string?> processName)
+    {
+        var parts = owner?.Split(':');
+        if (parts is not { Length: 3 } || !string.Equals(parts[0], Environment.MachineName, StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var processId) || processId == Environment.ProcessId)
+            return false;
+        var name = processName(processId);
+        return name is null || !(name.Equals("dotnet", StringComparison.OrdinalIgnoreCase) || name.StartsWith("Framewright", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? RunningProcessName(int processId)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            return process.HasExited ? null : process.ProcessName;
+        }
+        catch (ArgumentException) { return null; }
+        catch (InvalidOperationException) { return null; }
+    }
+
     public async Task<GenerationJobLease?> ClaimNextAsync(
         string leaseOwner,
         CancellationToken cancellationToken)

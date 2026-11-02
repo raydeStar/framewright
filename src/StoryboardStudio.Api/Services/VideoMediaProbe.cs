@@ -192,11 +192,7 @@ internal sealed class FfprobeVideoMediaProbe(IConfiguration configuration) : IVi
             if (File.Exists(sibling)) return sibling;
         }
 
-        var executable = OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "")
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(directory => Path.Combine(directory, executable))
-            .FirstOrDefault(File.Exists);
+        return MediaTools.FindOnPath("ffprobe");
     }
 
     private static double? ReadRate(JsonElement parent, string name)

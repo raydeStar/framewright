@@ -193,7 +193,7 @@ public sealed class AudioGenerationJobService(
         var recoverable = new List<Guid>();
         foreach (var job in candidates.Where(job =>
                      job.State == JobState.Queued.ToString() ||
-                     job.LeaseExpiresAt is null || job.LeaseExpiresAt <= now))
+                     GenerationJobLeaseService.IsAbandoned(job, now)))
         {
             // An external provider may already have accepted this request. Neither
             // OpenAI speech nor arbitrary ComfyUI graphs promise a resumable query,

@@ -108,21 +108,7 @@ internal sealed class FfmpegSceneVideoEncoder(IConfiguration configuration) : IS
         }
     }
 
-    private string? ResolveExecutable()
-    {
-        var configured = configuration["Studio:Tools:FfmpegPath"];
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            var full = Path.GetFullPath(configured);
-            if (File.Exists(full)) return full;
-        }
-
-        var name = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-        return (Environment.GetEnvironmentVariable("PATH") ?? "")
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(directory => Path.Combine(directory, name))
-            .FirstOrDefault(File.Exists);
-    }
+    private string? ResolveExecutable() => MediaTools.ResolveFfmpeg(configuration);
 
     private static async Task<ProcessResult> RunAsync(
         string executable,

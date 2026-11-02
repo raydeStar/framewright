@@ -132,7 +132,7 @@ public sealed class AssetImageGenerationService(
             .ToListAsync(cancellationToken);
         var jobs = candidates.Where(x =>
             x.State == JobState.Queued.ToString() ||
-            x.LeaseExpiresAt is null || x.LeaseExpiresAt <= now).ToArray();
+            GenerationJobLeaseService.IsAbandoned(x, now)).ToArray();
         var recoverable = new List<Guid>();
         foreach (var job in jobs)
         {
