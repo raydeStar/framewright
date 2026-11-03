@@ -90,7 +90,7 @@ export interface ShotContractProposal { description: string; action: string; con
 export interface VisualAuditDecisionSummary { findingId: string; action: VisualReconciliationAction; moreDetails: string }
 export interface ShotVisualAuditSummary { id: string; shotId: string; shotVersion: number; assetId: string; assetHash: string; contractHash: string; state: string; gateState: string; summary: string; findings: VisualAuditFindingSummary[]; decisions: VisualAuditDecisionSummary[]; adoptedShotProposal?: ShotContractProposal; createdAt: string; completedAt?: string; scopeNote: string }
 export interface VisualReconciliationPlan { audit: ShotVisualAuditSummary; contractApplied: boolean; requiresImageGeneration: boolean; imageRoute?: VisualCorrectionRoute; generationDirection: string; updatedShot?: ShotSummary; detail: string }
-export type TimelineTrackKind = 'Dialogue' | 'Voice' | 'Music'
+export type TimelineTrackKind = 'Dialogue' | 'Voice' | 'Music' | 'Effects'
 export interface TimelineClipSummary { id: string; track: TimelineTrackKind; label: string; startFrame: number; durationFrames: number; trimStartSeconds: number; volume: number; assetId?: string; assetUrl?: string; voiceProfileId?: string; text: string; createdAt: string; updatedAt: string }
 export type VoiceProfileKind = 'ProviderPreset' | 'ConsentedClone'
 export interface VoiceProfileSummary { id: string; name: string; kind: VoiceProfileKind; provider: string; providerVoiceId: string; characterName: string; consentAttestation: string; consentedAt?: string; createdAt: string; characterReferenceId?: string; sampleAssetId?: string; sampleAssetUrl?: string }

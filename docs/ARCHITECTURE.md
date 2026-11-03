@@ -42,7 +42,7 @@ Supported production progression:
 
 `Sketch -> Draft candidate -> Ratified draft -> Final candidate -> Ratified final -> Video candidate -> Ratified video`
 
-Audio never enters visual generation. Dialogue, voices, and music remain separate timeline assets; optional FFmpeg mastering produces a separate WAV.
+Audio never enters visual generation. Dialogue, voices, sound effects, and music remain separate timeline assets; optional FFmpeg mastering produces a separate WAV.
 
 The Asset Library adds two project-scoped relational layers above the content-addressed store: `AssetCollectionRecord` supplies optional manual bins, and `AssetPlacementRecord` attaches one canonical asset to a shot as an `Image guide`, `Video take`, or `Audio cue`. Smart views are queries over media type, archive state, and authority records rather than duplicated folders. Asset archive is non-destructive and reversible; a collection can only be removed after its assets are returned to Unfiled.
 

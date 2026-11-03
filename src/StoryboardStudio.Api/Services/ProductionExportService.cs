@@ -124,11 +124,11 @@ public sealed class ProductionExportService(
             blockers.Add($"Bind a completed Max-quality video take matching the current project delivery format to {invalidVideoBindings.Length} shot(s): {string.Join(", ", invalidVideoBindings)}.");
 
         var silentDeliveryClips = timeline
-            .Where(x => (x.Track == nameof(TimelineTrackKind.Voice) || x.Track == nameof(TimelineTrackKind.Music)) && x.AssetId is null)
+            .Where(x => (x.Track == nameof(TimelineTrackKind.Voice) || x.Track == nameof(TimelineTrackKind.Music) || x.Track == nameof(TimelineTrackKind.Effects)) && x.AssetId is null)
             .Select(x => x.Label)
             .ToArray();
         if (silentDeliveryClips.Length > 0)
-            blockers.Add($"Attach rendered media to {silentDeliveryClips.Length} voice/music cue(s): {string.Join(", ", silentDeliveryClips)}.");
+            blockers.Add($"Attach rendered media to {silentDeliveryClips.Length} voice, music or effects cue(s): {string.Join(", ", silentDeliveryClips)}.");
 
         if (openNotes > 0) blockers.Add($"Resolve {openNotes} open review note(s).");
         if (activeJobs > 0) blockers.Add($"Wait for {activeJobs} active generation job(s) to reach a terminal state.");

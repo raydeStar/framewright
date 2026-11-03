@@ -1017,6 +1017,46 @@ test('timeline clips and the volume slider persist real edits', async ({ page },
   verifyConsole()
 })
 
+test('a sound effect gets its own lane and survives a reload', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  const suffix = testInfo.project.name === 'tablet' ? 'Tablet' : 'Desktop'
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Sequence' }).click()
+  await expect(page.getByText('Sound design', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Add audio' }).click()
+  const editor = page.getByRole('dialog', { name: 'Add audio clip' })
+  await editor.getByLabel('Track').selectOption('Effects')
+  await expect(editor.getByText(/never captioned or inserted into image or video prompts/)).toBeVisible()
+  await expect(editor.getByLabel('Reusable voice profile')).toHaveCount(0)
+  await editor.getByLabel('Clip label').fill(`Hauler fire ${suffix}`)
+  await editor.getByLabel('Dialogue / editorial note').fill('Whoomph, then crackling flames.')
+  const wav = Buffer.alloc(46)
+  wav.write('RIFF', 0); wav.writeUInt32LE(38, 4); wav.write('WAVE', 8); wav.write('fmt ', 12)
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24)
+  wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(2, 40)
+  await editor.locator('input[type="file"]').setInputFiles({ name: `fire-${suffix.toLowerCase()}.wav`, mimeType: 'audio/wav', buffer: wav })
+  await expect(editor.getByText('Audio imported into the content-addressed studio library.')).toBeVisible()
+  await editor.getByRole('button', { name: 'Save clip' }).click()
+
+  const clip = page.getByRole('button', { name: new RegExp(`Edit effects clip Hauler fire ${suffix}`) })
+  await expect(clip).toContainText('Media')
+  await page.reload()
+  await page.getByRole('button', { name: 'Sequence' }).click()
+  const reopened = page.getByRole('button', { name: new RegExp(`Edit effects clip Hauler fire ${suffix}`) })
+  await expect(reopened).toBeVisible()
+  // Desktop and tablet share one studio, so their clips overlap on the lane; open by keyboard like the voice journey.
+  await reopened.focus()
+  await reopened.press('Enter')
+  const savedEditor = page.getByRole('dialog', { name: 'Edit audio clip' })
+  await expect(savedEditor.getByLabel('Track')).toHaveValue('Effects')
+  await expect(savedEditor.getByLabel('Dialogue / editorial note')).toHaveValue('Whoomph, then crackling flames.')
+  await savedEditor.getByRole('button', { name: 'Cancel' }).click()
+  await expectNoHorizontalPageOverflow(page)
+  await expectNoSeriousAccessibilityViolations(page)
+  verifyConsole()
+})
+
 test('inline candidate review keeps versions, feedback, and tablet controls in place', async ({ page }, testInfo) => {
   const verifyConsole = failOnConsoleErrors(page, [/409 \(Conflict\)/])
   const shotCode = testInfo.project.name === 'tablet' ? 'SH-060' : 'SH-020'

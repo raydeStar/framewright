@@ -304,6 +304,77 @@ public sealed class FilmExportTests
         }
     }
 
+    [Fact]
+    public async Task AnEffectsCueIsItsOwnLaneStaysOutOfCaptionsAndNeedsSoundForProduction()
+    {
+        var encoder = new FakeFilmEncoder();
+        using var factory = Factory(encoder);
+        using var client = factory.CreateClient();
+        var project = await NewProjectAsync(client);
+        await FourShotsAsync(factory, client, project);
+        (await client.PostAsJsonAsync("/api/timeline/clips", new SaveTimelineClipRequest(TimelineTrackKind.Dialogue, "Remora", 378, 58, 0, 1, null, null, "He wants us to go in."))).EnsureSuccessStatusCode();
+        var placed = await client.PostAsJsonAsync("/api/timeline/clips", new SaveTimelineClipRequest(TimelineTrackKind.Effects, "Hauler fire", 120, 48, 0, 1, null, null, "Whoomph, then crackling flames."));
+        Assert.True(placed.IsSuccessStatusCode, await placed.Content.ReadAsStringAsync());
+
+        var effect = Assert.Single((await client.GetFromJsonAsync<TimelineClipSummary[]>("/api/timeline/clips"))!, clip => clip.Label == "Hauler fire");
+        Assert.Equal(TimelineTrackKind.Effects, effect.Track);
+        // A sound-design cue is not dialogue: it never becomes a subtitle.
+        var job = await WaitAsync(client, (await (await client.PostAsJsonAsync("/api/export/film", new FilmExportRequest(Captions: true))).Content.ReadFromJsonAsync<JobSummary>())!.Id);
+        Assert.Equal(JobState.Completed, job.State);
+        Assert.Contains("He wants us to go in.", encoder.Captions);
+        Assert.DoesNotContain("Whoomph", encoder.Captions);
+        // Like a music cue, a placed effect with no sound is unfinished delivery.
+        var readiness = (await client.GetFromJsonAsync<ProductionExportReadiness>("/api/export/production/status"))!;
+        Assert.Contains(readiness.Blockers, blocker => blocker.Contains("Hauler fire", StringComparison.Ordinal));
+    }
+
+    [FfmpegFact]
+    public async Task FfmpegMixesAnEffectIntoTheFilmAtItsFrame()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "framewright-film-effect", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var factory = new StudioApiFactory(Path.Combine(root, "data"), deleteDataRoot: true,
+                videoMediaProbe: new FfprobeVideoMediaProbe(new ConfigurationBuilder().Build()));
+            using var client = factory.CreateClient();
+            await NewProjectAsync(client, 320, 180);
+            await ShotAsync(client, "SH-A", 48, (await PictureAsync(client, "still.png", 320, 180)).Id);
+            var tonePath = Path.Combine(root, "whoomph.wav");
+            Ffmpeg($"-f lavfi -i sine=frequency=1000:sample_rate=48000 -t 0.5 \"{tonePath}\"");
+            var tone = await UploadAsync(client, "/api/assets/media?kind=Audio", tonePath, "audio/wav");
+            (await client.PostAsJsonAsync("/api/timeline/clips", new SaveTimelineClipRequest(TimelineTrackKind.Effects, "Whoomph", 24, 12, 0, 1, tone.Id, null, "The hauler goes up."))).EnsureSuccessStatusCode();
+
+            var queued = await client.PostAsJsonAsync("/api/export/film", new FilmExportRequest(Fades: false, Captions: true, NormalizeLoudness: false));
+            var job = await WaitAsync(client, (await queued.Content.ReadFromJsonAsync<JobSummary>())!.Id, TimeSpan.FromMinutes(2));
+            Assert.True(job.State == JobState.Completed, job.Error);
+
+            var film = Path.Combine(root, "film.mp4");
+            await File.WriteAllBytesAsync(film, await client.GetByteArrayAsync(job.OutputAssetUrl));
+            // Frame 24 at 24 fps: silence for the first second, the effect for the next half.
+            Assert.True(Level(film, 0.1, 0.8) < -60, "The film should be silent before the effect's frame.");
+            Assert.True(Level(film, 1.05, 1.45) > -30, "The effect should play from its frame.");
+            using var probe = JsonDocument.Parse(Run("ffprobe", $"-v error -show_streams -of json \"{film}\""));
+            Assert.DoesNotContain(probe.RootElement.GetProperty("streams").EnumerateArray(), stream => stream.GetProperty("codec_type").GetString() == "subtitle");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>RMS level in dBFS of a film's audio between two times; -inf (silence) reads as -200.</summary>
+    private static double Level(string film, double from, double to)
+    {
+        using var process = Process.Start(new ProcessStartInfo("ffmpeg", $"-v info -i \"{film}\" -map 0:a -af atrim={from.ToString(System.Globalization.CultureInfo.InvariantCulture)}:{to.ToString(System.Globalization.CultureInfo.InvariantCulture)},astats=metadata=0 -f null -")
+            { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false })!;
+        var report = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        var line = report.Split('\n').Last(text => text.Contains("RMS level dB:", StringComparison.Ordinal));
+        var value = line[(line.IndexOf("RMS level dB:", StringComparison.Ordinal) + 13)..].Trim();
+        return double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var level) ? level : -200;
+    }
+
     /// <summary>The id of a process that has already exited, as a crashed app's would be.</summary>
     private static async Task<int> ExitedProcessIdAsync()
     {

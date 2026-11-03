@@ -50,7 +50,7 @@ Everything runs on your machine. Projects, media, approvals, and credentials sta
 | **Director Mode** | Point at a frame or a scene object and describe what should change. A browser agent reads exactly what you are looking at and stages a proposal; you review it and apply it. Proposing never generates, saves, or approves anything. |
 | **3D scenes and previs** | Generate a static prop from a reference image, rig a humanoid, block out a scene from a reference, replace stand-ins with library models, and animate with clips and pivot motion. |
 | **Animated takes** | Render a scene still into ordinary shot review. Once it is approved, render an exact-frame animated take, or send approved frames to a first/last-frame video workflow. |
-| **Sound editorial** | Separate Dialogue, Voice, and Music lanes with sequence assembly and an independent WAV mix export, so picture and sound stay separately editable. **Export film** renders the cut as one MP4 with the mix, fades, normalized loudness, and soft captions from the dialogue text. |
+| **Sound editorial** | Separate Dialogue, Voice, Effects, and Music lanes with sequence assembly and an independent WAV mix export, so picture and sound stay separately editable. **Export film** renders the cut as one MP4 with the mix, fades, normalized loudness, and soft captions from the dialogue text. |
 | **Review and ship to a game** | Approve or send back any library asset (image, model, video, audio) with a reason, leave notes pinned to a spot, a moment, or a model view, and ship approved work to a game project as an engine-neutral bundle of files and a JSON manifest. |
 | **Local-first and recoverable** | SQLite plus content-addressed media, durable provider jobs that survive a restart, editable project export and import, and verified backups with an offline restore tool. |
 
@@ -108,7 +108,7 @@ Everything runs on your machine. Projects, media, approvals, and credentials sta
 | **Revision history**        | Version-bound notes and markup, version comparison, approval gates, and frozen generation manifests                                                               |
 | **3D scenes**               | Scene instances pinned to exact model revisions, stand-in replacement that keeps identity and placement, notes anchored on an object, and frozen scene snapshots   |
 | **Motion continuity**       | Project-locked resolution, approved versions as endpoints, optional last frames, take lineage, and encoded-video validation                                        |
-| **Sound editorial**         | Separate Dialogue, Voice, and Music lanes, plus an independent WAV mix export instead of baked-in sound, and a finished MP4 from **Export film**                  |
+| **Sound editorial**         | Separate Dialogue, Voice, Effects, and Music lanes, plus an independent WAV mix export instead of baked-in sound, and a finished MP4 from **Export film**                  |
 | **Operational recovery**    | Durable provider jobs, exact prompt ownership, restart recovery, verified backups, and atomic local installation                                                  |
 
 ## Image generation without reference roulette

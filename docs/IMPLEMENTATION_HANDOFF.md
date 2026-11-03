@@ -1,5 +1,30 @@
 # Framewright implementation handoff
 
+## Effects lane (2026-11-02)
+
+The Sequence had Dialogue, Voice and Music lanes only, so sound design (wind,
+a fire, a silence before a blast) had to be mixed outside the app. The
+timeline now has an **Effects** lane (`TimelineTrackKind.Effects`, stored as
+the track name like the others, so no schema change). An effect is an
+ordinary placed audio clip: it plays in the Sequence, is mixed into the WAV
+export and Export film, is never captioned, cannot cite a voice profile, and
+never reaches image or video generation. Production export treats a placed
+effect cue with no audio like a music cue with no audio, as a blocker.
+
+Evidence: two `FilmExportTests`. One shows the lane, captions and the
+production blocker. The other renders a film with real FFmpeg: an effect
+placed at frame 24 is silent before 1.0 s and plays from its frame, and the
+film has no subtitle stream. Dropping the blocker, captioning effects, or
+leaving effects out of the film mix each failed a test. A Playwright journey
+adds an effect with real audio through the clip dialog, sees it on its own
+lane, reloads, and reopens it, in desktop Chromium and iPad WebKit. In the
+real app at 1024×768 the fifth lane squeezed Music to 40 px, so the picture
+row now gives way first (at least 64 px) and every audio lane keeps at least
+46 px; all four measured 55 px there. The full browser suite passed (212, with
+6 desktop-only skips) and the backend suite 432 of 432 on a second run; the
+first run, made while the browser suite loaded the machine, had one failure
+that was not captured and did not recur.
+
 ## Max takes delivered in Rec.709 (2026-11-02)
 
 No real H3 Max take could be approved in a Rec.709 project. ComfyUI's
@@ -362,7 +387,7 @@ ComfyUI is an external service. Its workflows are supplied by an explicit filesy
 7. Edit the shot's authority packet and literal rules directly in the inspector. Attached references can be added or removed. On desktop, grab **Drag pin to frame** and drop it directly on the intended face, prop, wardrobe area, or region; the frame highlights as a live drop target and the resulting instruction cites the normalized location and exact authority version. Tapping the same control retains the keyboard/touch-safe click-to-place path. A reference card lists every spatial note, exact cited version, and normalized location, with a direct resolve action. Reference placements are labeled as such in Review rather than appearing as anonymous feedback. Removing an authority resolves its current-version spatial pins so stale guidance cannot survive invisibly. Rule edits use explicit Save/Reset actions, and editing either contract on a ratified shot preserves the ratified authority while opening a new working sketch version.
 8. Place version-bound comment pins and durable drawn markup, in the ordinary workspace or in full-view director mode. Switching candidates swaps the image, comments, and markup together; archived drafts are read-only until promoted, so feedback cannot silently land on the wrong revision. Intent, reference, rule, Codex, and edit-dialog controls are also locked while an archived candidate is displayed, preventing a live contract from being edited under an old image. The inline candidate bar exposes **Compare to latest**, **Promote draft**, and **Delete draft** without requiring a workspace change. **Regenerate from feedback** presents three explicit engines: the selected ComfyUI workflow for the fast local route, Codex ImageGen for a ChatGPT-authenticated MCP handoff, and an optional direct OpenAI API lane. Every lane freezes the current candidate (or temporary markup composite), pinned notes, exact authorities, and constraints; none silently substitutes the original sketch. Codex directing advice has a **Make these changes** action that opens the same reviewable revision surface. Promotion copies an earlier image forward as a new working head without rewriting either historical revision; deletion is limited to non-current, non-ratified attempts. Resolve notes and ratify the exact current candidate.
 9. Promote a ratified draft to a precision final. A ratified final with a real image asset can freeze a visual-only video packet.
-10. Reorder named shot slots on the sequence timeline. Add dialogue, voice, and music clips as separate durable records.
+10. Reorder named shot slots on the sequence timeline. Add dialogue, voice, effects, and music clips as separate durable records.
 11. Attach recorded audio or synthesize a saved Voice clip through a protected preset-voice route. Review playback and decoded waveform evidence. Browser decoding is capped at 8 MB per source; larger media keeps streaming playback and uses an explicitly labeled guide waveform rather than consuming unbounded browser memory.
 12. Export a production package and, when FFmpeg is available and media exists, a separate 48 kHz/24-bit WAV editorial mix, or render the whole cut as one finished MP4 with **Export film**.
 
@@ -385,7 +410,7 @@ The UI uses five persistent rail workspaces plus a focused authority workspace:
 - **Director mode:** a full-view state of the Shot workspace, not a separate screen. The rails, context bar, version rail, inspector, and video endpoint strip step aside so the frame takes the whole workstation at the exact delivery aspect; the tools, candidate review bar, Compare, and Exit stay in reach. Because only the shell restyles, the displayed revision, pins, unsaved markup, and unsaved inspector drafts survive entering and leaving it. Escape leaves full view once any modal on top has had its own press, and leaving the Shot workspace always leaves full view. Browser tools read the same state: `get_director_context` reports the exact revision on screen with a state token, and `observe_current_frame` resolves that revision's picture only while the token still matches, so an agent can never describe one frame while looking at another. Both are read-only and neither opens a panel by itself. A browser agent can also stage a bounded edit proposal against the context it read, naming the pinned notes it targets and the shot rules it preserves; the artist rejects it, or accepts and applies it once into the ordinary revision surface. Applying records a single application, refuses a shot that has moved on, and authorizes no provider - the existing Generate action still does that.
 - **Authority library:** a project-local working shelf plus a searchable global vault. Importing creates an immutable, provenance-linked project copy; only local copies are offered to shots. Promoting into the global vault is explicit so experimental assets cannot pollute every project.
 - **Review:** version comparison, continuity preflight, feedback disposition, ratification gate.
-- **Sequence:** picture slots, playhead, durable dialogue/voice/music lanes, playback, shot reorder, package/mix export.
+- **Sequence:** picture slots, playhead, durable dialogue/voice/effects/music lanes, playback, shot reorder, package/mix export.
 
 Production UI rules already enforced:
 
@@ -444,7 +469,7 @@ Persisted entities include:
 - `AssetCollectionRecord`: project-scoped manual bin name, color, and sort order; deleting an empty collection never deletes media.
 - `AssetPlacementRecord`: unique asset/shot/role attachment for image guides, video takes, and audio cues.
 - `CommentRecord`: normalized pin geometry bound to a shot version, optionally citing an exact reference ID and authority version for spatial reference placement.
-- `TimelineClipRecord`: separate dialogue/voice/music timing, trim, volume, text, audio asset, and voice profile.
+- `TimelineClipRecord`: separate dialogue/voice/effects/music timing, trim, volume, text, audio asset, and voice profile.
 - `VoiceProfileRecord`: preset or consented-clone provider identity, linked Character authority, approved sample asset, and consent attestation, never credentials.
 
 Concurrency tokens prevent stale project, shot, sketch, markup, and timeline edits from overwriting newer work.

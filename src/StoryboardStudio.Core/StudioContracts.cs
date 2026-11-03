@@ -618,7 +618,10 @@ public enum TimelineTrackKind
 {
     Dialogue,
     Voice,
-    Music
+    Music,
+    // Sound design: mixed into the editorial audio and the film like any other
+    // placed clip, never captioned and never sent to image or video generation.
+    Effects
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
