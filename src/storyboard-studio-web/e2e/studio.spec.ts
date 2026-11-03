@@ -1017,6 +1017,15 @@ test('timeline clips and the volume slider persist real edits', async ({ page },
   verifyConsole()
 })
 
+/** One silent 8 kHz sample: a real WAV the studio imports as audio. */
+function tinyWav() {
+  const wav = Buffer.alloc(46)
+  wav.write('RIFF', 0); wav.writeUInt32LE(38, 4); wav.write('WAVE', 8); wav.write('fmt ', 12)
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24)
+  wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(2, 40)
+  return wav
+}
+
 test('a sound effect gets its own lane and survives a reload', async ({ page }, testInfo) => {
   const verifyConsole = failOnConsoleErrors(page)
   const suffix = testInfo.project.name === 'tablet' ? 'Tablet' : 'Desktop'
@@ -1031,11 +1040,7 @@ test('a sound effect gets its own lane and survives a reload', async ({ page }, 
   await expect(editor.getByLabel('Reusable voice profile')).toHaveCount(0)
   await editor.getByLabel('Clip label').fill(`Hauler fire ${suffix}`)
   await editor.getByLabel('Dialogue / editorial note').fill('Whoomph, then crackling flames.')
-  const wav = Buffer.alloc(46)
-  wav.write('RIFF', 0); wav.writeUInt32LE(38, 4); wav.write('WAVE', 8); wav.write('fmt ', 12)
-  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24)
-  wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(2, 40)
-  await editor.locator('input[type="file"]').setInputFiles({ name: `fire-${suffix.toLowerCase()}.wav`, mimeType: 'audio/wav', buffer: wav })
+  await editor.locator('input[type="file"]').setInputFiles({ name: `fire-${suffix.toLowerCase()}.wav`, mimeType: 'audio/wav', buffer: tinyWav() })
   await expect(editor.getByText('Audio imported into the content-addressed studio library.')).toBeVisible()
   await editor.getByRole('button', { name: 'Save clip' }).click()
 
@@ -1045,7 +1050,7 @@ test('a sound effect gets its own lane and survives a reload', async ({ page }, 
   await page.getByRole('button', { name: 'Sequence' }).click()
   const reopened = page.getByRole('button', { name: new RegExp(`Edit effects clip Hauler fire ${suffix}`) })
   await expect(reopened).toBeVisible()
-  // Desktop and tablet share one studio, so their clips overlap on the lane; open by keyboard like the voice journey.
+  // Open by keyboard like the voice journey; the stacking journey below opens clips by tap.
   await reopened.focus()
   await reopened.press('Enter')
   const savedEditor = page.getByRole('dialog', { name: 'Edit audio clip' })
@@ -1055,6 +1060,45 @@ test('a sound effect gets its own lane and survives a reload', async ({ page }, 
   await expectNoHorizontalPageOverflow(page)
   await expectNoSeriousAccessibilityViolations(page)
   verifyConsole()
+})
+
+test('overlapping sound effects stack into rows and each opens with a tap', async ({ page }, testInfo) => {
+  const verifyConsole = failOnConsoleErrors(page)
+  const suffix = testInfo.project.name === 'tablet' ? 'Tablet' : 'Desktop'
+  const headers = { 'X-Storyboard-Studio': '1' }
+  const asset = await (await page.request.post('/api/assets/media?kind=Audio', { headers, multipart: { file: { name: `bed-${suffix.toLowerCase()}.wav`, mimeType: 'audio/wav', buffer: tinyWav() } } })).json()
+  const created: { id: string }[] = []
+  // An ambience bed and a spot effect over its start, as a sound designer lays them.
+  for (const [label, startFrame, durationFrames] of [[`Air bed ${suffix}`, 0, 96], [`Sail ${suffix}`, 24, 24]] as const) {
+    const response = await page.request.post('/api/timeline/clips', { headers, data: { track: 'Effects', label, startFrame, durationFrames, trimStartSeconds: 0, volume: 1, assetId: asset.id, voiceProfileId: null, text: '' } })
+    expect(response.ok()).toBe(true)
+    created.push(await response.json())
+  }
+  try {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Sequence' }).click()
+    const bed = page.getByRole('button', { name: `Edit effects clip Air bed ${suffix}` })
+    const sail = page.getByRole('button', { name: `Edit effects clip Sail ${suffix}` })
+    await expect(bed).toBeVisible()
+    await expect(sail).toBeVisible()
+    const bedBox = (await bed.boundingBox())!
+    const sailBox = (await sail.boundingBox())!
+    // They overlap in time, so they sit on separate rows: neither covers the other, and both stay tappable.
+    expect(bedBox.y + bedBox.height <= sailBox.y || sailBox.y + sailBox.height <= bedBox.y).toBe(true)
+    expect(Math.min(bedBox.height, sailBox.height)).toBeGreaterThanOrEqual(18)
+    for (const [clip, label] of [[sail, `Sail ${suffix}`], [bed, `Air bed ${suffix}`]] as const) {
+      if (testInfo.project.name === 'tablet') await clip.tap()
+      else await clip.click()
+      const editor = page.getByRole('dialog', { name: 'Edit audio clip' })
+      await expect(editor.getByLabel('Clip label')).toHaveValue(label)
+      await editor.getByRole('button', { name: 'Cancel' }).click()
+    }
+    await expectNoHorizontalPageOverflow(page)
+    await expectNoSeriousAccessibilityViolations(page)
+    verifyConsole()
+  } finally {
+    for (const clip of created) await page.request.delete(`/api/timeline/clips/${clip.id}`, { headers })
+  }
 })
 
 test('inline candidate review keeps versions, feedback, and tablet controls in place', async ({ page }, testInfo) => {

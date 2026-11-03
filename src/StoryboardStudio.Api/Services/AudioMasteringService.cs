@@ -73,7 +73,7 @@ public sealed class AudioMasteringService(
 
     /// <summary>
     /// Mixes placed clips onto one timeline of exactly <paramref name="durationSeconds"/>,
-    /// padded with silence, into a 24-bit WAV. Returns why it failed, or null.
+    /// padded with silence, into a 24-bit stereo WAV. Returns why it failed, or null.
     /// Shared by the WAV export and the film render, so both hear the same mix.
     /// </summary>
     internal static async Task<string?> RenderMixAsync(
@@ -92,7 +92,10 @@ public sealed class AudioMasteringService(
             var length = (input.DurationFrames / (double)fps).ToString("0.###", CultureInfo.InvariantCulture);
             var volume = input.Volume.ToString("0.###", CultureInfo.InvariantCulture);
             var delay = Math.Max(0, (int)Math.Round(input.StartFrame * 1000d / fps));
-            return $"[{index}:a]atrim=start={trim}:duration={length},asetpts=PTS-STARTPTS,volume={volume},adelay={delay}:all=1[a{index}]";
+            // Every clip joins as stereo. amix takes its layout from its first input, so a mono line
+            // that starts first would otherwise fold stereo music and effects to mono. A mono clip
+            // plays centred, 3 dB down in each channel, as it already did beside a stereo clip.
+            return $"[{index}:a]atrim=start={trim}:duration={length},asetpts=PTS-STARTPTS,aformat=channel_layouts=stereo,volume={volume},adelay={delay}:all=1[a{index}]";
         }).ToList();
         var duration = durationSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         filters.Add($"{string.Concat(inputs.Select((_, i) => $"[a{i}]"))}amix=inputs={inputs.Count}:duration=longest:normalize=0,apad=whole_dur={duration},atrim=duration={duration},alimiter=limit=0.95[out]");

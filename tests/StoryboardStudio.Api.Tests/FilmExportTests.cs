@@ -363,14 +363,74 @@ public sealed class FilmExportTests
         }
     }
 
+    [FfmpegFact]
+    public async Task FfmpegMixStaysStereoWhenAMonoLineStartsFirst()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "framewright-mix-layout", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var factory = new StudioApiFactory(Path.Combine(root, "data"), deleteDataRoot: true);
+            using var client = factory.CreateClient();
+            await NewProjectAsync(client, 320, 180);
+            await ShotAsync(client, "SH-A", 48, (await PictureAsync(client, "still.png", 320, 180)).Id);
+            // A mono line at frame 0, then a stereo gust heard only on the left from frame 24.
+            var linePath = Path.Combine(root, "line.wav");
+            Ffmpeg($"-f lavfi -i sine=frequency=440:sample_rate=48000 -t 0.5 -ac 1 \"{linePath}\"");
+            var gustPath = Path.Combine(root, "gust.wav");
+            Ffmpeg($"-f lavfi -i sine=frequency=1000:sample_rate=48000 -t 0.5 -af \"pan=stereo|c0=c0|c1=0*c0\" \"{gustPath}\"");
+            var line = await UploadAsync(client, "/api/assets/media?kind=Audio", linePath, "audio/wav");
+            var gust = await UploadAsync(client, "/api/assets/media?kind=Audio", gustPath, "audio/wav");
+            (await client.PostAsJsonAsync("/api/timeline/clips", new SaveTimelineClipRequest(TimelineTrackKind.Dialogue, "Mostly", 0, 12, 0, 1, line.Id, null, "Mostly."))).EnsureSuccessStatusCode();
+            (await client.PostAsJsonAsync("/api/timeline/clips", new SaveTimelineClipRequest(TimelineTrackKind.Effects, "Gust", 24, 12, 0, 1, gust.Id, null, "Wind from the left."))).EnsureSuccessStatusCode();
+
+            var mix = Path.Combine(root, "mix.wav");
+            await File.WriteAllBytesAsync(mix, await client.GetByteArrayAsync("/api/export/audio-mix"));
+            var source = ChannelLevels(linePath, 0.1, 0.4).Single();
+            var lineLevels = ChannelLevels(mix, 0.1, 0.4);
+            var gustLevels = ChannelLevels(mix, 1.1, 1.4);
+            // Starting first does not fold the mix to mono: the line plays centred, 3 dB down in each channel,
+            Assert.Equal(2, lineLevels.Length);
+            Assert.All(lineLevels, level => Assert.InRange(level, source - 3.5, source - 2.5));
+            // and the stereo gust keeps its side.
+            Assert.True(gustLevels[0] > -30, $"The gust should play on the left; it measured {gustLevels[0]:0.0} dB.");
+            Assert.True(gustLevels[1] < -60, $"The gust should stay off the right; it measured {gustLevels[1]:0.0} dB.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>RMS level in dBFS of a film's audio between two times; -inf (silence) reads as -200.</summary>
     private static double Level(string film, double from, double to)
+        => ParseDb(Astats(film, from, to).Last(text => text.Contains("RMS level dB:", StringComparison.Ordinal)));
+
+    /// <summary>RMS level in dBFS of each channel between two times.</summary>
+    private static double[] ChannelLevels(string media, double from, double to)
     {
-        using var process = Process.Start(new ProcessStartInfo("ffmpeg", $"-v info -i \"{film}\" -map 0:a -af atrim={from.ToString(System.Globalization.CultureInfo.InvariantCulture)}:{to.ToString(System.Globalization.CultureInfo.InvariantCulture)},astats=metadata=0 -f null -")
+        var levels = new List<double>();
+        var inChannel = false;
+        foreach (var text in Astats(media, from, to))
+        {
+            if (text.Contains("] Channel: ", StringComparison.Ordinal)) inChannel = true;
+            else if (text.Contains("] Overall", StringComparison.Ordinal)) inChannel = false;
+            else if (inChannel && text.Contains("RMS level dB:", StringComparison.Ordinal)) levels.Add(ParseDb(text));
+        }
+        return [.. levels];
+    }
+
+    private static string[] Astats(string media, double from, double to)
+    {
+        using var process = Process.Start(new ProcessStartInfo("ffmpeg", $"-v info -i \"{media}\" -map 0:a -af atrim={from.ToString(System.Globalization.CultureInfo.InvariantCulture)}:{to.ToString(System.Globalization.CultureInfo.InvariantCulture)},astats=metadata=0 -f null -")
             { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false })!;
         var report = process.StandardError.ReadToEnd();
         process.WaitForExit();
-        var line = report.Split('\n').Last(text => text.Contains("RMS level dB:", StringComparison.Ordinal));
+        return report.Split('\n');
+    }
+
+    private static double ParseDb(string line)
+    {
         var value = line[(line.IndexOf("RMS level dB:", StringComparison.Ordinal) + 13)..].Trim();
         return double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var level) ? level : -200;
     }

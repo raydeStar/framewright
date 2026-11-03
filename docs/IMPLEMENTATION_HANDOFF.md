@@ -1,5 +1,42 @@
 # Framewright implementation handoff
 
+## Stacked lanes and a stereo mix (2026-11-02)
+
+Laying real sound design on the Effects lane exposed two Sequence defects.
+
+**Overlapping clips covered each other.** A lane drew every clip on one row,
+so an ambience bed under spot effects hid them and their labels overprinted.
+`timelineLanes.ts` now gives each clip the first row where it clears what is
+already drawn there (judged on the drawn width, since short clips are drawn at
+least 3% wide), and a lane grows a row only when nothing fits. The timeline
+grid gives a stacked lane height in proportion to its rows, with a floor of
+46 px plus 18 px a row so a three-row lane still fits at 1024×768; if many rows
+ever outgrow the screen, the grid scrolls instead of clipping lanes. Short
+rows drop the "Media · volume" line.
+
+**The mix's channels depended on clip order.** FFmpeg's `amix` takes its
+layout from its first input, and the mix orders inputs by start frame, so a
+mono line that started first folded stereo music and effects to mono. Every
+clip is now converted to stereo before mixing, which the WAV export and Export
+film share. A mono clip plays centred, 3 dB down in each channel, as it already
+did beside a stereo clip. A project whose clips are all mono now gets a stereo
+mix with the same measured loudness, which plays about 3 dB quieter than the
+old mono file did on a player that copies mono to both speakers. Export film's
+loudness normalization measures the new stereo mix at its target.
+
+Evidence: unit tests for the row assignment, including this film's eight
+effects; `FilmExportTests.FfmpegMixStaysStereoWhenAMonoLineStartsFirst`
+(a mono line at frame 0 measures 3 dB down in both channels and a left-only
+effect stays left); a Playwright journey that lays a bed and a spot effect over
+it, checks that neither covers the other, and opens each by click on desktop
+Chromium and by tap on iPad WebKit. Removing the stereo conversion made the mix
+mono and failed the FFmpeg test; drawing every clip on one row failed the
+journey on both devices. In the real app the Skychasers film's eight effects sit
+on three rows with no overlap (49 px rows at 1440×960, 24 px at 1024×768 with
+Music still 46 px and nothing scrolling), and its mix came out unchanged (no
+sample differed by more than -97 dBFS). The full browser suite passed (214, with
+6 desktop-only skips) and the backend suite 433 of 433.
+
 ## Effects lane (2026-11-02)
 
 The Sequence had Dialogue, Voice and Music lanes only, so sound design (wind,
