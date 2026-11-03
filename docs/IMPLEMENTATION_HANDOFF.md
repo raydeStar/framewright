@@ -1,5 +1,30 @@
 # Framewright implementation handoff
 
+## Max takes delivered in Rec.709 (2026-11-02)
+
+No real H3 Max take could be approved in a Rec.709 project. ComfyUI's
+`SaveVideo` node converts frames to YUV with BT.601 and writes no colour tags,
+and approval requires tagged, limited-range BT.709. The Max import checked
+size, rate and frame count but not colour, and the API tests' probe accepts
+every file, so the refusal appeared only at Approve, after the render.
+
+A Max take for a Rec.709 project that is not already tagged BT.709 is now
+converted once on import (`FfmpegVideoDeliveryConverter`): read with the matrix
+it was written with (BT.601 limited when untagged), converted to BT.709,
+tagged in the stream, and probed against the full delivery contract before it
+becomes the shot's production take. The provider's file stays in the asset
+store, and a `VideoConvertedForDelivery` audit event names both assets. A take
+already tagged BT.709 is left as it is, and a failed conversion fails the job.
+
+Evidence: `MaxDeliveryConformTests` runs a Max promotion through the worker
+with real FFmpeg (skipped, not passed, without it). An untagged BT.601 take
+becomes tagged BT.709 with its frame count and colour intact and can be
+approved. Converting by re-tagging alone shifted the test green from 32,192,64
+to 20,169,60 and failed it. The backend suite passed 430 of 430. In an isolated
+app against the stand-in ComfyUI writing untagged BT.601, a 1920×1080 Max take
+of 48 frames was converted, approved, and matched the provider's colours within
+five levels at four sample points.
+
 ## Export film (2026-11-02)
 
 Finishing the Skychasers film needed scripts outside the app to cut the takes

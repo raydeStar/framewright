@@ -42,7 +42,8 @@ public sealed record GenerationExecutionContext(
     bool IsCurrentFrameEdit = false,
     int? VideoFramesPerSecond = null,
     int? VideoFrameCount = null,
-    GenerationAttentionReporter? Attention = null)
+    GenerationAttentionReporter? Attention = null,
+    string? DeliveryColorSpace = null)
 {
     public Task ReportAsync(int percent, string phase, CancellationToken cancellationToken)
         => Report?.Invoke(percent, phase, null, cancellationToken) ?? Task.CompletedTask;

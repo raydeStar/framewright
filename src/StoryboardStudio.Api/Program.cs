@@ -66,6 +66,7 @@ builder.Services.AddScoped<StudioRepository>();
 builder.Services.AddSingleton<ICompilerSkeletonProfiles, CompilerSkeletonProfiles>();
 builder.Services.AddScoped<AssetStore>();
 builder.Services.AddSingleton<IVideoMediaProbe, FfprobeVideoMediaProbe>();
+builder.Services.AddSingleton<IVideoDeliveryConverter, FfmpegVideoDeliveryConverter>();
 builder.Services.AddScoped<AuthorityLibraryService>();
 builder.Services.AddScoped<ContinuityService>();
 builder.Services.AddScoped<WebMcpStoryboardService>();

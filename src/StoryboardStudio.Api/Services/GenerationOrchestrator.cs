@@ -101,6 +101,7 @@ public sealed class GenerationOrchestrator(
     IProjectScope projectScope,
     RuntimeReadinessService readiness,
     IVideoMediaProbe videoMediaProbe,
+    IVideoDeliveryConverter videoDeliveryConverter,
     TimeProvider timeProvider)
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
@@ -417,23 +418,32 @@ public sealed class GenerationOrchestrator(
                 : await assets.ImportGeneratedMediaAsync(outputContent, output.FileName, output.MimeType, outputContent.CanSeek ? outputContent.Length : null, output.Kind, cancellationToken);
             if (imported.Kind != RepositoryResultKind.Ok || imported.Value is null)
                 throw new GenerationDispatchException(imported.Error ?? "The generated output failed local image validation.", output.ProviderCallMade, output.ProviderRequestId);
+            var outputAsset = imported.Value;
 
             if (output.Kind == AssetKind.Video && context.VideoQuality == VideoQuality.Max)
             {
                 if (context.DeliveryWidth is not > 0 || context.DeliveryHeight is not > 0 ||
                     context.VideoFramesPerSecond is not > 0 || context.VideoFrameCount is not > 0)
                     throw new GenerationDispatchException("The Max video packet is missing its frozen delivery dimensions or timing.", output.ProviderCallMade, output.ProviderRequestId);
-                var importedVideo = await db.Assets.SingleAsync(x => x.Id == imported.Value.Id, cancellationToken);
-                var mediaValidation = await videoMediaProbe.ValidateAsync(
-                    assets.ResolveContentPath(importedVideo),
-                    new VideoMediaExpectation(
-                        context.DeliveryWidth.Value,
-                        context.DeliveryHeight.Value,
-                        context.VideoFramesPerSecond.Value,
-                        context.VideoFrameCount.Value),
-                    cancellationToken);
+                var importedVideo = await db.Assets.SingleAsync(x => x.Id == outputAsset.Id, cancellationToken);
+                var expectation = new VideoMediaExpectation(
+                    context.DeliveryWidth.Value,
+                    context.DeliveryHeight.Value,
+                    context.VideoFramesPerSecond.Value,
+                    context.VideoFrameCount.Value);
+                var mediaValidation = await videoMediaProbe.ValidateAsync(assets.ResolveContentPath(importedVideo), expectation, cancellationToken);
                 if (!mediaValidation.IsValid)
                     throw new GenerationDispatchException($"The Max render did not satisfy its frozen delivery contract. {mediaValidation.Detail}", output.ProviderCallMade, output.ProviderRequestId);
+                // A Rec.709 delivery also needs tagged BT.709, which approval checks.
+                // A provider that writes none is converted once here, so the take
+                // the artist reviews is the one that is approved.
+                if (string.Equals(context.DeliveryColorSpace, "Rec.709", StringComparison.OrdinalIgnoreCase))
+                {
+                    var delivery = expectation with { ColorSpace = context.DeliveryColorSpace };
+                    var tagged = await videoMediaProbe.ValidateAsync(assets.ResolveContentPath(importedVideo), delivery, cancellationToken);
+                    if (!tagged.IsValid)
+                        outputAsset = await ConvertForDeliveryAsync(job.Id, importedVideo, tagged.Metadata ?? mediaValidation.Metadata, delivery, output, cancellationToken);
+                }
             }
 
             var shot = await db.Shots.SingleAsync(x => x.Id == job.ShotId, cancellationToken);
@@ -450,13 +460,13 @@ public sealed class GenerationOrchestrator(
                 shot.Version = Math.Max(shot.Version, highestVersion) + 1;
                 shot.Stage = manifest.Purpose switch { nameof(GenerationPurpose.Final) => ShotStage.Final.ToString(), nameof(GenerationPurpose.Video) => ShotStage.Video.ToString(), _ => ShotStage.Draft.ToString() };
                 shot.Approval = ApprovalState.Working.ToString();
-                if (output.Kind == AssetKind.Image) shot.CurrentAssetId = imported.Value.Id;
+                if (output.Kind == AssetKind.Image) shot.CurrentAssetId = outputAsset.Id;
                 shot.ProductionVideoJobId = null;
                 shot.ProductionVideoAssetId = null;
                 if (output.Kind == AssetKind.Video && context.VideoQuality == VideoQuality.Max)
                 {
                     shot.ProductionVideoJobId = job.Id;
-                    shot.ProductionVideoAssetId = imported.Value.Id;
+                    shot.ProductionVideoAssetId = outputAsset.Id;
                 }
                 shot.ContinuityState = "Pending";
                 shot.UpdatedAt = now;
@@ -468,7 +478,7 @@ public sealed class GenerationOrchestrator(
                     Stage = shot.Stage,
                     Approval = shot.Approval,
                     IsCurrent = true,
-                    AssetId = output.Kind == AssetKind.Image ? imported.Value.Id : shot.CurrentAssetId,
+                    AssetId = output.Kind == AssetKind.Image ? outputAsset.Id : shot.CurrentAssetId,
                     SourceManifestId = manifest.Id,
                     CreatedAt = now
                 };
@@ -490,19 +500,19 @@ public sealed class GenerationOrchestrator(
                     Id = Guid.NewGuid(), ShotId = shot.Id, Version = variantVersion,
                     Stage = manifest.Purpose == nameof(GenerationPurpose.Final) ? ShotStage.Final.ToString() : ShotStage.Draft.ToString(),
                     Approval = ApprovalState.Working.ToString(), IsCurrent = false,
-                    AssetId = imported.Value.Id, SourceManifestId = manifest.Id,
+                    AssetId = outputAsset.Id, SourceManifestId = manifest.Id,
                     CreatedAt = now, SupersededAt = now
                 });
                 await CarryOpenFeedbackForwardAsync(shot.Id, manifest.ShotVersion, variantVersion, now, cancellationToken);
                 siblingCandidate = true;
             }
-            job.OutputAssetId = imported.Value.Id;
+            job.OutputAssetId = outputAsset.Id;
             job.ProviderRequestId = output.ProviderRequestId;
             job.State = JobState.Completed.ToString(); job.Progress = 100;
             job.Phase = promoted ? "Candidate ready for review" : siblingCandidate ? "Variant ready for comparison" : "Output ready; shot changed after dispatch";
             job.CompletedAt = timeProvider.GetUtcNow(); job.LastHeartbeatAt = job.CompletedAt;
             manifest.State = ManifestState.Completed.ToString(); manifest.ProviderCallMade = output.ProviderCallMade;
-            AddAudit("GenerationCompleted", "GenerationManifest", manifest.Id.ToString(), new { job.Id, outputAssetId = imported.Value.Id, promoted, output.ProviderCallMade, output.ProviderRequestId });
+            AddAudit("GenerationCompleted", "GenerationManifest", manifest.Id.ToString(), new { job.Id, outputAssetId = outputAsset.Id, promoted, output.ProviderCallMade, output.ProviderRequestId });
             await db.SaveChangesAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -609,7 +619,7 @@ public sealed class GenerationOrchestrator(
         {
             prompt.Append("\n\nGENERATE THIS AS A NEW FRAME FROM THE SHOT INTENT. There is no composition sketch for this pass. Use the camera guidance, action, approved authorities, and locked constraints to choose clear cinematic blocking. Do not invent changes to world canon merely because a feature is outside the crop.");
         }
-        var videoQuality = VideoQuality.Low; long? videoSeed = null; int? videoWidth = null; int? videoHeight = null; int? deliveryWidth = null; int? deliveryHeight = null; int? videoFramesPerSecond = null; int? videoFrameCount = null;
+        var videoQuality = VideoQuality.Low; long? videoSeed = null; int? videoWidth = null; int? videoHeight = null; int? deliveryWidth = null; int? deliveryHeight = null; int? videoFramesPerSecond = null; int? videoFrameCount = null; string? deliveryColorSpace = null;
         try
         {
             using var payload = JsonDocument.Parse(manifest.ManifestJson);
@@ -619,6 +629,7 @@ public sealed class GenerationOrchestrator(
                 if (format.TryGetProperty("deliveryWidth", out var widthNode) && widthNode.TryGetInt32(out var parsedWidth)) deliveryWidth = parsedWidth;
                 if (format.TryGetProperty("deliveryHeight", out var heightNode) && heightNode.TryGetInt32(out var parsedHeight)) deliveryHeight = parsedHeight;
                 if (format.TryGetProperty("framesPerSecond", out var fpsNode) && fpsNode.TryGetInt32(out var parsedFps)) videoFramesPerSecond = parsedFps;
+                if (format.TryGetProperty("colorSpace", out var colorNode) && colorNode.ValueKind == JsonValueKind.String) deliveryColorSpace = colorNode.GetString();
             }
             if (packet.Purpose == GenerationPurpose.Video.ToString())
             {
@@ -633,7 +644,7 @@ public sealed class GenerationOrchestrator(
             }
         }
         catch (JsonException ex) { throw new GenerationDispatchException("The frozen manifest payload cannot be read.", false, null, ex); }
-        return new(job.Id, manifest.Id, manifest.ShotCode, Enum.Parse<GenerationRoute>(packet.Route), Enum.Parse<GenerationPurpose>(packet.Purpose), prompt.ToString(), manifest.ManifestHash, composition, compositionPath, referenceImages, lastFrame, lastFramePath, Report, videoQuality, videoSeed, videoWidth, videoHeight, deliveryWidth, deliveryHeight, job.ProviderRequestId, currentFrameEdit, videoFramesPerSecond, videoFrameCount, Attention);
+        return new(job.Id, manifest.Id, manifest.ShotCode, Enum.Parse<GenerationRoute>(packet.Route), Enum.Parse<GenerationPurpose>(packet.Purpose), prompt.ToString(), manifest.ManifestHash, composition, compositionPath, referenceImages, lastFrame, lastFramePath, Report, videoQuality, videoSeed, videoWidth, videoHeight, deliveryWidth, deliveryHeight, job.ProviderRequestId, currentFrameEdit, videoFramesPerSecond, videoFrameCount, Attention, deliveryColorSpace);
     }
 
     private async Task<ResolvedGenerationManifest> ResolveFrozenManifestAsync(
@@ -867,6 +878,44 @@ public sealed class GenerationOrchestrator(
         if (manifest is not null) { manifest.State = ManifestState.Failed.ToString(); manifest.ProviderCallMade = providerCallMade; }
         AddAudit("GenerationFailed", manifest is null ? "Job" : "GenerationManifest", manifest?.Id.ToString() ?? job.Id.ToString(), new { job.Id, error, providerCallMade, providerRequestId });
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Imports a BT.709 copy of a Max take. The provider's own file
+    /// stays in the asset store as evidence, and the audit names both.</summary>
+    private async Task<AssetSummary> ConvertForDeliveryAsync(
+        Guid jobId, AssetRecord source, VideoMediaMetadata? metadata, VideoMediaExpectation delivery,
+        GenerationAdapterOutput output, CancellationToken cancellationToken)
+    {
+        if (metadata is null)
+            throw new GenerationDispatchException("The Max render's colour could not be read, so it cannot be delivered in Rec.709.", output.ProviderCallMade, output.ProviderRequestId);
+        var work = Path.Combine(Path.GetTempPath(), "framewright-delivery", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(work);
+        try
+        {
+            var converted = Path.Combine(work, $"{Path.GetFileNameWithoutExtension(source.OriginalFileName)}-rec709.mp4");
+            var conversion = await videoDeliveryConverter.ConvertToRec709Async(assets.ResolveContentPath(source), metadata, converted, cancellationToken);
+            if (!conversion.Success)
+                throw new GenerationDispatchException($"The Max render could not be delivered in Rec.709. {conversion.Detail}", output.ProviderCallMade, output.ProviderRequestId);
+            var check = await videoMediaProbe.ValidateAsync(converted, delivery, cancellationToken);
+            if (!check.IsValid)
+                throw new GenerationDispatchException($"The Max render did not satisfy its frozen delivery contract after conversion to Rec.709. {check.Detail}", output.ProviderCallMade, output.ProviderRequestId);
+            await using var content = File.OpenRead(converted);
+            var imported = await assets.ImportGeneratedMediaAsync(content, Path.GetFileName(converted), "video/mp4", content.Length, AssetKind.Video, cancellationToken);
+            if (imported.Kind != RepositoryResultKind.Ok || imported.Value is null)
+                throw new GenerationDispatchException(imported.Error ?? "The Rec.709 take failed local validation.", output.ProviderCallMade, output.ProviderRequestId);
+            AddAudit("VideoConvertedForDelivery", "Job", jobId.ToString(), new
+            {
+                jobId, sourceAssetId = source.Id, sourceHash = source.ContentHash, outputAssetId = imported.Value.Id,
+                colorSpace = delivery.ColorSpace, sourceMatrix = metadata.ColorSpace, sourceRange = metadata.ColorRange
+            });
+            return imported.Value;
+        }
+        finally
+        {
+            try { Directory.Delete(work, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     private void AddAudit(string type, string targetType, string targetId, object payload) => db.AuditEvents.Add(new AuditEventRecord
