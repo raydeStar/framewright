@@ -187,8 +187,14 @@ test('two instances of one model are placed, moved independently, and reopen aft
   // revision behind both of them.
   await page.reload()
   await page.getByRole('button', { name: 'Scene', exact: true }).click()
-  await expect(page.getByTestId('scene-objects').getByRole('button', { name: /Right block/ })).toBeVisible()
-  await page.getByTestId('scene-objects').getByRole('button', { name: /Right block/ }).click()
+  // The lazy viewport replaces a short loading placeholder above the tablet
+  // inspector. Wait for that layout before aiming a pointer at an object.
+  await expect(page.getByTestId('scene-viewport')).toHaveAttribute('data-state', 'ready')
+  await expect(page.getByTestId('scene-stage')).toHaveAttribute('data-objects', '2')
+  const rightBlock = page.getByTestId('scene-objects').getByRole('button', { name: /Right block/ })
+  if (testInfo.project.name === 'tablet') await rightBlock.tap()
+  else await rightBlock.click()
+  await expect(rightBlock).toHaveAttribute('aria-pressed', 'true')
   const reopened = page.getByTestId('scene-placement')
   await expect(reopened.getByLabel('position X')).toHaveValue('2.5')
   await expect(reopened.getByLabel('scale X')).toHaveValue('2')

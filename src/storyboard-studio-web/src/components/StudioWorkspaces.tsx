@@ -1971,7 +1971,9 @@ const guidePeaks = (seed: number) => Array.from({ length: 42 }, (_, i) => 18 + (
 function Wave({ assetUrl, seed = 0 }: { assetUrl?: string; seed?: number }) {
   const [peaks, setPeaks] = useState<number[]>(() => assetUrl ? waveformCache.get(assetUrl) ?? [] : [])
   useEffect(() => {
-    if (!assetUrl || waveformCache.has(assetUrl)) return
+    // Some tablet browser builds have no Web Audio. Keep the guide without
+    // fetching a preview they cannot decode; no orchestra, no delivery cart.
+    if (!assetUrl || typeof AudioContext === 'undefined' || waveformCache.has(assetUrl)) return
     let active = true
     const controller = new AbortController()
     let context: AudioContext | undefined
