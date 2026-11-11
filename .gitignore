@@ -10,6 +10,7 @@ test-results/
 .voice-runtime/
 .qwen-voice-runtime/
 .yue2-runtime/
+.moss-sfx-runtime/
 src/StoryboardStudio.Api/wwwroot/
 src/storyboard-studio-web/playwright-report/
 src/storyboard-studio-web/test-results/

@@ -65,6 +65,8 @@ try {
     Assert-NativeSuccess 'local voice bootstrap contract tests'
     & $voicePythonPath -m unittest discover -s (Join-Path $repoRoot 'tools\yue2\tests') -v
     Assert-NativeSuccess 'local YuE2 worker safety contract tests'
+    & $voicePythonPath -m unittest discover -s (Join-Path $repoRoot 'tools\moss_sfx\tests') -v
+    Assert-NativeSuccess 'local MOSS sound-effect safety and DSP tests'
     dotnet list Framewright.slnx package --vulnerable --include-transitive
     Assert-NativeSuccess 'NuGet vulnerability inspection'
 }
