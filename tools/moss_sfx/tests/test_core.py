@@ -330,6 +330,18 @@ assert 'numpy' not in sys.modules
                 core.get_pipeline(core.Config(model=str(Path(temp) / "missing")))
             self.assertNotIn("torch", sys.modules)
 
+    def test_approved_download_can_repair_an_incomplete_hub_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(core, "_PIPELINE", None), \
+             mock.patch.object(core, "_PIPELINE_CONFIG", None), mock.patch.object(core, "_PIPELINE_METADATA", None), \
+             mock.patch.dict(os.environ, {}, clear=True):
+            pipe = types.SimpleNamespace(sample_rate=48000, max_inference_seconds=30, device="cuda")
+            factory = mock.Mock(return_value=pipe)
+            fake_torch = types.SimpleNamespace(bfloat16="bf16", __version__="fixture-torch", cuda=types.SimpleNamespace(is_available=lambda: True, synchronize=lambda device: None))
+            with mock.patch.dict(sys.modules, {"torch": fake_torch, "moss_soundeffect_v2": types.SimpleNamespace(MossSoundEffectPipeline=types.SimpleNamespace(from_pretrained=factory))}), \
+                 mock.patch.object(core, "source_provenance", return_value={}), mock.patch.object(core, "local_snapshot", return_value=Path(temp)):
+                core.get_pipeline(core.Config(allow_downloads=True))
+            factory.assert_called_once_with(core.MODEL_ID, torch_dtype="bf16", device="cuda", local_files_only=False, revision=None)
+
     def test_wrong_channels_and_sample_count_fail(self):
         for shape, count in (((1, 2, 4800), 4800), ((1, 1, 4799), 4799)):
             audio = mock.Mock()

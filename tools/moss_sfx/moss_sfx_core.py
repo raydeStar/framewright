@@ -415,17 +415,18 @@ def get_pipeline(config):
             os.environ["HF_HUB_OFFLINE"] = "1"
             os.environ["TRANSFORMERS_OFFLINE"] = "1"
         path = local_snapshot(config)
-        if not config.allow_downloads:
-            errors = snapshot_errors(path)
-            if errors:
-                raise RuntimeError("; ".join(errors))
+        errors = snapshot_errors(path)
+        if errors and not config.allow_downloads:
+            raise RuntimeError("; ".join(errors))
         import torch
         from moss_soundeffect_v2 import MossSoundEffectPipeline
 
         if config.device.startswith("cuda") and not torch.cuda.is_available():
             raise RuntimeError("CUDA requested but unavailable; refusing an implicit CPU fallback")
         start = time.perf_counter()
-        pipe = MossSoundEffectPipeline.from_pretrained(str(path) if path else config.model,
+        # An incomplete Hub cache needs the repo ID so approved downloads can
+        # fill missing files. A complete snapshot stays strictly local.
+        pipe = MossSoundEffectPipeline.from_pretrained(str(path) if path and not errors else config.model,
                  torch_dtype=torch.bfloat16, device=config.device,
                  local_files_only=not config.allow_downloads, revision=config.revision)
         if pipe.sample_rate != SAMPLE_RATE or pipe.max_inference_seconds != 30:
