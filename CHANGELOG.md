@@ -7,6 +7,16 @@
   npm package metadata.
 
 ### 3D models
+- **Revisions compare in place.** Flipping between revisions of one model keeps
+  the inspection camera where it was left, so the same spot can be compared
+  up close. A revision whose size differs by more than a quarter is framed
+  afresh, and another asset always is. Paint, wireframe and channel are kept
+  too.
+- **One channel at a time.** The model view can show base colour, normal map,
+  roughness or metalness alone and unlit, beside the usual lit view, so a
+  fault seen when lit can be traced to the map it lives in. Data maps show
+  the value the file holds. Each channel is a stand-in that shares the file's
+  textures; the file's own materials are never edited, and Lit puts them back.
 - **Blender is found for you.** When no Blender is configured, Framewright uses
   the `BLENDER` or `RAC_BLENDER` environment variable, then `PATH`, then the
   usual install places for the system: Program Files (newest version first),

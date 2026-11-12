@@ -2055,10 +2055,24 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .model-stage:active{cursor:grabbing}
 .model-stage:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .model-stage canvas{display:block;width:100%;height:100%}
-.model-viewer-bar{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:var(--text-xs)}
-.model-viewer-bar>div{display:flex;gap:7px}
+.model-viewer-bar{position:relative;z-index:1;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:var(--text-xs)}
+/* The controls keep their row and the hint takes what is left. When that is
+   too little to read, the controls drop to a row of their own rather than
+   squeezing the hint into a column. */
+.model-viewer-bar>span{flex:1 1 220px}
+.model-viewer-bar>div{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:7px;margin-left:auto}
 .model-viewer-bar button{min-height:40px;padding:0 13px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font-weight:650}
 .model-viewer-bar button.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 18%,var(--surface-2));color:var(--text)}
+/* The surface channels are one choice out of five, so they are joined into one
+   control. The chosen and the focused segment are lifted so a neighbour's
+   edge never covers their border or focus ring. */
+.model-channels{display:flex}
+.model-channels button{padding:0 9px;border-radius:0}
+.model-channels button+button{margin-left:-1px}
+.model-channels button:first-child{border-radius:6px 0 0 6px}
+.model-channels button:last-child{border-radius:0 6px 6px 0}
+.model-channels button.is-on{position:relative}
+.model-channels button:focus-visible{position:relative;z-index:1}
 .model-viewer-orbit{position:relative;z-index:1;margin:0;color:var(--quiet);font:var(--text-2xs) ui-monospace,monospace}
 .model-animation-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface-1);font-size:var(--text-xs)}
 .model-animation-bar>strong{margin-right:3px;color:var(--muted)}

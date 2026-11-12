@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { AmbientLight, AnimationMixer, Box3, Color, DirectionalLight, GridHelper, LoopRepeat, Mesh, MeshStandardMaterial, PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type Material, type Object3D } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { keepsCamera, type KeptCamera } from '../inspectionCamera'
+import { channelMaterial, openingLook, surfaceChannels, type SurfaceChannel, type SurfaceLook } from '../surfaceChannels'
 import { sharpenTextures } from './textureQuality'
 
 /**
@@ -18,6 +20,17 @@ import { sharpenTextures } from './textureQuality'
  * spikes and creases live in the topology. Neither toggle edits anything: the
  * file's own materials are kept and put back.
  *
+ * A painted surface can also be read one channel at a time -- base colour,
+ * normal map, roughness or metalness, each unlit -- because the lit view mixes
+ * all four and a fault lives in one of them. Those are stand-ins beside the
+ * file's materials, never edits to them.
+ *
+ * This surface is rebuilt for every revision, so the camera a reviewer leaves
+ * is handed to the parent and picked up by the next revision of the same
+ * stack: flipping between two revisions compares the same spot. Paint,
+ * wireframe and channel are held by the parent too, so it compares the same
+ * map.
+ *
  * Resources are released explicitly when the model changes or the surface
  * closes. A WebGL context left holding geometry is how a long session turns into
  * an unexplained slowdown.
@@ -33,6 +46,12 @@ export interface ModelViewerProps {
   onOrbit?: (yaw: number, pitch: number) => void
   /** Puts the inspection camera back at a view; a new object each time it is asked. */
   goTo?: { yaw: number; pitch: number }
+  /** The revision stack this model belongs to. Another revision of it opens with the camera where `kept` says it was left. */
+  stack?: string
+  /** Where the camera was left. Held by the parent, because this surface does not outlive its revision. */
+  kept?: { current: KeptCamera | undefined }
+  /** Paint, wireframe and channel. Held by the parent for the same reason, so the next revision opens looked at the same way. */
+  look?: { current: SurfaceLook }
 }
 
 type ViewerState = 'loading' | 'ready' | 'failed' | 'unsupported'
@@ -40,13 +59,19 @@ type ViewerState = 'loading' | 'ready' | 'failed' | 'unsupported'
 const openingYaw = 0.9
 const openingPitch = 0.42
 
-export default function ModelViewer({ contentUrl, label, dimensions, supportedClipNames, onError, onOrbit, goTo }: ModelViewerProps) {
+export default function ModelViewer({ contentUrl, label, dimensions, supportedClipNames, onError, onOrbit, goTo, stack, kept, look }: ModelViewerProps) {
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewerState>('loading')
   const [detail, setDetail] = useState('Preparing the model surface')
   const [readout, setReadout] = useState({ yaw: openingYaw, pitch: openingPitch })
-  const [painted, setPainted] = useState(true)
-  const [wired, setWired] = useState(false)
+  // The renderer reads these rather than React state, because it runs inside an
+  // effect that must not be torn down and rebuilt to change how a surface looks.
+  // A parent that holds the look across revisions lends its own object, which
+  // is then changed in place; otherwise the surface keeps one for itself.
+  const display = useRef<SurfaceLook>(look?.current ?? openingLook())
+  const [painted, setPainted] = useState(display.current.painted)
+  const [wired, setWired] = useState(display.current.wired)
+  const [channel, setChannel] = useState<SurfaceChannel>(display.current.channel)
   const [clipNames, setClipNames] = useState<string[]>([])
   const [selectedClip, setSelectedClip] = useState<string | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -54,9 +79,6 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
   const [clipDuration, setClipDuration] = useState(0)
   const allowedClips = useRef(supportedClipNames)
   allowedClips.current = supportedClipNames
-  // The renderer reads these rather than React state, because it runs inside an
-  // effect that must not be torn down and rebuilt to change how a surface looks.
-  const display = useRef({ painted: true, wired: false })
   // One camera, one source of truth. The renderer reads this; the pointer and
   // keyboard paths both write to it, so they can never drift apart.
   const view = useRef({ yaw: openingYaw, pitch: openingPitch, distance: 1, target: new Vector3() })
@@ -69,6 +91,11 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
   // must never rebuild the surface just to keep listening.
   const reportOrbit = useRef(onOrbit)
   reportOrbit.current = onOrbit
+  // And the same for the kept camera. A model gains its revision family when
+  // a second revision is added, which can happen while it is on screen, and
+  // a new name for the stack is no reason to load the model again.
+  const resume = useRef({ stack, kept })
+  resume.current = { stack, kept }
   // The three numbers, not the array. A parent that rebuilds the array on
   // every render -- and the inspection workspace does, every 700 ms while a
   // job is running -- would otherwise tear this whole surface down and load
@@ -102,8 +129,16 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     let currentClip: AnimationClip | undefined
     let motionFrame = 0
     let previousFrame = 0
+    let shownSize = 0
 
-    view.current = { yaw: openingYaw, pitch: openingPitch, distance: span * 2.6, target: new Vector3() }
+    // A camera left on another revision of this stack is picked up before the
+    // model arrives, so the view does not start somewhere else and then jump.
+    const opening = resume.current.stack
+    const left = resume.current.kept?.current
+    const resumed = keepsCamera(left, opening) ? left : undefined
+    view.current = resumed
+      ? { yaw: resumed.yaw, pitch: resumed.pitch, distance: resumed.distance, target: new Vector3(...resumed.target) }
+      : { yaw: openingYaw, pitch: openingPitch, distance: span * 2.6, target: new Vector3() }
 
     renderer.outputColorSpace = SRGBColorSpace
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
@@ -174,13 +209,25 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     // The file's own materials are kept, never edited, so turning paint back on
     // restores exactly what was delivered rather than an approximation of it.
     const dressed: { mesh: Mesh; own: Material | Material[]; plain: Material }[] = []
+    // One unlit stand-in per file material and channel, made the first time
+    // it is asked for and kept, so changing channel is a swap, not a rebuild.
+    const stands = new Map<string, Material>()
+    const standIn = (own: Material, channel: Exclude<SurfaceChannel, 'lit'>) => {
+      const key = `${channel}:${own.uuid}`
+      let stand = stands.get(key)
+      if (!stand) stands.set(key, stand = channelMaterial(own, channel))
+      return stand
+    }
 
     const show = () => {
+      const { painted, wired, channel } = display.current
       for (const { mesh, own, plain } of dressed) {
-        mesh.material = display.current.painted ? own : plain
+        // A channel is one part of the paint, so clay replaces it like the rest.
+        mesh.material = !painted ? plain : channel === 'lit' ? own
+          : Array.isArray(own) ? own.map(material => standIn(material, channel)) : standIn(own, channel)
         for (const material of (Array.isArray(mesh.material) ? mesh.material : [mesh.material])) {
           const surfaceMaterial = material as Material & { wireframe?: boolean }
-          if ('wireframe' in surfaceMaterial) surfaceMaterial.wireframe = display.current.wired
+          if ('wireframe' in surfaceMaterial) surfaceMaterial.wireframe = wired
         }
       }
       draw()
@@ -283,7 +330,15 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
         setState('ready')
         setDetail('Drag to orbit, right-drag or shift-drag to move up and down, scroll to zoom. The model is not moved.')
         resize()
-        frame()
+        const bounds = new Box3().setFromObject(loaded).getSize(new Vector3())
+        shownSize = Math.max(bounds.x, bounds.y, bounds.z)
+        // The kept camera stays only while it still suits what it looks at. A
+        // revision of a very different size is framed like a newly opened model.
+        if (keepsCamera(resumed, opening, shownSize)) place()
+        else {
+          if (resumed) { view.current.yaw = openingYaw; view.current.pitch = openingPitch }
+          frame()
+        }
         publishLoadedBounds()
         // The loader reports the scene as soon as its graph is built, while the
         // textures are still decoding. This viewer draws on demand rather than
@@ -325,8 +380,17 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
       mixer?.stopAllAction()
       if (loaded) mixer?.uncacheRoot(loaded)
       surface.current = undefined
+      // Leave the camera for the next revision of this stack, under the name
+      // the stack has now. A model that never loaded has nothing to hand on.
+      const { stack: leaving, kept: keeper } = resume.current
+      if (loaded && leaving && keeper) {
+        const { yaw, pitch, distance, target } = view.current
+        keeper.current = { stack: leaving, size: shownSize, yaw, pitch, distance, target: target.toArray() }
+      }
       // Restore the owned materials before releasing: clay must not hide the silverware.
       for (const { mesh, own, plain } of dressed) { mesh.material = own; plain.dispose() }
+      // The stand-ins share the file's textures, which are released with it below.
+      for (const stand of stands.values()) stand.dispose()
       scene.environment?.dispose()
       scene.environment = null
       environment.dispose()
@@ -442,6 +506,15 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
           onClick={() => { display.current.wired = !wired; setWired(!wired); surface.current?.show() }}>
           {wired ? 'Wire on' : 'Wire off'}
         </button>
+        <div className="model-channels" role="group" aria-label="Surface channel" data-testid="model-channel">
+          {surfaceChannels.map(item => <button type="button" key={item.id} className={channel === item.id ? 'is-on' : undefined}
+            data-testid={`model-channel-${item.id}`} aria-pressed={channel === item.id}
+            title={painted ? item.hint : 'Turn paint on to look at one channel of it'}
+            disabled={state !== 'ready' || !painted}
+            onClick={() => { display.current.channel = item.id; setChannel(item.id); surface.current?.show() }}>
+            {item.label}
+          </button>)}
+        </div>
         <button type="button" disabled={state !== 'ready'} onClick={() => surface.current?.frame()}>Frame</button>
         <button type="button" disabled={state !== 'ready'} onClick={() => { view.current.yaw = openingYaw; view.current.pitch = openingPitch; surface.current?.frame() }}>Reset view</button>
       </div>
