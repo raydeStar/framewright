@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatMoment, matchesReviewFilter, noteAnchorLabel, orderNotes, reviewBadge } from '../src/assetReview.ts'
+import { formatMoment, matchesReviewFilter, nextInQueue, noteAnchorLabel, orderNotes, reviewBadge, reviewQueue, revisionLabel, SENT_BACK_WITHOUT_NOTE, sendBackNote, sentBackList, waitingCount } from '../src/assetReview.ts'
 import type { AssetReviewNoteSummary, AssetSummary } from '../src/types.ts'
 
 const asset = (overrides: Partial<AssetSummary> = {}): AssetSummary => ({
@@ -61,4 +61,56 @@ test('open notes come first, timed ones in playback order', () => {
     note({ id: 'early', anchor: 'Time', timeSeconds: 2 }),
   ])
   assert.deepEqual(ordered.map(item => item.id), ['early', 'late', 'whole', 'resolved'])
+})
+
+test('quick review walks current, unarchived revisions in name order', () => {
+  const library = [
+    asset({ id: 'c', displayName: 'Gong' }),
+    asset({ id: 'a', displayName: 'Drum', reviewDecision: 'Approved' }),
+    asset({ id: 'old', displayName: 'Bell', revisionFamilyId: 'f', revisionNumber: 1, isCurrentRevision: false }),
+    asset({ id: 'new', displayName: 'Bell', revisionFamilyId: 'f', revisionNumber: 2, isCurrentRevision: true }),
+    asset({ id: 'gone', displayName: 'Anvil', isArchived: true }),
+  ]
+  assert.deepEqual(reviewQueue(library, 'all').map(item => item.id), ['new', 'a', 'c'])
+  assert.deepEqual(reviewQueue(library, 'Pending').map(item => item.id), ['new', 'c'])
+  // Decided in this sitting: still walked, so going back finds it.
+  assert.deepEqual(reviewQueue(library, 'Pending', new Set(['a'])).map(item => item.id), ['new', 'a', 'c'])
+})
+
+test('a decision moves on to the next one still waiting, wrapping round', () => {
+  const queue = [
+    asset({ id: '1', reviewDecision: 'Pending' }),
+    asset({ id: '2', reviewDecision: 'Approved' }),
+    asset({ id: '3', reviewDecision: 'Approved' }),
+    asset({ id: '4', reviewDecision: 'Pending' }),
+  ]
+  assert.equal(nextInQueue(queue, '1', 'Pending'), '4')
+  assert.equal(nextInQueue(queue, '4', 'Pending'), '1')
+  assert.equal(nextInQueue(queue, '2', 'all'), '3')
+  assert.equal(nextInQueue(queue, '4', 'all'), undefined)
+  assert.equal(nextInQueue([asset({ id: 'only', reviewDecision: 'Approved' })], 'only', 'Pending'), undefined)
+  assert.equal(waitingCount(queue, 'Pending'), 2)
+  assert.equal(waitingCount(queue, 'all'), 4)
+})
+
+test('the revision reads as its place in the stack', () => {
+  const v1 = asset({ id: 'v1', revisionFamilyId: 'f', revisionNumber: 1, isCurrentRevision: false })
+  const v2 = asset({ id: 'v2', revisionFamilyId: 'f', revisionNumber: 2, isCurrentRevision: true })
+  assert.equal(revisionLabel(v2, [v1, v2]), 'rev 2 of 2')
+  assert.equal(revisionLabel(asset(), [asset()]), 'rev 1 of 1')
+})
+
+test('an empty feedback box still sends a reason the server accepts', () => {
+  assert.equal(sendBackNote('  Lid is muddy. '), 'Lid is muddy.')
+  assert.equal(sendBackNote('   '), SENT_BACK_WITHOUT_NOTE)
+})
+
+test('the send-back list is one plain line per asset sent back', () => {
+  const library = [
+    asset({ id: 'b', displayName: 'SM_Kettle', reviewDecision: 'ChangesRequested', reviewNote: 'Lid is\nmuddy.' }),
+    asset({ id: 'a', displayName: 'SM_Drum', reviewDecision: 'Approved' }),
+    asset({ id: 'v1', displayName: 'SM_Bell', revisionFamilyId: 'f', revisionNumber: 1, isCurrentRevision: false, reviewDecision: 'ChangesRequested', reviewNote: 'Old.' }),
+    asset({ id: 'v2', displayName: 'SM_Bell', revisionFamilyId: 'f', revisionNumber: 2, isCurrentRevision: true, reviewDecision: 'ChangesRequested', reviewNote: 'Too shiny.' }),
+  ]
+  assert.equal(sentBackList(library), 'SM_Bell — rev 2 of 2 — Too shiny.\nSM_Kettle — rev 1 of 1 — Lid is muddy.')
 })

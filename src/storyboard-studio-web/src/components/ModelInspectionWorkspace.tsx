@@ -22,9 +22,11 @@ const ModelPreparation = lazy(() => import('./ModelPreparation'))
  * geometry itself, the numbers measured from the stored bytes, and the library
  * organisation that can be edited without touching any of those facts.
  */
-export default function ModelInspectionWorkspace({ asset, onBack, onError, onChanged, ...director }: AssetDirectorControls & {
+export default function ModelInspectionWorkspace({ asset, onBack, backLabel = 'Asset library', onError, onChanged, ...director }: AssetDirectorControls & {
   asset: AssetSummary
   onBack: () => void
+  /** Where the back button goes, in words: the library, or quick review when opened from there. */
+  backLabel?: string
   onError: (message: string) => void
   onChanged?: (message: string) => void
 }) {
@@ -217,7 +219,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
 
   return <main className={`workspace model-workspace${director.directorMode ? ' director-mode' : ''}`} data-testid="model-workspace">
     <header className="model-header">
-      <button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />Asset library</button>
+      <button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />{backLabel}</button>
       <div><p className="eyebrow">Model inspection</p><h1>{active.displayName}</h1></div>
       <span className="model-format"><Box size={15} />{profile?.container ?? 'GLB'}</span>
       <DirectorModeButton active={director.directorMode} onClick={() => director.onDirectorMode(!director.directorMode)} />

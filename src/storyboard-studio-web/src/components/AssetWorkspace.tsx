@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Archive, ArrowLeft, ArrowRight, BadgeCheck, Box, Check, CheckSquare, Clapperboard, Download, Folder, FolderOpen, GitCompare, Grid2X2, Image, ImagePlus, Library, List, LoaderCircle, Music2, PackageCheck, Pause, PenLine, Play, Plus, Search, SlidersHorizontal, Sparkles, Upload, Video, WandSparkles, X } from 'lucide-react'
+import { Archive, ArrowLeft, ArrowRight, BadgeCheck, Box, Check, CheckSquare, Clapperboard, Download, Folder, FolderOpen, GitCompare, Grid2X2, Image, ImagePlus, Library, List, ListChecks, LoaderCircle, Music2, PackageCheck, Pause, PenLine, Play, Plus, Search, SlidersHorizontal, Sparkles, Upload, Video, WandSparkles, X } from 'lucide-react'
 import { studioApi } from '../api'
 import ModelFromReference from './ModelFromReference'
 import type { AssetCollectionSummary, AssetGenerationDraft, AssetGenerationReference, AssetPlacementSummary, AssetReviewNoteSummary, AssetSummary, AssetUsageSummary, JobSummary, ReferenceSummary, ShotSummary, StudioSnapshot } from '../types'
@@ -9,7 +9,8 @@ import AssetReviewPins from './AssetReviewPins'
 import AssetNotesPanel from './AssetNotesPanel'
 import ReviewDecisionPanel from './ReviewDecisionPanel'
 import ShipDialog, { type ShipSource } from './ShipDialog'
-import { matchesReviewFilter, reviewBadge, type ReviewFilter } from '../assetReview'
+import QuickReviewWorkspace from './QuickReviewWorkspace'
+import { matchesReviewFilter, newQuickReviewSession, reviewBadge, reviewQueue, type QuickReviewSession, type ReviewFilter } from '../assetReview'
 import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorMode'
 import { useAssetDirectorView } from './useAssetDirectorView'
 
@@ -34,6 +35,13 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sort, setSort] = useState<'newest' | 'name' | 'type'>('newest')
   const [review, setReview] = useState<ReviewFilter>('all')
+  // Quick review: one asset at a time, decided from the keyboard. Where the
+  // sitting is lives here, so stepping out to the full inspection view and
+  // back picks it up on the same asset.
+  const [reviewing, setReviewing] = useState(false)
+  const reviewSession = useRef<QuickReviewSession>(newQuickReviewSession())
+  const keepReviewSession = useCallback((session: QuickReviewSession) => { reviewSession.current = session }, [])
+  const reviewDecided = useCallback((updated: AssetSummary) => setAssets(current => current.map(item => item.id === updated.id ? updated : item)), [])
   // Shipping: a collection or a picked set of cards, handed to the ship dialog.
   const [shipping, setShipping] = useState<ShipSource>()
   const [selecting, setSelecting] = useState(false)
@@ -193,14 +201,24 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   }, [rawGenerationReferences])
 
   const closeAsset = () => { director.onDirectorMode(false); setSelectedId(undefined) }
-  if (selected?.kind === 'Model') return <ModelInspectionWorkspace {...director} asset={selected} onBack={closeAsset} onError={setError} onChanged={announce} />
+  const pendingCount = reviewQueue(assets, 'Pending').length
+  if (selected?.kind === 'Model') return <ModelInspectionWorkspace {...director} asset={selected} onBack={closeAsset} backLabel={reviewing ? 'Quick review' : undefined} onError={setError} onChanged={announce} />
   if (selected?.kind === 'Image') return <ImageRevisionWorkspace {...director} asset={selected} collections={collections} shots={studio.shots} references={generationReferences} onBack={closeAsset} onOpenGeneration={onOpenGeneration} onChanged={announce} onEditAuthority={onEditAuthority} />
+  // After the full views, so "Full inspection" from quick review opens one and
+  // its back button lands in quick review again.
+  if (reviewing) return <QuickReviewWorkspace assets={assets} session={reviewSession.current} onSession={keepReviewSession}
+    onExit={() => { setReviewing(false); void refresh() }} onInspect={setSelectedId} onDecided={reviewDecided} onRefresh={refresh} />
 
   return <main className={`workspace asset-workspace${director.directorMode && selected ? ' director-mode' : ''}`} aria-busy={loading}>
     <header className="asset-hero">
       <div><p className="eyebrow">Project media pool</p><h1>Asset library</h1><p>One searchable home for approved references, working images, music, audio, and video takes.</p></div>
       <div className="asset-hero-actions">
         <input ref={fileRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,audio/*,video/mp4,video/webm,.glb,model/gltf-binary" onChange={event => void importFiles(event.target.files ?? undefined)} />
+        <button className="secondary quick-review-open" data-testid="quick-review-open" disabled={loading}
+          title="Go through the library one asset at a time: A approves, X sends back, the arrows move."
+          onClick={() => { setSelectedId(undefined); setReviewing(true) }}>
+          <ListChecks size={17} />Quick review{pendingCount > 0 && <small>{pendingCount} pending</small>}
+        </button>
         <button className="secondary" onClick={() => fileRef.current?.click()} disabled={busy || loading}><Upload size={17} />Import media</button>
         <button className="primary" onClick={() => setCreateOpen(true)} disabled={loading}><Plus size={18} />Create new</button>
       </div>

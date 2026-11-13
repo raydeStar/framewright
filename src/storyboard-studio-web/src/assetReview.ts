@@ -35,6 +35,96 @@ export function reviewBadge(asset: AssetSummary): { decision: AssetReviewDecisio
   }
 }
 
+/**
+ * Quick review walks the library one asset at a time: the revision the library
+ * shows (the current one of a stack, or a lone asset), never an archived one,
+ * in name order so a family of props sits together and the order does not
+ * shuffle while decisions land.
+ *
+ * An asset decided in this sitting stays in the walk even though it no longer
+ * matches the filter, so the previous arrow still finds it and the count
+ * does not shift under the reviewer. `kept` holds those.
+ */
+export function reviewQueue(assets: AssetSummary[], filter: ReviewFilter, kept: ReadonlySet<string> = new Set()) {
+  return assets
+    .filter(asset => (!asset.revisionFamilyId || asset.isCurrentRevision) && !asset.isArchived)
+    .filter(asset => matchesReviewFilter(asset, filter) || kept.has(asset.id))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+}
+
+/**
+ * Where a decision moves on to: the next asset after this one that still
+ * waits under the filter, wrapping round to the start for any skipped
+ * earlier. Under "all" it is simply the next one. Nothing left is undefined.
+ */
+export function nextInQueue(queue: AssetSummary[], fromId: string, filter: ReviewFilter): string | undefined {
+  const at = queue.findIndex(asset => asset.id === fromId)
+  if (filter === 'all') return at >= 0 && at + 1 < queue.length ? queue[at + 1].id : undefined
+  const ordered = at < 0 ? queue : [...queue.slice(at + 1), ...queue.slice(0, at)]
+  return ordered.find(asset => asset.id !== fromId && matchesReviewFilter(asset, filter))?.id
+}
+
+/** How many of the walk still wait under the filter. Under "all", every one. */
+export function waitingCount(queue: AssetSummary[], filter: ReviewFilter) {
+  return filter === 'all' ? queue.length : queue.filter(asset => matchesReviewFilter(asset, filter)).length
+}
+
+/** Which revision this is out of its stack: "rev 2 of 3". A lone asset is rev 1 of 1. */
+export function revisionLabel(asset: AssetSummary, all: AssetSummary[]) {
+  const number = asset.revisionNumber ?? 1
+  if (!asset.revisionFamilyId) return `rev ${number} of ${number}`
+  const stack = all.filter(item => item.revisionFamilyId === asset.revisionFamilyId)
+  const total = Math.max(number, stack.length, ...stack.map(item => item.revisionNumber ?? 1))
+  return `rev ${number} of ${total}`
+}
+
+/**
+ * The send-backs as plain text to paste to whoever makes the fixes: one line
+ * per asset, its name, which revision, and what needs to change.
+ */
+export function sentBackList(assets: AssetSummary[]) {
+  return reviewQueue(assets, 'ChangesRequested')
+    .map(asset => `${asset.displayName} — ${revisionLabel(asset, assets)} — ${asset.reviewNote.replace(/\s+/g, ' ').trim()}`)
+    .join('\n')
+}
+
+/**
+ * In quick review the feedback is optional, but the server keeps its rule that
+ * a send-back carries a reason. An empty box sends this, so whoever picks it
+ * up knows there was no more to it rather than finding a blank.
+ */
+export const SENT_BACK_WITHOUT_NOTE = 'Sent back in quick review without a note.'
+
+export function sendBackNote(typed: string) {
+  return typed.trim() || SENT_BACK_WITHOUT_NOTE
+}
+
+/** One decision made in quick review, and what the asset was before it, so it can be put back. */
+export interface QuickReviewUndo {
+  assetId: string
+  displayName: string
+  /** The decision being undone. */
+  made: AssetReviewDecision
+  /** What it was before, restored as it was, note and all. */
+  decision: AssetReviewDecision
+  note: string
+}
+
+/**
+ * Where a quick review sitting is, held by the library so stepping out to the
+ * full inspection view and back resumes on the same asset.
+ */
+export interface QuickReviewSession {
+  filter: ReviewFilter
+  currentId?: string
+  kept: Set<string>
+  undo: QuickReviewUndo[]
+}
+
+export function newQuickReviewSession(): QuickReviewSession {
+  return { filter: 'Pending', kept: new Set(), undo: [] }
+}
+
 /** A moment the way a player shows it: 0:07.5, 1:02.0. */
 export function formatMoment(seconds: number) {
   const whole = Math.max(0, seconds)
