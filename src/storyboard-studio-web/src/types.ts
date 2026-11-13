@@ -1,4 +1,4 @@
-export type Workspace = 'board' | 'assets' | 'world' | 'authority' | 'scene' | 'shot' | 'review' | 'sequence'
+export type Workspace = 'board' | 'assets' | 'world' | 'authority' | 'scene' | 'shot' | 'review' | 'sequence' | 'sounds'
 export type ShotStage = 'Sketch' | 'Draft' | 'Final' | 'Video'
 export type ApprovalState = 'Working' | 'NeedsWork' | 'Ratified'
 export type GenerationRoute = 'FastDraft' | 'PrecisionDraft'
@@ -375,3 +375,12 @@ export interface ModelProfileSummary {
   primitivesWithoutUvs: number
 }
 export interface AgentActivityEntry { id: number; tool: string; state: 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'; message: string; at: string }
+// Sound review: the sounds a MOSS list asks for, the takes MOSS wrote, and a
+// person's decision on each sound (the asset review values: Approved is
+// accepted, ChangesRequested is rejected).
+export interface SfxTakeSummary { sha256: string; runId: string; fileName: string; takeNumber: number; seed?: number | null; durationSeconds: number; loop: boolean; prompt: string; createdAt?: string | null; audioUrl: string; afterRejection: boolean }
+export interface SfxSoundSummary { name: string; category: string; prompt: string; seconds?: number | null; loop: boolean; variations?: number | null; onList: boolean; generated: boolean; decision: AssetReviewDecision; storedDecision: AssetReviewDecision; note: string; decidedAt?: string | null; acceptedTakeSha256?: string | null; answersNote: string; cueFileName: string; takes: SfxTakeSummary[] }
+export interface SfxReviewSources { listPath: string; takeRoots: string[]; exportPath: string }
+export interface SfxReviewCounts { total: number; pending: number; approved: number; changesRequested: number; notGenerated: number }
+export interface SfxReviewBoard { sources: SfxReviewSources; listError?: string | null; manifestErrors: string[]; counts: SfxReviewCounts; sounds: SfxSoundSummary[] }
+export interface SfxExportResult { exportPath: string; written: { sound: string; cueFileName: string; takeSha256: string; path: string }[]; missing: string[]; manifestPath: string }

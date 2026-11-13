@@ -34,6 +34,7 @@ public static class StudioDatabaseInitializer
     private const string ImageCardMigration = "20261008-image-card-stand-in-v23";
     private const string BlockoutPersonCardMigration = "20261008-blockout-person-and-card-v24";
     private const string JobWarningMigration = "20261101-job-warnings-v25";
+    private const string SfxReviewMigration = "20261113-sfx-review-decisions-v26";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -356,6 +357,28 @@ public static class StudioDatabaseInitializer
                 () => EnsureColumnAsync(db, "Jobs", "Warning", "TEXT NULL", cancellationToken), cancellationToken);
         }
 
+        // Sound review: a decision per sound on a MOSS list. A new table that
+        // nothing existing refers to, so every sound starts with no row, which
+        // reads as Pending.
+        if (!await HasMigrationAsync(db, SfxReviewMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, SfxReviewMigration, cancellationToken);
+            await RunMigrationAsync(db, SfxReviewMigration, () => db.Database.ExecuteSqlRawAsync("""
+                CREATE TABLE IF NOT EXISTS "SfxReviews" (
+                    "Id" TEXT NOT NULL CONSTRAINT "PK_SfxReviews" PRIMARY KEY,
+                    "ProjectId" TEXT NOT NULL,
+                    "SoundName" TEXT COLLATE NOCASE NOT NULL,
+                    "Decision" TEXT NOT NULL,
+                    "Note" TEXT NOT NULL,
+                    "DecidedAt" TEXT NULL,
+                    "AcceptedTakeSha256" TEXT NULL,
+                    "UpdatedAt" TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_SfxReviews_ProjectId_SoundName" ON "SfxReviews" ("ProjectId", "SoundName");
+                """, cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -509,6 +532,7 @@ public static class StudioDatabaseInitializer
             ImageCardMigration => "card-stand-in-showing-a-project-image-asset-on-scene-instances",
             BlockoutPersonCardMigration => "blockout-plan-items-carry-a-person-pose-and-a-card-project-image",
             JobWarningMigration => "a-running-job-carries-an-attention-warning-that-never-fails-it",
+            SfxReviewMigration => "project-scoped-sound-review-decision-note-and-accepted-take-per-moss-sound-name",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")
