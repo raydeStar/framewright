@@ -6,7 +6,35 @@
 - Framewright is now licensed under the MIT License, with matching .NET and
   npm package metadata.
 
+### Review
+- **Quick review.** The asset library's **Quick review** button opens one
+  asset at a time, Pending first. **A** approves and **X** sends back, each
+  moving straight on to the next; the arrows move through the list and **Z**
+  undoes the last decision. Feedback is optional, in a box under Send back.
+  **Copy list** puts the sent-back assets on the clipboard, one line each.
+- **Sound review.** A new **Sounds** page reads a MOSS sound list and every
+  `sfx-manifest.json` under the chosen folders. Each sound plays as it
+  arrives, with its waveform, prompt, length and takes. **A** accepts the take
+  that is playing, **X** rejects the sound, **N** writes a note that saves
+  with either, and **↑/↓** or **1–9** switch takes. Sounds on the list that
+  MOSS has not made yet show as not generated. A rejected sound with a newer
+  take reads as Pending again, answering the rejection. **Export accepted**
+  copies each accepted take as `SFX_<Name>.wav` (or `MUS_<Name>.wav`) into a
+  chosen folder, never inside an Unreal project, with `approved-sfx.json`
+  beside them. Decisions use the asset review values and are read at
+  `GET /api/sfx-review`.
+
 ### 3D models
+- **Revisions compare in place.** Flipping between revisions of one model keeps
+  the inspection camera where it was left, so the same spot can be compared
+  up close. A revision whose size differs by more than a quarter is framed
+  afresh, and another asset always is. Paint, wireframe and channel are kept
+  too.
+- **One channel at a time.** The model view can show base colour, normal map,
+  roughness or metalness alone and unlit, beside the usual lit view, so a
+  fault seen when lit can be traced to the map it lives in. Data maps show
+  the value the file holds. Each channel is a stand-in that shares the file's
+  textures; the file's own materials are never edited, and Lit puts them back.
 - **Blender is found for you.** When no Blender is configured, Framewright uses
   the `BLENDER` or `RAC_BLENDER` environment variable, then `PATH`, then the
   usual install places for the system: Program Files (newest version first),

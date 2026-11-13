@@ -6,6 +6,8 @@ import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorM
 import AssetNotesPanel from './AssetNotesPanel'
 import ReviewDecisionPanel from './ReviewDecisionPanel'
 import { useAssetDirectorView } from './useAssetDirectorView'
+import type { KeptCamera } from '../inspectionCamera'
+import { openingLook, type SurfaceLook } from '../surfaceChannels'
 import type { AssetSummary, ModelProfileSummary, ModelTriangleBudget, RigPoseSummary } from '../types'
 
 // three.js only loads when an artist actually opens a model, so the ordinary
@@ -20,9 +22,11 @@ const ModelPreparation = lazy(() => import('./ModelPreparation'))
  * geometry itself, the numbers measured from the stored bytes, and the library
  * organisation that can be edited without touching any of those facts.
  */
-export default function ModelInspectionWorkspace({ asset, onBack, onError, onChanged, ...director }: AssetDirectorControls & {
+export default function ModelInspectionWorkspace({ asset, onBack, backLabel = 'Asset library', onError, onChanged, ...director }: AssetDirectorControls & {
   asset: AssetSummary
   onBack: () => void
+  /** Where the back button goes, in words: the library, or quick review when opened from there. */
+  backLabel?: string
   onError: (message: string) => void
   onChanged?: (message: string) => void
 }) {
@@ -44,10 +48,22 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
   // send it when a note written from a view is opened again.
   const orbit = useRef<{ yaw: number; pitch: number } | undefined>(undefined)
   const [goTo, setGoTo] = useState<{ yaw: number; pitch: number }>()
+  // The inspection camera as the last revision left it. The viewer is rebuilt
+  // for every revision, so it is held here: flipping between v1 and v2 to
+  // compare a surface up close must not lose the zoom and angle each time.
+  const keptCamera = useRef<KeptCamera | undefined>(undefined)
+  // And how the surface was being looked at -- paint, wireframe, channel --
+  // so v1 against v2 on the Normal channel stays on the Normal channel.
+  const keptLook = useRef<SurfaceLook>(openingLook())
   const [exporting, setExporting] = useState(false)
 
   const active = revisions.find(item => item.id === activeId) ?? asset
   const current = revisions.find(item => item.isCurrentRevision) ?? revisions[0]
+  // The stack the model on screen belongs to, which is not always the one
+  // selected: the old model stays up for a moment after the choice changes.
+  // A family only exists once there is a second revision, so a lone model is
+  // a stack of its own.
+  const shownStack = profile && (revisions.find(item => item.id === profile.assetId)?.revisionFamilyId ?? profile.assetId)
   useAssetDirectorView(active, director)
 
   // The library hands down a fresh asset object on every refresh. Keying the
@@ -96,8 +112,10 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
     let live = true
     // A pose belongs to the revision it was calculated from, so switching
     // revisions drops it rather than showing one model's bones against
-    // another's mesh.
-    setProfile(undefined); setFailure(undefined); setPose(undefined); setExportClips([])
+    // another's mesh. A view asked for from a note is dropped for the same
+    // reason: replayed onto the next revision it would turn the camera the
+    // reviewer has since moved, which is the camera that is kept.
+    setProfile(undefined); setFailure(undefined); setPose(undefined); setExportClips([]); setGoTo(undefined)
     studioApi.modelProfile(activeId)
       .then(loaded => { if (live) {
         setProfile(loaded)
@@ -201,7 +219,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
 
   return <main className={`workspace model-workspace${director.directorMode ? ' director-mode' : ''}`} data-testid="model-workspace">
     <header className="model-header">
-      <button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />Asset library</button>
+      <button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />{backLabel}</button>
       <div><p className="eyebrow">Model inspection</p><h1>{active.displayName}</h1></div>
       <span className="model-format"><Box size={15} />{profile?.container ?? 'GLB'}</span>
       <DirectorModeButton active={director.directorMode} onClick={() => director.onDirectorMode(!director.directorMode)} />
@@ -222,6 +240,9 @@ export default function ModelInspectionWorkspace({ asset, onBack, onError, onCha
                 onError={message => { setFailure(message); onError(message) }}
                 onOrbit={(yaw, pitch) => { orbit.current = { yaw, pitch } }}
                 goTo={goTo}
+                stack={shownStack}
+                kept={keptCamera}
+                look={keptLook}
               />
             </Suspense>
           : !failure && <div className="asset-loading"><LoaderCircle className="spin" /><span>Measuring the model…</span></div>}

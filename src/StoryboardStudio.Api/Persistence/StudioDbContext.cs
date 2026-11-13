@@ -47,6 +47,7 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
     public DbSet<SceneBlockoutPlanRecord> SceneBlockoutPlans => Set<SceneBlockoutPlanRecord>();
     public DbSet<SceneBlockoutItemRecord> SceneBlockoutItems => Set<SceneBlockoutItemRecord>();
     public DbSet<SceneShotBindingRecord> SceneShotBindings => Set<SceneShotBindingRecord>();
+    public DbSet<SfxReviewRecord> SfxReviews => Set<SfxReviewRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -58,6 +59,11 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<CommentRecord>().HasIndex(x => new { x.ShotId, x.Version });
         modelBuilder.Entity<AssetReviewNoteRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<AssetReviewNoteRecord>().HasIndex(x => new { x.AssetId, x.CreatedAt });
+        // One decision per sound name in a project; MOSS names are unique
+        // without regard to case, so the index is too.
+        modelBuilder.Entity<SfxReviewRecord>().HasKey(x => x.Id);
+        modelBuilder.Entity<SfxReviewRecord>().Property(x => x.SoundName).UseCollation("NOCASE");
+        modelBuilder.Entity<SfxReviewRecord>().HasIndex(x => new { x.ProjectId, x.SoundName }).IsUnique();
         modelBuilder.Entity<ShotVisualAuditRecord>().HasKey(x => x.Id);
         modelBuilder.Entity<ShotVisualAuditRecord>().HasIndex(x => new { x.ShotId, x.ShotVersion, x.AssetId, x.ContractHash });
         modelBuilder.Entity<JobRecord>().HasKey(x => x.Id);
@@ -166,6 +172,7 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
         modelBuilder.Entity<ShotRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<CommentRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<AssetReviewNoteRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
+        modelBuilder.Entity<SfxReviewRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<ShotVisualAuditRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<JobRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
         modelBuilder.Entity<ShotVersionRecord>().HasQueryFilter(x => x.ProjectId == ActiveProjectId);
@@ -300,6 +307,23 @@ public sealed class CommentRecord
     public DateTimeOffset CreatedAt { get; set; }
     public string? ReferenceId { get; set; }
     public int? ReferenceVersion { get; set; }
+}
+
+/// <summary>
+/// A person's decision about one sound from a MOSS list: accepted (naming the
+/// take), rejected with an optional note, or pending. The takes themselves are
+/// files MOSS wrote; only the decision lives here.
+/// </summary>
+public sealed class SfxReviewRecord
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public required string SoundName { get; set; }
+    public required string Decision { get; set; }
+    public string Note { get; set; } = "";
+    public DateTimeOffset? DecidedAt { get; set; }
+    public string? AcceptedTakeSha256 { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed class AssetReviewNoteRecord

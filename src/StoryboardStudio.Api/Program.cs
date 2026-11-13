@@ -65,6 +65,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<StudioRepository>();
 builder.Services.AddSingleton<ICompilerSkeletonProfiles, CompilerSkeletonProfiles>();
 builder.Services.AddScoped<AssetStore>();
+builder.Services.AddScoped<SfxReviewService>();
 builder.Services.AddSingleton<IVideoMediaProbe, FfprobeVideoMediaProbe>();
 builder.Services.AddSingleton<IVideoDeliveryConverter, FfmpegVideoDeliveryConverter>();
 builder.Services.AddScoped<AuthorityLibraryService>();
@@ -515,6 +516,31 @@ app.MapPut("/api/assets/{assetId:guid}", async Task<IResult> (Guid assetId, Upda
 // about one revision; nothing automatic calls this.
 app.MapPost("/api/assets/{assetId:guid}/review", async Task<IResult> (Guid assetId, SetAssetReviewDecisionRequest request, AssetStore assets, CancellationToken cancellationToken)
     => ToHttpResult(await assets.SetReviewDecisionAsync(assetId, request, cancellationToken)));
+
+// Sound review: the sounds a MOSS list asks for, their takes, and a person's
+// decision about each. Choosing folders and exporting touch the file system,
+// so those two only answer this workstation's own page.
+app.MapGet("/api/sfx-review", async (SfxReviewService sounds, CancellationToken cancellationToken)
+    => Results.Ok(await sounds.BoardAsync(cancellationToken)));
+app.MapPut("/api/sfx-review/sources", async Task<IResult> (SetSfxReviewSourcesRequest request, HttpContext context, SfxReviewService sounds, CancellationToken cancellationToken) =>
+{
+    if (!IsTrustedLocalCaller(context.Connection.RemoteIpAddress, app.Configuration) || context.Request.Headers["X-Storyboard-Studio"] != "1")
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    return ToHttpResult(await sounds.SetSourcesAsync(request, cancellationToken));
+});
+app.MapPost("/api/sfx-review/sounds/{name}/decision", async Task<IResult> (string name, SetSfxReviewDecisionRequest request, SfxReviewService sounds, CancellationToken cancellationToken)
+    => ToHttpResult(await sounds.DecideAsync(name, request, cancellationToken)));
+app.MapGet("/api/sfx-review/takes/{sha256}/audio", async Task<IResult> (string sha256, SfxReviewService sounds, CancellationToken cancellationToken) =>
+{
+    var path = await sounds.TakeFileAsync(sha256, cancellationToken);
+    return path is null ? Results.NotFound() : Results.File(path, "audio/wav", enableRangeProcessing: true);
+});
+app.MapPost("/api/sfx-review/export", async Task<IResult> (HttpContext context, SfxReviewService sounds, CancellationToken cancellationToken) =>
+{
+    if (!IsTrustedLocalCaller(context.Connection.RemoteIpAddress, app.Configuration) || context.Request.Headers["X-Storyboard-Studio"] != "1")
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    return ToHttpResult(await sounds.ExportAsync(cancellationToken));
+});
 app.MapPost("/api/assets/{assetId:guid}/archive", async Task<IResult> (Guid assetId, AssetStore assets, CancellationToken cancellationToken)
     => ToHttpResult(await assets.SetArchivedAsync(assetId, true, cancellationToken)));
 app.MapPost("/api/assets/{assetId:guid}/restore", async Task<IResult> (Guid assetId, AssetStore assets, CancellationToken cancellationToken)
