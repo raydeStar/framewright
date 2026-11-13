@@ -60,6 +60,16 @@ export function openingTake(sound: SfxSoundSummary): SfxTakeSummary | undefined 
     ?? sound.takes[0]
 }
 
+/**
+ * Where a sound sits on the list, which is priority order: "#12 of 68".
+ * Sounds MOSS made that the list does not name have no place on it.
+ */
+export function listPosition(sounds: SfxSoundSummary[], name: string): { position: number; total: number } | undefined {
+  const listed = sounds.filter(sound => sound.onList)
+  const at = listed.findIndex(sound => sound.name === name)
+  return at < 0 ? undefined : { position: at + 1, total: listed.length }
+}
+
 /** The rejected sounds as plain text to hand back for regeneration: one line each. */
 export function rejectedSfxList(sounds: SfxSoundSummary[]) {
   return sounds

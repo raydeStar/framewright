@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatSeconds, matchesSfxFilter, nextSfx, openingTake, rejectedSfxList, sfxCounts, sfxQueue, waveformPeaks } from '../src/sfxReview.ts'
+import { formatSeconds, listPosition, matchesSfxFilter, nextSfx, openingTake, rejectedSfxList, sfxCounts, sfxQueue, waveformPeaks } from '../src/sfxReview.ts'
 import type { SfxSoundSummary, SfxTakeSummary } from '../src/types.ts'
 
 const take = (sha256: string, overrides: Partial<SfxTakeSummary> = {}): SfxTakeSummary => ({
@@ -66,4 +66,10 @@ test('a waveform outline is the loudest sample per slice', () => {
   assert.equal(formatSeconds(0.6), '0.6 s')
   assert.equal(formatSeconds(19.5), '19.5 s')
   assert.equal(formatSeconds(undefined), '—')
+})
+
+test('a sound shows where it sits on the list, which is priority order', () => {
+  const sounds = [sound('Jump'), sound('Stray', { onList: false }), sound('Hit'), sound('Land')]
+  assert.deepEqual(listPosition(sounds, 'Hit'), { position: 2, total: 3 })
+  assert.equal(listPosition(sounds, 'Stray'), undefined)
 })
