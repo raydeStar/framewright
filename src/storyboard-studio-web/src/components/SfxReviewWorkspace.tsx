@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, ClipboardCopy, CornerUpLeft, FolderOpen, LoaderCircle, PackageCheck, Play, RefreshCw, Repeat, Square, Undo2, X } from 'lucide-react'
 import { studioApi } from '../api'
-import { formatSeconds, matchesSfxFilter, nextSfx, openingTake, rejectedSfxList, SFX_LABELS, sfxCounts, sfxQueue, waveformPeaks, type SfxFilter } from '../sfxReview'
+import { formatSeconds, listPosition, matchesSfxFilter, nextSfx, openingTake, rejectedSfxList, SFX_LABELS, sfxCounts, sfxQueue, waveformPeaks, type SfxFilter } from '../sfxReview'
 import type { AssetReviewDecision, SfxReviewBoard, SfxReviewCounts, SfxSoundSummary, SfxTakeSummary } from '../types'
 
 const FILTERS: { id: SfxFilter; label: string; count: (counts: SfxReviewCounts) => number }[] = [
@@ -65,6 +65,10 @@ export default function SfxReviewWorkspace({ onToast }: { onToast: (message: str
   const current = index >= 0 ? queue[index] : undefined
   const take = current ? current.takes.find(item => item.sha256 === chosenTake[current.name]) ?? openingTake(current) : undefined
   const showDone = finished || queue.length === 0
+  // A sound the list marks as a loop is previewed looping whatever its take's
+  // manifest says, so a bed or a machine hum is heard the way the game plays it.
+  const looping = (item: SfxTakeSummary) => Boolean(current?.loop || item.loop)
+  const hear = (item: SfxTakeSummary) => player.play(item, looping(item))
 
   // The note follows the sound on screen and its saved note; a refresh that
   // changes nothing about the decision leaves what is being typed alone.
@@ -77,7 +81,7 @@ export default function SfxReviewWorkspace({ onToast }: { onToast: (message: str
   const takeSha = take?.sha256
   useEffect(() => {
     if (!take || showDone) { player.stop(); return }
-    void player.play(take)
+    void hear(take)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [takeSha, showDone])
 
@@ -104,7 +108,7 @@ export default function SfxReviewWorkspace({ onToast }: { onToast: (message: str
     const target = typeof step === 'number' ? Math.max(0, Math.min(current.takes.length - 1, at + step)) : step.number - 1
     const chosen = current.takes[target]
     if (!chosen) return
-    if (chosen.sha256 === take.sha256) { void player.play(chosen); return }
+    if (chosen.sha256 === take.sha256) { void hear(chosen); return }
     setChosenTake(map => ({ ...map, [current.name]: chosen.sha256 }))
   }
 
@@ -206,7 +210,7 @@ export default function SfxReviewWorkspace({ onToast }: { onToast: (message: str
       const handled = () => { event.preventDefault(); event.stopPropagation() }
       if (key === 'ArrowLeft' || key === 'ArrowRight') { handled(); go(key === 'ArrowLeft' ? -1 : 1); return }
       if (key === 'ArrowUp' || key === 'ArrowDown') { handled(); switchTake(key === 'ArrowUp' ? -1 : 1); return }
-      if (key === ' ') { handled(); if (take && !showDone) void player.play(take); return }
+      if (key === ' ') { handled(); if (take && !showDone) void hear(take); return }
       if (event.repeat) return
       if (/^[1-9]$/.test(key)) { handled(); switchTake({ number: Number(key) }); return }
       const lower = key.toLowerCase()
@@ -223,6 +227,7 @@ export default function SfxReviewWorkspace({ onToast }: { onToast: (message: str
   if (loading) return <main className="workspace sfx-review"><div className="asset-loading"><LoaderCircle className="spin" /><span>Opening sound review…</span></div></main>
 
   const last = undo[undo.length - 1]
+  const position = current ? listPosition(sounds, current.name) : undefined
   const decided = queue.length - queue.filter(sound => matchesSfxFilter(sound, filter)).length
   const filterLabel = FILTERS.find(item => item.id === filter)?.label.toLowerCase() ?? ''
   const canDecide = Boolean(current && current.generated && !showDone && !busy)
@@ -275,11 +280,11 @@ export default function SfxReviewWorkspace({ onToast }: { onToast: (message: str
               : take && <div className="sfx-player">
                   <Waveform take={take} player={player} />
                   <div className="sfx-transport">
-                    <button type="button" className="secondary" data-testid="sfx-play" aria-keyshortcuts="Space" onClick={() => void player.play(take)}>
+                    <button type="button" className="secondary" data-testid="sfx-play" aria-keyshortcuts="Space" onClick={() => void hear(take)}>
                       <Play size={16} />{player.state.playing && player.state.sha === take.sha256 ? 'Replay' : 'Play'}<kbd>Space</kbd>
                     </button>
                     <button type="button" className="secondary" aria-keyshortcuts="S" disabled={!player.state.playing} onClick={player.stop}><Square size={14} />Stop<kbd>S</kbd></button>
-                    {take.loop && <span className="sfx-loop"><Repeat size={14} />Loops until stopped</span>}
+                    {looping(take) && <span className="sfx-loop"><Repeat size={14} />Loops until stopped</span>}
                     {player.state.blocked && <span className="sfx-blocked">The browser held the sound back. Press Space to hear it.</span>}
                   </div>
                   <div className="sfx-takes" role="group" aria-label="Takes">
@@ -300,7 +305,7 @@ export default function SfxReviewWorkspace({ onToast }: { onToast: (message: str
         {current && !showDone && <>
           <section>
             <h2 data-testid="sfx-name">{current.name}</h2>
-            <p className="quick-review-facts">{current.category || 'No category'} · {current.cueFileName}{current.onList ? '' : ' · not on the list'}</p>
+            <p className="quick-review-facts" data-testid="sfx-position">{current.category || 'No category'} · {current.cueFileName} · {position ? `#${position.position} of ${position.total} on the list` : 'not on the list'}</p>
             <p className="quick-review-decision" data-decision={current.decision}>
               <span className={`decision-chip decision-${current.decision}`}>{SFX_LABELS[current.decision]}</span>
               {current.decidedAt && <small>{new Date(current.decidedAt).toLocaleString()}</small>}
@@ -465,7 +470,7 @@ function Waveform({ take, player }: { take: SfxTakeSummary; player: Player }) {
 }
 
 interface Player {
-  play: (take: SfxTakeSummary) => Promise<void>
+  play: (take: SfxTakeSummary, loop: boolean) => Promise<void>
   stop: () => void
   buffer: (take: SfxTakeSummary) => Promise<AudioBuffer>
   progress: (sha256: string) => number | null
@@ -502,7 +507,7 @@ function usePlayer(): Player {
     if (current) { current.source.onended = null; try { current.source.stop() } catch { /* already ended */ } }
   }, [])
   const stop = useCallback(() => { ticket.current++; halt(); setState(value => ({ ...value, playing: false })) }, [halt])
-  const play = useCallback(async (take: SfxTakeSummary) => {
+  const play = useCallback(async (take: SfxTakeSummary, loop: boolean) => {
     const mine = ++ticket.current
     halt()
     const output = audio()
@@ -518,11 +523,11 @@ function usePlayer(): Player {
     if (output.state !== 'running') { setState({ sha: take.sha256, playing: false, blocked: true }); return }
     const source = output.createBufferSource()
     source.buffer = decoded
-    source.loop = take.loop
+    source.loop = loop
     source.connect(output.destination)
     source.onended = () => { if (playing.current?.source === source) { playing.current = undefined; setState(value => ({ ...value, playing: false })) } }
     source.start()
-    playing.current = { source, sha: take.sha256, started: output.currentTime, duration: decoded.duration, loop: take.loop }
+    playing.current = { source, sha: take.sha256, started: output.currentTime, duration: decoded.duration, loop }
     setState({ sha: take.sha256, playing: true, blocked: false })
   }, [audio, buffer, halt])
   const progress = useCallback((sha256: string) => {
