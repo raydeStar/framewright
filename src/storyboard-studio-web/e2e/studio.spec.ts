@@ -1017,19 +1017,27 @@ test('timeline clips and the volume slider persist real edits', async ({ page },
   verifyConsole()
 })
 
-/** One silent 8 kHz sample: a real WAV the studio imports as audio. */
+/** A short audible PCM tone, long enough for both browsers to decode a waveform. */
 function tinyWav() {
-  const wav = Buffer.alloc(46)
-  wav.write('RIFF', 0); wav.writeUInt32LE(38, 4); wav.write('WAVE', 8); wav.write('fmt ', 12)
-  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24)
-  wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(2, 40)
+  const rate = 48000
+  const samples = rate / 10
+  const wav = Buffer.alloc(44 + samples * 2)
+  wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVE', 8); wav.write('fmt ', 12)
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(rate, 24)
+  wav.writeUInt32LE(rate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(samples * 2, 40)
+  for (let index = 0; index < samples; index++) wav.writeInt16LE(Math.round(6000 * Math.sin(2 * Math.PI * 440 * index / rate)), 44 + index * 2)
   return wav
 }
 
 test('a sound effect gets its own lane and survives a reload', async ({ page }, testInfo) => {
   const verifyConsole = failOnConsoleErrors(page)
-  const suffix = testInfo.project.name === 'tablet' ? 'Tablet' : 'Desktop'
+  const suffix = `${testInfo.project.name} run ${testInfo.repeatEachIndex}`
+  const waveformRequests: string[] = []
+  page.on('request', request => {
+    if (request.resourceType() === 'fetch' && /\/api\/assets\/[^/]+\/content$/.test(request.url())) waveformRequests.push(request.url())
+  })
   await page.goto('/')
+  const canDecodeWaveforms = await page.evaluate(() => typeof AudioContext !== 'undefined')
   await page.getByRole('button', { name: 'Sequence' }).click()
   await expect(page.getByText('Sound design', { exact: true })).toBeVisible()
 
@@ -1044,12 +1052,16 @@ test('a sound effect gets its own lane and survives a reload', async ({ page }, 
   await expect(editor.getByText('Audio imported into the content-addressed studio library.')).toBeVisible()
   await editor.getByRole('button', { name: 'Save clip' }).click()
 
-  const clip = page.getByRole('button', { name: new RegExp(`Edit effects clip Hauler fire ${suffix}`) })
+  const clip = page.getByRole('button', { name: `Edit effects clip Hauler fire ${suffix}`, exact: true })
   await expect(clip).toContainText('Media')
+  // Media means the upload saved, not that its preview fetch finished. Reloading
+  // mid-fetch makes WebKit report an access-control error; let the bard finish.
+  await expect(clip.locator('.wave')).toHaveAttribute('data-waveform', canDecodeWaveforms ? 'decoded' : 'guide')
   await page.reload()
   await page.getByRole('button', { name: 'Sequence' }).click()
-  const reopened = page.getByRole('button', { name: new RegExp(`Edit effects clip Hauler fire ${suffix}`) })
+  const reopened = page.getByRole('button', { name: `Edit effects clip Hauler fire ${suffix}`, exact: true })
   await expect(reopened).toBeVisible()
+  await expect(reopened.locator('.wave')).toHaveAttribute('data-waveform', canDecodeWaveforms ? 'decoded' : 'guide')
   // Open by keyboard like the voice journey; the stacking journey below opens clips by tap.
   await reopened.focus()
   await reopened.press('Enter')
@@ -1059,6 +1071,8 @@ test('a sound effect gets its own lane and survives a reload', async ({ page }, 
   await savedEditor.getByRole('button', { name: 'Cancel' }).click()
   await expectNoHorizontalPageOverflow(page)
   await expectNoSeriousAccessibilityViolations(page)
+  // Browsers without Web Audio keep the guide without fetching unusable previews.
+  if (!canDecodeWaveforms) expect(waveformRequests).toEqual([])
   verifyConsole()
 })
 
