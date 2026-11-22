@@ -66,6 +66,7 @@ builder.Services.AddScoped<StudioRepository>();
 builder.Services.AddSingleton<ICompilerSkeletonProfiles, CompilerSkeletonProfiles>();
 builder.Services.AddScoped<AssetStore>();
 builder.Services.AddScoped<SfxReviewService>();
+builder.Services.AddSingleton<AssetEventHub>();
 builder.Services.AddSingleton<IVideoMediaProbe, FfprobeVideoMediaProbe>();
 builder.Services.AddSingleton<IVideoDeliveryConverter, FfmpegVideoDeliveryConverter>();
 builder.Services.AddScoped<AuthorityLibraryService>();
@@ -1039,8 +1040,68 @@ app.MapPost("/api/assets/models", async Task<IResult> (
     var form = await context.Request.ReadFormAsync(cancellationToken);
     var file = form.Files.GetFile("file");
     if (file is null) return Results.BadRequest(new { error = "The multipart field 'file' is required." });
-    return ToHttpResult(await assets.ImportModelAsync(file, cancellationToken));
+    // Optional: the image the model was made from, as an existing image's id
+    // (referenceAssetId) or uploaded alongside it (referenceImage). Checked
+    // before the model is stored, so a bad id never leaves an orphan model.
+    Guid? referenceId = null;
+    var referenceText = form["referenceAssetId"].ToString().Trim();
+    var referenceImage = form.Files.GetFile("referenceImage");
+    if (referenceText.Length > 0 && referenceImage is not null)
+        return Results.BadRequest(new { error = "Send referenceAssetId or referenceImage, not both." });
+    if (referenceText.Length > 0)
+    {
+        if (!Guid.TryParse(referenceText, out var parsed)) return Results.BadRequest(new { error = "referenceAssetId is not an asset id." });
+        if (await assets.ReferenceProblemAsync(parsed, null, cancellationToken) is { } problem) return Results.BadRequest(new { error = problem });
+        referenceId = parsed;
+    }
+    else if (referenceImage is not null)
+    {
+        var image = await assets.ImportImageAsync(referenceImage, cancellationToken);
+        if (image.Kind != RepositoryResultKind.Ok) return ToHttpResult(image);
+        referenceId = image.Value!.Id;
+    }
+    var model = await assets.ImportModelAsync(file, cancellationToken);
+    if (model.Kind != RepositoryResultKind.Ok || referenceId is null) return ToHttpResult(model);
+    return ToHttpResult(await assets.SetReferenceAsync(model.Value!.Id, referenceId, cancellationToken));
 }).DisableAntiforgery();
+
+// Link an asset to the image it was made from, or clear the link (null).
+app.MapPut("/api/assets/{assetId:guid}/reference", async Task<IResult> (Guid assetId, SetAssetReferenceRequest request, AssetStore assets, CancellationToken cancellationToken)
+    => ToHttpResult(await assets.SetReferenceAsync(assetId, request.ReferenceAssetId, cancellationToken)));
+
+// Library changes as they are saved, for open pages to pick up without a
+// reload: server-sent events named "asset", one JSON object each.
+app.MapGet("/api/assets/events", async (HttpContext context, AssetEventHub hub) =>
+{
+    var aborted = context.RequestAborted;
+    context.Response.Headers.ContentType = "text/event-stream";
+    context.Response.Headers.CacheControl = "no-cache";
+    using var subscription = hub.Subscribe();
+    try
+    {
+        await context.Response.WriteAsync("retry: 3000\n\n", aborted);
+        await context.Response.Body.FlushAsync(aborted);
+        while (!aborted.IsCancellationRequested)
+        {
+            using var tick = CancellationTokenSource.CreateLinkedTokenSource(aborted);
+            tick.CancelAfter(TimeSpan.FromSeconds(20));
+            bool ready;
+            try { ready = await subscription.Reader.WaitToReadAsync(tick.Token); }
+            catch (OperationCanceledException) when (!aborted.IsCancellationRequested)
+            {
+                // Quiet for a while: a comment keeps proxies and the browser from giving up.
+                await context.Response.WriteAsync(": keep-alive\n\n", aborted);
+                await context.Response.Body.FlushAsync(aborted);
+                continue;
+            }
+            if (!ready) break;
+            while (subscription.Reader.TryRead(out var change))
+                await context.Response.WriteAsync($"event: asset\ndata: {JsonSerializer.Serialize(change, AssetEventHub.Json)}\n\n", aborted);
+            await context.Response.Body.FlushAsync(aborted);
+        }
+    }
+    catch (OperationCanceledException) { }
+});
 
 app.MapGet("/api/assets/{assetId:guid}/model-profile", async Task<IResult> (
     Guid assetId, AssetStore assets, CancellationToken cancellationToken)

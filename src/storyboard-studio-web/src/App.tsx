@@ -19,6 +19,7 @@ const SceneWorkspace = lazy(() => import('./components/SceneWorkspace'))
 const SfxReviewWorkspace = lazy(() => import('./components/SfxReviewWorkspace'))
 import { BoardWorkspace, ReviewWorkspace, SequenceWorkspace, ShotWorkspace } from './components/StudioWorkspaces'
 import { FRAMEWRIGHT_WEBMCP_TOOL_NAMES, registerFramewrightWebMcp } from './webmcp'
+import { formatWorkspaceRoute, parseRoute, showRoute } from './routes'
 import type { AgentActivityEntry, AssetGenerationDraft, CodexAssistResponse, DirectorAssetView, DirectorSceneView, DirectorViewQuery, IntegrationSummary, JobSummary, PairingStatusSummary, ReferenceSummary, ShotRevisionProposalSummary, ShotSummary, StudioSnapshot, Workspace } from './types'
 
 const SketchWorkspace = lazy(() => import('./components/SketchWorkspace'))
@@ -36,10 +37,11 @@ const workspaceItems: { id: Workspace; label: string; icon: React.ReactNode }[] 
 
 export default function App() {
   const [studio, setStudio] = useState<StudioSnapshot | null>(null)
-  const [workspace, setWorkspace] = useState<Workspace>('board')
+  // The address says where the page was, so a refresh comes back to it.
+  const [workspace, setWorkspace] = useState<Workspace>(() => parseRoute(window.location.pathname, window.location.search).workspace)
   const [boardView, setBoardView] = useState<'shots' | 'authorities'>('shots')
   const [creatingProject, setCreatingProject] = useState(false)
-  const [selectedId, setSelectedId] = useState('')
+  const [selectedId, setSelectedId] = useState(() => parseRoute(window.location.pathname, window.location.search).shotId ?? '')
   const [reviewCandidateId, setReviewCandidateId] = useState<string>()
   const [tool, setTool] = useState<'select' | 'draw' | 'comment'>('select')
   const [setupOpen, setSetupOpen] = useState(() => new URLSearchParams(window.location.search).get('setup') === '1')
@@ -161,6 +163,12 @@ export default function App() {
   // Full view belongs to the visual surface currently being directed. Leaving
   // the workspace exits it, so the shell never stays hidden on another surface.
   useEffect(() => { setDirectorMode(false) }, [workspace])
+  // Every workspace but the asset library writes its own address here; the
+  // library writes its view, filter and open asset itself.
+  useEffect(() => {
+    if (!studio || workspace === 'assets') return
+    showRoute(formatWorkspaceRoute(workspace, selectedId || undefined))
+  }, [selectedId, studio, workspace])
 
   const selected = studio?.shots.find(x => x.id === selectedId) ?? studio?.shots[0]
   selectedShotRef.current = { id: selected?.id, version: selected?.version }

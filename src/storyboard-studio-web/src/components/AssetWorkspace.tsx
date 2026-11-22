@@ -10,14 +10,20 @@ import AssetNotesPanel from './AssetNotesPanel'
 import ReviewDecisionPanel from './ReviewDecisionPanel'
 import ShipDialog, { type ShipSource } from './ShipDialog'
 import QuickReviewWorkspace from './QuickReviewWorkspace'
+import AssetStepper from './AssetStepper'
+import { useAssetEvents } from './useAssetEvents'
+import { madeFrom, neighbours, referencesByName } from '../assetNavigation'
+import { currentAssetRoute, formatAssetRoute, showRoute, type AssetRoute } from '../routes'
 import { matchesReviewFilter, newQuickReviewSession, reviewBadge, reviewQueue, type QuickReviewSession, type ReviewFilter } from '../assetReview'
 import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorMode'
 import { useAssetDirectorView } from './useAssetDirectorView'
 
 type LibraryView = 'all' | 'images' | 'audio' | 'video' | 'models' | 'authorities' | 'archived' | `collection:${string}`
-export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority, onOpenGeneration, onOpenSequence, onJobQueued, onToast, ...director }: AssetDirectorControls & {
+export default function AssetWorkspace({ studio, initialAssetId, initialRoute = currentAssetRoute(), onEditAuthority, onOpenGeneration, onOpenSequence, onJobQueued, onToast, ...director }: AssetDirectorControls & {
   studio: StudioSnapshot
   initialAssetId?: string
+  /** Where the address said the library was, so a refresh lands back there. */
+  initialRoute?: AssetRoute
   onEditAuthority: (reference: ReferenceSummary) => void
   onOpenGeneration: (draft: AssetGenerationDraft) => void
   onOpenSequence: () => void
@@ -30,15 +36,15 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   const [usage, setUsage] = useState<Map<string, AssetUsageSummary>>(new Map())
   const [postered, setPostered] = useState<Set<string>>(new Set())
   const [rendering, setRendering] = useState<number>()
-  const [view, setView] = useState<LibraryView>('all')
-  const [query, setQuery] = useState('')
+  const [view, setView] = useState<LibraryView>(initialRoute.view)
+  const [query, setQuery] = useState(initialRoute.query)
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
-  const [sort, setSort] = useState<'newest' | 'name' | 'type'>('newest')
-  const [review, setReview] = useState<ReviewFilter>('all')
+  const [sort, setSort] = useState<'newest' | 'name' | 'type'>(initialRoute.sort)
+  const [review, setReview] = useState<ReviewFilter>(initialRoute.review)
   // Quick review: one asset at a time, decided from the keyboard. Where the
   // sitting is lives here, so stepping out to the full inspection view and
   // back picks it up on the same asset.
-  const [reviewing, setReviewing] = useState(false)
+  const [reviewing, setReviewing] = useState(Boolean(initialRoute.reviewing) && !initialAssetId)
   const reviewSession = useRef<QuickReviewSession>(newQuickReviewSession())
   const keepReviewSession = useCallback((session: QuickReviewSession) => { reviewSession.current = session }, [])
   const reviewDecided = useCallback((updated: AssetSummary) => setAssets(current => current.map(item => item.id === updated.id ? updated : item)), [])
@@ -51,7 +57,12 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     if (next.has(assetId)) next.delete(assetId); else next.add(assetId)
     return next
   })
-  const [selectedId, setSelectedId] = useState<string | undefined>(initialAssetId)
+  const [selectedId, setSelectedId] = useState<string | undefined>(initialAssetId ?? initialRoute.assetId)
+  // The address follows the library, so a refresh comes back to this view,
+  // filter and open asset rather than the front page.
+  useEffect(() => {
+    showRoute(formatAssetRoute({ view, assetId: selectedId, reviewing: reviewing && !selectedId, review, sort, query: query.trim() }))
+  }, [query, review, reviewing, selectedId, sort, view])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -93,6 +104,9 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     if (ticket === announceSequence.current) onToast(message)
   }, [onToast, refresh])
   useEffect(() => { void refresh().catch(reason => setError(reason instanceof Error ? reason.message : 'Could not open the asset library.')).finally(() => setLoading(false)) }, [refresh])
+  // An address naming an asset this project does not have (another project's,
+  // or one since removed) opens the library instead.
+  useEffect(() => { if (!loading && selectedId && !assets.some(item => item.id === selectedId)) setSelectedId(undefined) }, [assets, loading, selectedId])
   useEffect(() => {
     const finished = studio.jobs.filter(job =>
       Boolean(job.outputAssetId) &&
@@ -128,6 +142,43 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
   // pulling the whole model down, so it is offered rather than done: doing it
   // automatically put a library's worth of geometry ahead of everything the
   // artist was actually waiting for.
+  // Assets arriving while the page is open (an agent uploading, a job
+  // finishing) appear without a reload. Bursts are gathered into one refresh;
+  // the filter, sort and scroll stay as they are.
+  const [revisionSignal, setRevisionSignal] = useState(0)
+  const pendingRefresh = useRef<number | undefined>(undefined)
+  useAssetEvents(studio.project.id, event => {
+    window.clearTimeout(pendingRefresh.current)
+    pendingRefresh.current = window.setTimeout(() => { void refresh().catch(() => undefined) }, 400)
+    const open = assets.find(item => item.id === selectedId)
+    if (open && (event.assetId === open.id || (event.revisionFamilyId && (event.revisionFamilyId === open.revisionFamilyId || event.revisionFamilyId === open.id))))
+      setRevisionSignal(signal => signal + 1)
+  })
+  useEffect(() => () => window.clearTimeout(pendingRefresh.current), [])
+
+  // Previous and next from an asset's own view walk the list it was opened
+  // from: this view, filter, sort and search.
+  const step = selected && !reviewing ? neighbours(visible.map(item => item.id), selected.id) : undefined
+  const stepper = step && <AssetStepper position={step.position} total={step.total}
+    onPrevious={step.previous ? () => { setCameFrom(undefined); setSelectedId(step.previous) } : undefined}
+    onNext={step.next ? () => { setCameFrom(undefined); setSelectedId(step.next) } : undefined} />
+
+  // Models uploaded without a reference whose concept image has the same name
+  // ("<name> - concept"): offered as one confirmed action, since a library of
+  // them predates the link.
+  const linkable = useMemo(() => referencesByName(assets), [assets])
+  const [linking, setLinking] = useState<number>()
+  const linkByName = async () => {
+    const pairs = [...linkable]
+    if (!window.confirm(`Link ${pairs.length} model${pairs.length === 1 ? '' : 's'} to the image with the same name? Each link can be changed or removed on the model.`)) return
+    setLinking(pairs.length); setError(undefined)
+    try {
+      for (const pair of pairs) { await studioApi.setAssetReference(pair.model.id, pair.image.id); setLinking(left => (left ?? 1) - 1) }
+      await announce(`${pairs.length} model${pairs.length === 1 ? '' : 's'} linked to ${pairs.length === 1 ? 'its' : 'their'} reference image${pairs.length === 1 ? '' : 's'}.`)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not link those references.') }
+    finally { setLinking(undefined) }
+  }
+
   const missingPosters = useMemo(
     () => libraryAssets.filter(asset => asset.kind === 'Model' && !asset.isArchived && !postered.has(asset.id)),
     [libraryAssets, postered])
@@ -200,10 +251,16 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
     })
   }, [rawGenerationReferences])
 
-  const closeAsset = () => { director.onDirectorMode(false); setSelectedId(undefined) }
+  // Opening a model's reference image (or an image's model) remembers where
+  // it came from, so Back returns there rather than to the grid.
+  const [cameFrom, setCameFrom] = useState<string>()
+  const openLinked = (assetId: string) => { setCameFrom(selectedId); setSelectedId(assetId) }
+  const closeAsset = () => { director.onDirectorMode(false); setSelectedId(cameFrom); setCameFrom(undefined) }
   const pendingCount = reviewQueue(assets, 'Pending').length
-  if (selected?.kind === 'Model') return <ModelInspectionWorkspace {...director} asset={selected} onBack={closeAsset} backLabel={reviewing ? 'Quick review' : undefined} onError={setError} onChanged={announce} />
-  if (selected?.kind === 'Image') return <ImageRevisionWorkspace {...director} asset={selected} collections={collections} shots={studio.shots} references={generationReferences} onBack={closeAsset} onOpenGeneration={onOpenGeneration} onChanged={announce} onEditAuthority={onEditAuthority} />
+  if (selected?.kind === 'Model') return <ModelInspectionWorkspace {...director} asset={selected} onBack={closeAsset} backLabel={reviewing ? 'Quick review' : undefined} onError={setError} onChanged={announce}
+    library={assets} onOpenAsset={openLinked} stepper={stepper} revisionSignal={revisionSignal} />
+  if (selected?.kind === 'Image') return <ImageRevisionWorkspace key={selected.id} {...director} asset={selected} collections={collections} shots={studio.shots} references={generationReferences} onBack={closeAsset} onOpenGeneration={onOpenGeneration} onChanged={announce} onEditAuthority={onEditAuthority}
+    library={assets} onOpenAsset={openLinked} stepper={stepper} />
   // After the full views, so "Full inspection" from quick review opens one and
   // its back button lands in quick review again.
   if (reviewing) return <QuickReviewWorkspace assets={assets} session={reviewSession.current} onSession={keepReviewSession}
@@ -233,6 +290,12 @@ export default function AssetWorkspace({ studio, initialAssetId, onEditAuthority
         {activeCollection && <div className="asset-collection-actions"><button onClick={() => setCollectionEditor(activeCollection)}>Rename</button><button className="danger-text" onClick={async () => { if (!window.confirm(`Delete the ${activeCollection.name} collection? Its assets will move to Unfiled.`)) return; await studioApi.deleteAssetCollection(activeCollection.id); setView('all'); await announce('Collection removed; its assets are still safe in Unfiled.') }}>Delete</button></div>}
       </aside>
       <section className="asset-browser">
+        {linkable.length > 0 && (view === 'all' || view === 'models') && <div className="asset-thumbnail-prompt" data-testid="reference-by-name">
+          <span>{linkable.length} model{linkable.length === 1 ? ' has' : 's have'} an image with the same name but no reference link.</span>
+          <button type="button" disabled={linking !== undefined} onClick={() => void linkByName()}>
+            {linking === undefined ? 'Link them' : `Linking… ${linking} left`}
+          </button>
+        </div>}
         {missingPosters.length > 0 && <div className="asset-thumbnail-prompt">
           <span>{missingPosters.length} model{missingPosters.length === 1 ? ' has' : 's have'} no thumbnail yet.</span>
           <button type="button" disabled={rendering !== undefined} data-testid="render-thumbnails"
@@ -300,8 +363,9 @@ function ReviewBadge({ asset }: { asset: AssetSummary }) {
   return <em className={`decision-chip decision-${badge.decision}`} data-testid="asset-review-badge" data-decision={badge.decision} title={badge.title}>{badge.label}</em>
 }
 
-function ImageRevisionWorkspace({ asset, collections, shots, references, onBack, onOpenGeneration, onChanged, onEditAuthority, ...director }: AssetDirectorControls & {
+function ImageRevisionWorkspace({ asset, collections, shots, references, onBack, onOpenGeneration, onChanged, onEditAuthority, library, onOpenAsset, stepper, ...director }: AssetDirectorControls & {
   asset: AssetSummary; collections: AssetCollectionSummary[]; shots: ShotSummary[]; references: AssetGenerationReference[]
+  library: AssetSummary[]; onOpenAsset: (assetId: string) => void; stepper?: React.ReactNode
   onBack: () => void; onOpenGeneration: (draft: AssetGenerationDraft) => void; onChanged: (message: string) => Promise<void>; onEditAuthority: (reference: ReferenceSummary) => void
 }) {
   const [revisions, setRevisions] = useState<AssetSummary[]>([])
@@ -358,12 +422,12 @@ function ImageRevisionWorkspace({ asset, collections, shots, references, onBack,
   const promote = async () => { setBusy(true); setError(undefined); try { const authority = await studioApi.createReference({ name: name.trim(), category: authorityCategory, description: authorityDescription.trim(), lockedConstraint: authorityConstraint.trim(), accent: '#73b7cf', imageAssetId: active.id }); await onChanged(`${authority.name} created as an immutable reference.`); onEditAuthority(authority) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not promote this image to reference.') } finally { setBusy(false) } }
 
   return <main className={`workspace image-revision-workspace${director.directorMode ? ' director-mode' : ''}`}>
-    <header className="image-revision-header"><button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />Assets</button><div><p className="eyebrow">Still image studio</p><h1>{current.displayName}</h1><p>Iterate freely here. Only promotion creates immutable canon.</p></div><div className="image-revision-header-actions"><DirectorModeButton active={director.directorMode} onClick={() => director.onDirectorMode(!director.directorMode)} /><input ref={importRef} aria-label="Import image revision" className="sr-only" type="file" accept="image/png,image/jpeg" onChange={event => void importRevision(event.target.files?.[0])} /><button className="secondary" onClick={() => importRef.current?.click()} disabled={busy}><Upload size={16} />Import revision</button><button className="primary" onClick={generateRevision}><WandSparkles size={17} />{openReviewNotes.length > 0 ? `Regenerate from ${openReviewNotes.length} note${openReviewNotes.length === 1 ? '' : 's'}` : 'Create revision'}</button></div></header>
+    <header className="image-revision-header"><button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />Assets</button><div><p className="eyebrow">Still image studio</p><h1>{current.displayName}</h1><p>Iterate freely here. Only promotion creates immutable canon.</p></div>{stepper}<div className="image-revision-header-actions"><DirectorModeButton active={director.directorMode} onClick={() => director.onDirectorMode(!director.directorMode)} /><input ref={importRef} aria-label="Import image revision" className="sr-only" type="file" accept="image/png,image/jpeg" onChange={event => void importRevision(event.target.files?.[0])} /><button className="secondary" onClick={() => importRef.current?.click()} disabled={busy}><Upload size={16} />Import revision</button><button className="primary" onClick={generateRevision}><WandSparkles size={17} />{openReviewNotes.length > 0 ? `Regenerate from ${openReviewNotes.length} note${openReviewNotes.length === 1 ? '' : 's'}` : 'Create revision'}</button></div></header>
     {error && <p className="asset-error" role="alert">{error}</p>}
     <div className="image-revision-layout">
       <aside className="image-version-rail"><div><small>REVISION STACK</small><strong>{revisions.length || 1} version{revisions.length === 1 ? '' : 's'}</strong></div>{(revisions.length ? revisions : [asset]).map(item => { const itemIsCurrent = item.id === current.id; return <button key={item.id} className={active.id === item.id ? 'active' : ''} onClick={() => { setActiveId(item.id); setCompare(false) }}><img src={item.contentUrl} alt="" /><span><strong>v{item.revisionNumber ?? 1}</strong><small>{itemIsCurrent ? 'Current working image' : item.isArchived ? 'Archived' : item.revisionEngine || item.source}</small></span>{itemIsCurrent && <BadgeCheck size={15} />}</button> })}</aside>
       <section className="image-revision-stage"><div className="image-stage-toolbar"><span>{activeIsCurrent ? <><BadgeCheck size={15} />Current working image</> : `Viewing v${active.revisionNumber ?? 1}`}</span>{revisions.length > 1 && <button className={compare ? 'active' : ''} onClick={() => setCompare(value => !value)}><GitCompare size={16} />{compare ? 'Single view' : 'Compare to current'}</button>}</div>{compare && active.id !== current.id ? <div className="image-compare"><figure><figcaption>Current · v{current.revisionNumber ?? 1}</figcaption><img src={current.contentUrl} alt={`${current.displayName} current`} /></figure><figure><figcaption>Selected · v{active.revisionNumber ?? 1}</figcaption><img src={active.contentUrl} alt={`${active.displayName} selected`} /></figure></div> : <div className="image-revision-canvas"><img src={active.contentUrl} alt={active.displayName} /><AssetReviewPins key={active.id} assetId={active.id} assetLabel={`${active.displayName} v${active.revisionNumber ?? 1}`} onNotesChanged={setReviewNotes} onError={setError} /><span>v{active.revisionNumber ?? 1} · {active.width} × {active.height}</span></div>}<div className="image-revision-actions">{!activeIsCurrent && <button className="primary" onClick={() => void makeCurrent()} disabled={busy}><Check size={16} />Choose this revision</button>}<button className="secondary" onClick={generateRevision}><PenLine size={16} />{openReviewNotes.length > 0 ? `Regenerate from ${openReviewNotes.length} note${openReviewNotes.length === 1 ? '' : 's'}` : 'Edit with directions'}</button><a className="secondary button-link" href={active.contentUrl} download={active.originalFileName}><Download size={16} />Download</a><button className="danger-text" onClick={() => void archive()} disabled={busy}><Archive size={15} />Archive revision</button></div></section>
-      <aside className="image-revision-inspector" aria-label="Image asset details"><div className="image-inspector-heading"><p className="eyebrow">Image inspector</p><strong>Identity and use</strong></div><ReviewDecisionPanel asset={active} onDecided={async (_, message) => { await load(); await onChanged(message) }} /><label>Name<input value={name} onChange={event => setName(event.target.value)} /></label><label>Collection<select value={collectionId} onChange={event => setCollectionId(event.target.value)}><option value="">Unfiled</option>{collections.map(collection => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label><label>Tags <small>comma separated</small><input value={tags} onChange={event => setTags(event.target.value)} /></label><label>Notes<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Usage, continuity, or editorial notes" /></label><button className="secondary asset-save" onClick={() => void save()} disabled={busy || !name.trim()}>Save details</button><section className="revision-provenance"><h3>Revision provenance</h3><dl><div><dt>Route</dt><dd>{active.revisionEngine || active.source}</dd></div><div><dt>Created</dt><dd>{new Date(active.createdAt).toLocaleDateString()}</dd></div><div><dt>Content ID</dt><dd>{active.contentHash.slice(0, 12)}…</dd></div></dl>{active.revisionPrompt && <p>{active.revisionPrompt}</p>}</section><section className="revision-production"><h3>Use in production</h3><div className="asset-shot-picker"><select value={shotId} onChange={event => setShotId(event.target.value)}>{shots.map(shot => <option key={shot.id} value={shot.id}>{shot.code} · {shot.title}</option>)}</select><button onClick={() => void place()} disabled={busy || !shotId}><Plus size={15} />Add</button></div><details className="authority-promotion-disclosure"><summary className="secondary promote-authority"><BadgeCheck size={16} />Promote to reference</summary><div className="authority-promotion"><p>Freeze this exact image and its rules as reusable canon.</p><label>What this reference controls<select value={authorityCategory} onChange={event => setAuthorityCategory(event.target.value)}><option>Character</option><option>Role</option><option>Wardrobe</option><option>Pose</option><option>Location</option><option>Architecture</option><option>Prop</option><option>Style</option><option>World</option></select></label><label>Identity and context<textarea value={authorityDescription} onChange={event => setAuthorityDescription(event.target.value)} /></label><label>Locked constraint<textarea value={authorityConstraint} onChange={event => setAuthorityConstraint(event.target.value)} /></label><button className="primary" onClick={() => void promote()} disabled={busy || !name.trim() || !authorityDescription.trim() || !authorityConstraint.trim()}>Create immutable reference</button></div></details></section><ModelFromReference asset={active} onQueued={message => void onChanged(message)} /></aside>
+      <aside className="image-revision-inspector" aria-label="Image asset details"><div className="image-inspector-heading"><p className="eyebrow">Image inspector</p><strong>Identity and use</strong></div><ReviewDecisionPanel asset={active} onDecided={async (_, message) => { await load(); await onChanged(message) }} /><MadeFromThis models={madeFrom((revisions.length ? revisions : [asset]).map(item => item.id), library)} onOpen={onOpenAsset} /><label>Name<input value={name} onChange={event => setName(event.target.value)} /></label><label>Collection<select value={collectionId} onChange={event => setCollectionId(event.target.value)}><option value="">Unfiled</option>{collections.map(collection => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label><label>Tags <small>comma separated</small><input value={tags} onChange={event => setTags(event.target.value)} /></label><label>Notes<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Usage, continuity, or editorial notes" /></label><button className="secondary asset-save" onClick={() => void save()} disabled={busy || !name.trim()}>Save details</button><section className="revision-provenance"><h3>Revision provenance</h3><dl><div><dt>Route</dt><dd>{active.revisionEngine || active.source}</dd></div><div><dt>Created</dt><dd>{new Date(active.createdAt).toLocaleDateString()}</dd></div><div><dt>Content ID</dt><dd>{active.contentHash.slice(0, 12)}…</dd></div></dl>{active.revisionPrompt && <p>{active.revisionPrompt}</p>}</section><section className="revision-production"><h3>Use in production</h3><div className="asset-shot-picker"><select value={shotId} onChange={event => setShotId(event.target.value)}>{shots.map(shot => <option key={shot.id} value={shot.id}>{shot.code} · {shot.title}</option>)}</select><button onClick={() => void place()} disabled={busy || !shotId}><Plus size={15} />Add</button></div><details className="authority-promotion-disclosure"><summary className="secondary promote-authority"><BadgeCheck size={16} />Promote to reference</summary><div className="authority-promotion"><p>Freeze this exact image and its rules as reusable canon.</p><label>What this reference controls<select value={authorityCategory} onChange={event => setAuthorityCategory(event.target.value)}><option>Character</option><option>Role</option><option>Wardrobe</option><option>Pose</option><option>Location</option><option>Architecture</option><option>Prop</option><option>Style</option><option>World</option></select></label><label>Identity and context<textarea value={authorityDescription} onChange={event => setAuthorityDescription(event.target.value)} /></label><label>Locked constraint<textarea value={authorityConstraint} onChange={event => setAuthorityConstraint(event.target.value)} /></label><button className="primary" onClick={() => void promote()} disabled={busy || !name.trim() || !authorityDescription.trim() || !authorityConstraint.trim()}>Create immutable reference</button></div></details></section><ModelFromReference asset={active} onQueued={message => void onChanged(message)} /></aside>
     </div>
   </main>
 }
@@ -463,3 +527,12 @@ function describeAsset(asset: AssetSummary) {
   return `${asset.source} · ${size}`
 }
 
+/** The models made from an image, each opening its own view. */
+function MadeFromThis({ models, onOpen }: { models: AssetSummary[]; onOpen: (assetId: string) => void }) {
+  if (models.length === 0) return null
+  return <section className="made-from-this" data-testid="made-from-this"><h3>Models made from this</h3>
+    {models.map(model => <button type="button" key={model.id} className="secondary compact" onClick={() => onOpen(model.id)}>
+      <Box size={14} />{model.displayName}{model.revisionNumber ? <small>v{model.revisionNumber}</small> : null}
+    </button>)}
+  </section>
+}

@@ -1,10 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Archive, ArrowLeft, Bone, Box, Check, Download, Layers3, LoaderCircle, LockKeyhole, Ruler, TriangleAlert, Upload } from 'lucide-react'
 import { studioApi } from '../api'
 import { geometryBudget } from '../modelBudget'
 import { DirectorModeButton, type AssetDirectorControls } from './AssetDirectorMode'
 import AssetNotesPanel from './AssetNotesPanel'
 import ReviewDecisionPanel from './ReviewDecisionPanel'
+import ReferenceLink from './ReferenceLink'
 import { useAssetDirectorView } from './useAssetDirectorView'
 import type { KeptCamera } from '../inspectionCamera'
 import { openingLook, type SurfaceLook } from '../surfaceChannels'
@@ -22,9 +23,17 @@ const ModelPreparation = lazy(() => import('./ModelPreparation'))
  * geometry itself, the numbers measured from the stored bytes, and the library
  * organisation that can be edited without touching any of those facts.
  */
-export default function ModelInspectionWorkspace({ asset, onBack, backLabel = 'Asset library', onError, onChanged, ...director }: AssetDirectorControls & {
+export default function ModelInspectionWorkspace({ asset, onBack, backLabel = 'Asset library', onError, onChanged, library, onOpenAsset, stepper, revisionSignal, ...director }: AssetDirectorControls & {
   asset: AssetSummary
   onBack: () => void
+  /** The whole library, for the reference image and its picker. */
+  library?: AssetSummary[]
+  /** Opens another asset in its own view, such as the reference image. */
+  onOpenAsset?: (assetId: string) => void
+  /** Previous and next through the list this model was opened from. */
+  stepper?: ReactNode
+  /** Bumped when the server says this model's stack changed, so the revision list catches up. */
+  revisionSignal?: number
   /** Where the back button goes, in words: the library, or quick review when opened from there. */
   backLabel?: string
   onError: (message: string) => void
@@ -80,6 +89,8 @@ export default function ModelInspectionWorkspace({ asset, onBack, backLabel = 'A
   }, [])
 
   useEffect(() => { setActiveId(asset.id); void loadRevisions() }, [asset.id, loadRevisions])
+  // A revision that arrives while the model is open joins the stack on screen.
+  useEffect(() => { if (revisionSignal) void loadRevisions() }, [revisionSignal, loadRevisions])
   // The form follows the artist's choice of revision, not every refresh of the
   // revision list. Reacting to the list itself would wipe whatever they were
   // part-way through typing the moment a reload landed.
@@ -221,6 +232,7 @@ export default function ModelInspectionWorkspace({ asset, onBack, backLabel = 'A
     <header className="model-header">
       <button className="secondary compact" onClick={onBack}><ArrowLeft size={16} />{backLabel}</button>
       <div><p className="eyebrow">Model inspection</p><h1>{active.displayName}</h1></div>
+      {stepper}
       <span className="model-format"><Box size={15} />{profile?.container ?? 'GLB'}</span>
       <DirectorModeButton active={director.directorMode} onClick={() => director.onDirectorMode(!director.directorMode)} />
     </header>
@@ -273,6 +285,11 @@ export default function ModelInspectionWorkspace({ asset, onBack, backLabel = 'A
           <p className="model-note">A new revision never overwrites an earlier one. Every revision keeps its own file, measurements, and materials.</p>
         </section>
 
+        {library && onOpenAsset && <ReferenceLink asset={active} library={library} onOpen={onOpenAsset}
+          onChanged={async updated => {
+            await loadRevisions()
+            onChanged?.(updated.referenceAssetId ? `${updated.displayName} is linked to its reference image.` : `${updated.displayName} has no reference image now.`)
+          }} />}
         <ReviewDecisionPanel asset={active} onDecided={async (_, message) => { await loadRevisions(); onChanged?.(message) }} />
         <AssetNotesPanel assetId={active.id}
           capture={() => orbit.current ? { viewYaw: orbit.current.yaw, viewPitch: orbit.current.pitch } : undefined}

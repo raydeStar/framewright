@@ -131,6 +131,8 @@ export interface GenerationManifestSummary { id: string; shotId: string; shotCod
 export interface AssetSummary { id: string; projectId: string; kind: 'Image' | 'Video' | 'Audio' | 'Model'; originalFileName: string; mimeType: string; bytes: number; width?: number; height?: number; durationSeconds?: number; contentHash: string; contentUrl: string; createdAt: string; displayName: string; collectionId?: string; tags: string[]; notes: string; source: string; isArchived: boolean; updatedAt: string; revisionFamilyId?: string; revisionNumber?: number; isCurrentRevision: boolean; parentAssetId?: string; revisionPrompt: string; revisionEngine: string; preparationAcceptedAt?: string; preparationAcceptedBy: string; preparationAcceptanceNote: string; preparationTopologyChanged: boolean
   /** A person's decision about this revision, why, and when; and the send-back it answers, if any. */
   reviewDecision: AssetReviewDecision; reviewNote: string; reviewDecidedAt?: string | null
+  /** The image this asset was made from, such as a model's concept art. */
+  referenceAssetId?: string | null
   reviewAnswersAssetId?: string | null; reviewAnswersNote: string }
 export interface AssetCollectionSummary { id: string; projectId: string; name: string; color: string; sortOrder: number; assetCount: number; createdAt: string; updatedAt: string }
 /** Where one asset is actually used, across shots, scenes and clip bindings. */

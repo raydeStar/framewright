@@ -1577,7 +1577,12 @@ public sealed record AssetSummary(
     DateTimeOffset? ReviewDecidedAt = null,
     // The revision whose send-back this one answers, and what it asked for.
     Guid? ReviewAnswersAssetId = null,
-    string ReviewAnswersNote = "");
+    string ReviewAnswersNote = "",
+    // The image this asset was made from (a model's concept art), if one is linked.
+    Guid? ReferenceAssetId = null);
+
+/// <summary>Link an asset to the image it was made from, or clear the link with null.</summary>
+public sealed record SetAssetReferenceRequest(Guid? ReferenceAssetId);
 
 public sealed record AssetCollectionSummary(
     Guid Id,
