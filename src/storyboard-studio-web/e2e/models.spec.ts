@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -437,5 +437,281 @@ test('an unrigged humanoid is rigged as a candidate, shown bending, and accepted
     .find(asset => asset.id === rigged!.id)
   expect(after?.isCurrentRevision).toBe(true)
   expect(after?.preparationAcceptedAt).toBeTruthy()
+  verifyConsole()
+})
+
+/**
+ * The block as a part worth judging up close: two metres long, a few
+ * centimetres deep, and painted one matte 18% grey. The depth puts the middle
+ * of the part just behind its face, as it is on a railing or a panel, so the
+ * closest view looks at a surface rather than out from inside a solid. The
+ * grey is the card a light is exposed against: its stored base colour is
+ * sRGB 118, and how far a light shows it from 118 is how far that light is
+ * from showing paint as it was authored.
+ */
+function greyPanel(label: string) {
+  const bytes = ownFixture(block, label)
+  const jsonLength = bytes.readUInt32LE(12)
+  const document = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString('utf8'))
+  for (const material of document.materials)
+    material.pbrMetallicRoughness = { baseColorFactor: [0.18, 0.18, 0.18, 1], metallicFactor: 0, roughnessFactor: 1 }
+  document.nodes.push({ name: 'Panel', children: document.scenes[0].nodes, scale: [1, 1, 0.1] })
+  document.scenes[0].nodes = [document.nodes.length - 1]
+  let json = Buffer.from(JSON.stringify(document), 'utf8')
+  if (json.length % 4 !== 0) json = Buffer.concat([json, Buffer.alloc(4 - (json.length % 4), 0x20)])
+  const binary = bytes.subarray(20 + jsonLength)
+  const header = Buffer.alloc(20)
+  header.writeUInt32LE(0x46546c67, 0)
+  header.writeUInt32LE(2, 4)
+  header.writeUInt32LE(12 + 8 + json.length + binary.length, 8)
+  header.writeUInt32LE(json.length, 12)
+  header.writeUInt32LE(0x4e4f534a, 16)
+  return Buffer.concat([header, json, binary])
+}
+
+/**
+ * The picture inside the stage's frame. The frame itself is left out: its
+ * rounded corners show the focus ring drawn around the stage, which says
+ * where the keyboard is and nothing about the model.
+ */
+async function pictureOf(stage: Locator) {
+  await stage.scrollIntoViewIfNeeded()
+  const box = (await stage.boundingBox())!
+  const frame = 14
+  return stage.page().screenshot({
+    clip: { x: box.x + frame, y: box.y + frame, width: box.width - frame * 2, height: box.height - frame * 2 },
+  })
+}
+
+/** That picture once it has stopped changing: this viewer draws on demand, so a finished picture holds still. */
+async function settled(stage: Locator) {
+  let previous: Buffer | undefined
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const shot = await pictureOf(stage)
+    if (previous?.equals(shot)) return shot
+    previous = shot
+    await stage.page().waitForTimeout(150)
+  }
+  throw new Error('The model view never came to rest.')
+}
+
+/**
+ * What a picture of the stage shows: how much of it is the model's surface
+ * rather than the dark floor behind it, and the middle value of that surface.
+ * Read on a blank page, so nothing about the app decides what can be decoded.
+ */
+async function surfaceOf(lab: Page, picture: Buffer) {
+  return lab.evaluate(async encoded => {
+    const image = new Image()
+    image.src = `data:image/png;base64,${encoded}`
+    await image.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d', { willReadFrequently: true })!
+    context.drawImage(image, 0, 0)
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
+    const seen: number[] = []
+    let sampled = 0
+    for (let y = 0; y < canvas.height; y += 3) {
+      for (let x = 0; x < canvas.width; x += 3) {
+        sampled++
+        const green = data[(y * canvas.width + x) * 4 + 1]
+        // The floor and its grid are darker than any lit face of this part.
+        if (green > 85) seen.push(green)
+      }
+    }
+    seen.sort((a, b) => a - b)
+    return { coverage: seen.length / sampled, value: seen[Math.floor(seen.length / 2)] ?? 0 }
+  }, picture.toString('base64'))
+}
+
+const distanceShown = (metres: string) => new RegExp(`distance ${metres.replace('.', '\\.')} m$`)
+
+test('a part is judged under a look-dev light and from as close as it will be seen, by pointer, keys and touch', async ({ page }, testInfo) => {
+  test.setTimeout(150_000)
+  // Switching revisions aborts a GLB still in flight; WebKit reports the abort.
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const touchScreen = testInfo.project.name === 'tablet'
+  const name = `lookdev-panel-${testInfo.project.name}-${Date.now()}`
+  const lab = await page.context().newPage()
+  await openAssets(page)
+  await page.locator('input[type="file"]').setInputFiles({ name: `${name}.glb`, mimeType: 'model/gltf-binary', buffer: greyPanel(name) })
+  await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
+  await page.getByRole('button', { name: /^Models/ }).click()
+  await page.getByRole('button', { name: `Open ${name}` }).click()
+  const viewer = page.getByTestId('model-viewer')
+  const stage = page.getByTestId('model-stage')
+  const orbit = page.getByTestId('model-viewer-orbit')
+  const light = page.getByTestId('model-light')
+  await expect(viewer).toHaveAttribute('data-state', 'ready')
+  await expect(stage).toHaveAttribute('data-loaded-max', '2,1,0.075')
+
+  // It opens under the even light and at the framing it always had.
+  await expect(viewer).toHaveAttribute('data-light', 'inspection')
+  await expect(light).toHaveAttribute('aria-pressed', 'false')
+  await expect(light).toHaveText('Look-dev off')
+  await expect(orbit).toHaveText(distanceShown('5.20'))
+  const opening = await settled(stage)
+  await testInfo.attach('opening-inspection', { body: opening, contentType: 'image/png' })
+  expect((await surfaceOf(lab, opening)).coverage, 'the whole part is in view, with floor around it').toBeLessThan(0.3)
+
+  // The keys bring the camera in to a quarter of a metre and no nearer. On a
+  // two-metre part the limit used to be 80 cm.
+  await stage.focus()
+  for (let step = 0; step < 25; step++) await stage.press('+')
+  await expect(orbit).toHaveText(distanceShown('0.28'))
+  for (let step = 0; step < 6; step++) await stage.press('+')
+  await expect(orbit).toHaveText(distanceShown('0.25'))
+  await stage.press('-')
+  await expect(orbit).toHaveText(distanceShown('0.28'))
+  await stage.press('+')
+  await expect(orbit).toHaveText(distanceShown('0.25'))
+  // The numbers are not the proof: at that distance the surface fills the view.
+  const closeInspection = await settled(stage)
+  await testInfo.attach('close-inspection', { body: closeInspection, contentType: 'image/png' })
+  const even = await surfaceOf(lab, closeInspection)
+  // A tablet's stage is a wide strip, and its far end looks past the part.
+  expect(even.coverage, 'the face of the part fills most of the stage').toBeGreaterThan(0.6)
+  // The even light shows an 18% grey well above the 118 it is stored as.
+  expect(even.value).toBeGreaterThan(140)
+
+  // The look-dev light, from the keyboard. The viewer draws only when asked,
+  // so the picture changing at all is the proof that the switch redrew it.
+  await light.focus()
+  await light.press('Enter')
+  await expect(light).toHaveAttribute('aria-pressed', 'true')
+  await expect(light).toHaveText('Look-dev on')
+  await expect(viewer).toHaveAttribute('data-light', 'lookdev')
+  await expect.poll(async () => (await pictureOf(stage)).equals(closeInspection)).toBe(false)
+  const closeLookdev = await settled(stage)
+  await testInfo.attach('close-lookdev', { body: closeLookdev, contentType: 'image/png' })
+  const filmic = await surfaceOf(lab, closeLookdev)
+  expect(filmic.coverage).toBeGreaterThan(0.6)
+  // Mid-grey reads as mid-grey: within a sixth of a stop of the stored 118 on
+  // a face that is turned a little away from the key.
+  expect(filmic.value).toBeGreaterThan(100)
+  expect(filmic.value).toBeLessThan(130)
+
+  // And back, by pointer or by touch: the default view is the picture it was, to the pixel.
+  if (touchScreen) await light.tap()
+  else await light.click()
+  await expect(light).toHaveAttribute('aria-pressed', 'false')
+  await expect.poll(async () => (await pictureOf(stage)).equals(closeInspection)).toBe(true)
+
+  // A single channel is unlit and is not tone-mapped, so it shows the stored
+  // numbers under either light: base colour 0.18 is sRGB 118 and roughness 1
+  // is white, and the two pictures are the same picture.
+  const channelUnder = async (channel: string) => {
+    await page.getByTestId(`model-channel-${channel}`).click()
+    await expect(page.getByTestId(`model-channel-${channel}`)).toHaveAttribute('aria-pressed', 'true')
+    await expect(light).toBeDisabled()
+    return settled(stage)
+  }
+  const colourEven = await channelUnder('colour')
+  const roughnessEven = await channelUnder('roughness')
+  await page.getByTestId('model-channel-lit').click()
+  await expect(light).toBeEnabled()
+  await light.click()
+  await expect(viewer).toHaveAttribute('data-light', 'lookdev')
+  const colourFilmic = await channelUnder('colour')
+  const roughnessFilmic = await channelUnder('roughness')
+  expect(colourFilmic.equals(colourEven), 'base colour is the same picture under both lights').toBe(true)
+  expect(roughnessFilmic.equals(roughnessEven), 'roughness is the same picture under both lights').toBe(true)
+  expect(colourFilmic.equals(roughnessFilmic)).toBe(false)
+  const storedColour = (await surfaceOf(lab, colourFilmic)).value
+  expect(storedColour).toBeGreaterThanOrEqual(117)
+  expect(storedColour).toBeLessThanOrEqual(119)
+  expect((await surfaceOf(lab, roughnessFilmic)).value).toBe(255)
+  await page.getByTestId('model-channel-lit').click()
+  await expect.poll(async () => (await pictureOf(stage)).equals(closeLookdev)).toBe(true)
+
+  // Sliding the view at this distance moves the camera without turning it or
+  // changing how far away it is.
+  const beforeSlide = await orbit.innerText()
+  await stage.press('Shift+ArrowUp')
+  await stage.press('Shift+ArrowLeft')
+  await expect(orbit).toHaveText(beforeSlide)
+  const leftAt = await settled(stage)
+
+  // Another revision of the part opens under the same light and from the same
+  // spot, and so does the first when it is opened again. The two revisions are
+  // the same panel, so the same light from the same spot is the same picture:
+  // a control that only said look-dev would not pass.
+  const revisions = page.getByTestId('model-revisions')
+  await revisions.locator('input[type="file"]').setInputFiles({
+    name: `${name}-v2.glb`, mimeType: 'model/gltf-binary', buffer: greyPanel(`${name}-v2`),
+  })
+  await expect(revisions.getByRole('button', { name: /^v2/ })).toBeVisible()
+  for (const revision of [/^v1/, /^v2/, /^v1/]) {
+    await revisions.getByRole('button', { name: revision }).click()
+    await expect(revisions.getByRole('button', { name: revision })).toHaveAttribute('aria-pressed', 'true')
+    await expect(viewer).toHaveAttribute('data-state', 'ready')
+    await expect(viewer).toHaveAttribute('data-light', 'lookdev')
+    await expect(light).toHaveAttribute('aria-pressed', 'true')
+    await expect(orbit).toHaveText(beforeSlide)
+    await expect.poll(async () => (await pictureOf(stage)).equals(leftAt)).toBe(true)
+  }
+  // Seen whole again, it is not the picture it opened with: the light stayed.
+  await page.getByRole('button', { name: 'Frame', exact: true }).click()
+  await expect(orbit).toHaveText(distanceShown('5.20'))
+  const openingLookdev = await settled(stage)
+  await testInfo.attach('opening-lookdev', { body: openingLookdev, contentType: 'image/png' })
+  expect(openingLookdev.equals(opening)).toBe(false)
+
+  // Two fingers: moving them apart brings the camera in by the same ratio.
+  // These are touch pointers handed to the stage, not a finger on glass.
+  const box = (await stage.boundingBox())!
+  const [centreX, centreY] = [box.x + box.width / 2, box.y + box.height / 2]
+  const finger = (pointerId: number, isPrimary: boolean, x: number, y = centreY) =>
+    ({ pointerId, pointerType: 'touch', isPrimary, clientX: x, clientY: y, button: 0, buttons: 1 })
+  const pinch = async (from: number, to: number) => {
+    await stage.dispatchEvent('pointerdown', finger(11, true, centreX - from / 2))
+    await stage.dispatchEvent('pointerdown', finger(12, false, centreX + from / 2))
+    await stage.dispatchEvent('pointermove', finger(11, true, centreX - to / 2))
+    await stage.dispatchEvent('pointermove', finger(12, false, centreX + to / 2))
+    await stage.dispatchEvent('pointerup', finger(12, false, centreX + to / 2))
+    await stage.dispatchEvent('pointerup', finger(11, true, centreX - to / 2))
+  }
+  await pinch(100, 200)
+  await expect(orbit).toHaveText(distanceShown('2.60'))
+  await pinch(200, 100)
+  await expect(orbit).toHaveText(distanceShown('5.20'))
+  for (let gesture = 0; gesture < 4; gesture++) await pinch(60, 240)
+  await expect(orbit).toHaveText(distanceShown('0.25'))
+  // Two fingers moved together slide the view: the picture moves, the camera does not turn.
+  await page.getByRole('button', { name: 'Reset view' }).click()
+  const beforeTwoFingers = await orbit.innerText()
+  const framed = await settled(stage)
+  await stage.dispatchEvent('pointerdown', finger(11, true, centreX - 50))
+  await stage.dispatchEvent('pointerdown', finger(12, false, centreX + 50))
+  await stage.dispatchEvent('pointermove', finger(11, true, centreX - 50, centreY + 60))
+  await stage.dispatchEvent('pointermove', finger(12, false, centreX + 50, centreY + 60))
+  await expect(orbit).toHaveText(beforeTwoFingers)
+  expect((await settled(stage)).equals(framed)).toBe(false)
+  // The finger left down when the other lifts carries on as an orbit.
+  await stage.dispatchEvent('pointerup', finger(12, false, centreX + 50, centreY + 60))
+  await stage.dispatchEvent('pointermove', finger(11, true, centreX + 30, centreY + 60))
+  await expect(orbit).not.toHaveText(beforeTwoFingers)
+  await expect(orbit).toHaveText(distanceShown('5.20'))
+  await stage.dispatchEvent('pointerup', finger(11, true, centreX + 30, centreY + 60))
+
+  // The wheel, where the device has one, stops at the same quarter of a metre.
+  if (!touchScreen) {
+    await page.mouse.move(centreX, centreY)
+    for (let step = 0; step < 31; step++) await page.mouse.wheel(0, -120)
+    await expect(orbit).toHaveText(distanceShown('0.25'))
+    for (let step = 0; step < 80; step++) await page.mouse.wheel(0, 120)
+    await expect(orbit).toHaveText(distanceShown('80.00'))
+  }
+
+  // The light chosen here is not saved anywhere. A refresh reopens the part
+  // from its address, afresh: under the even light, at its opening framing.
+  await expect(viewer).toHaveAttribute('data-light', 'lookdev')
+  await page.reload()
+  await expect(viewer).toHaveAttribute('data-state', 'ready')
+  await expect(viewer).toHaveAttribute('data-light', 'inspection')
+  await expect(orbit).toHaveText(distanceShown('5.20'))
+  await lab.close()
   verifyConsole()
 })

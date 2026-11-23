@@ -209,6 +209,81 @@ measured from the stored bytes, and a browser journey asserts the two agree axis
 for axis — an orientation swap between file and view would break that agreement
 even though the picture would still look like a plausible object.
 
+### Two lights
+
+A lit surface is inspected under one of two lights, chosen with the **Look-dev**
+toggle in the viewer bar. They answer different questions, so neither replaces
+the other.
+
+| | Inspection (the default) | Look-dev |
+| --- | --- | --- |
+| Flat ambient | 0.75 | none |
+| Key, from (1, 2, 1.4) | 1.9 | 1.9 |
+| Fill, from (-1.1, -1.8, -0.9) | 1.1 | none |
+| Room environment | 0.65 | 1.0 |
+| Tone map | none | ACES filmic, exposure 0.35 |
+
+The **inspection light** is even on purpose. Ambient, a key, a fill from below
+and a dim room leave no face of a prop unreadable, which is what finding a torn
+surface needs. It is not a light for judging paint: it puts about twice the
+light on the lit side of a surface that its base colour assumes and shows the
+result without a tone map. A matte 18% grey card turned to face the key, stored as
+sRGB 118, is shown as about 165; a mid teal authored as sRGB (76, 116, 108) is
+shown as about (113, 163, 153). Paint reads pastel, metal has little to
+reflect, and highlights clip.
+
+The **look-dev light** asks what the surface will look like in an engine. The
+room becomes the main light, the flat ambient and the fill are turned off so
+occlusion and shading keep their depth, one key stays for shape and a
+highlight, and the picture goes through three.js's ACES filmic tone map. The
+exposure is a measurement, not a taste: 0.35 is the value at which that same
+grey card facing the key is shown as sRGB 118. The teal above is then shown as
+about (70, 115, 106). Changing the key or the room means measuring the exposure
+again, and a unit test holds the three numbers together.
+
+What look-dev is not:
+
+- It is not any engine's own tone curve, sky, or exposure. It is the same kind
+  of picture — image-based light and a filmic curve, exposed for mid-grey — and
+  an asset still has to be seen in the engine it is bound for.
+- Nothing casts a shadow. Occlusion comes from the model's own occlusion map.
+- The light does not turn with the camera. A face turned away from the key and
+  the bright side of the room is shown two and a half to three stops down (the
+  grey card reads about sRGB 36 to 52 there), as it would be on the shaded side of a
+  lit scene. The inspection light is the one that reads those faces.
+
+The single-channel views — Colour, Normal, Roughness, Metal — are unlit and
+bypass the tone map, so they show the stored numbers under either light and the
+toggle is unavailable while one is shown. The clay surface and the wireframe
+are lit, and follow the toggle. The floor grid keeps its colours under both.
+
+The light is part of how a surface is being looked at, with paint, wireframe
+and channel: it is carried to the next revision of the same stack, so two paint
+jobs are judged under one light. It is not saved. A model opened afresh is
+under the inspection light.
+
+### Close inspection
+
+The inspection camera's distance is in metres, measured to the point it looks
+at, and is shown with its yaw and pitch under the view. The wheel, a two-finger
+pinch, and the plus and minus keys all move it between the same two limits:
+
+- **Nearest:** 0.25 m, or 0.4 of the model's longest side where that is nearer
+  still, and never nearer than twice the camera's near plane (2 cm). A part is
+  judged from where a person will stand, and that distance does not grow with
+  the part; the limit used to be 0.4 of the longest side for every model, which
+  held a two-metre part 80 cm away. A fitting under 62.5 cm keeps the closer
+  limit it already had.
+- **Farthest:** 40 times the model's longest side.
+
+Two fingers moved together slide the view, as right-drag and shift-drag do, so
+a touch screen reaches every part of a model it has closed in on.
+
+The point the camera looks at starts at the middle of the model's bounds. On a
+thin part that is just behind the surface. On a thick one it is deep inside, and
+the nearest views are from within the mesh: slide the view until the point is on
+the surface to be judged before closing in.
+
 A browser without WebGL keeps an honest fallback: the measurements, materials,
 and supported-subset panels remain, and the surface says the 3D view is
 unavailable rather than showing an empty rectangle.
