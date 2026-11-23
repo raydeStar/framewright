@@ -235,6 +235,7 @@ export default function QuickReviewWorkspace({ assets, session, onSession, onExi
   }, [upNext])
 
   const last = undo[undo.length - 1]
+  const reference = current?.referenceAssetId ? merged.find(asset => asset.id === current.referenceAssetId) : undefined
   const decided = queue.length - waiting
   const filterLabel = filter === 'all' ? 'assets' : REVIEW_LABELS[filter].toLowerCase()
   const showDone = finished || queue.length === 0
@@ -291,6 +292,12 @@ export default function QuickReviewWorkspace({ assets, session, onSession, onExi
             {current.reviewNote && <p className="quick-review-quote">“{current.reviewNote}”</p>}
             {current.reviewAnswersNote && <p className="quick-review-answers"><CornerUpLeft size={13} />Answers a send-back: “{current.reviewAnswersNote}”</p>}
           </section>
+          {reference && <section>
+            <h3>Reference image</h3>
+            <button type="button" className="reference-thumb" data-testid="quick-review-reference" onClick={() => onInspect(reference.id)} title="Open the reference image">
+              <img src={reference.contentUrl} alt="" /><span><strong>{reference.displayName}</strong><small>Open the image</small></span>
+            </button>
+          </section>}
           {current.revisionPrompt && <section>
             <h3>This revision</h3>
             <p className="quick-review-text">{current.revisionPrompt}</p>

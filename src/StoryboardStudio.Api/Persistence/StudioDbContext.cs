@@ -3,7 +3,7 @@ using StoryboardStudio.Api.Services;
 
 namespace StoryboardStudio.Api.Persistence;
 
-public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, IProjectScope scope) : DbContext(options)
+public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, IProjectScope scope, AssetEventHub? events = null) : DbContext(options)
 {
     /// <summary>
     /// The project every scoped read is filtered to.
@@ -211,13 +211,39 @@ public sealed class StudioDbContext(DbContextOptions<StudioDbContext> options, I
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         StampNewRows();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        var changes = AssetChanges();
+        var saved = base.SaveChanges(acceptAllChangesOnSuccess);
+        if (changes.Count > 0) events?.Publish(changes);
+        return saved;
     }
 
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         StampNewRows();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        var changes = AssetChanges();
+        var saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        if (changes.Count > 0) events?.Publish(changes);
+        return saved;
+    }
+
+    /// <summary>
+    /// The library rows this save adds or changes, told to open pages once the
+    /// save has succeeded. Read here rather than at each call site, so every
+    /// way an asset arrives (upload, revision, generation, an agent) is covered.
+    /// </summary>
+    private List<AssetChangeEvent> AssetChanges()
+    {
+        if (events is null || events.SubscriberCount == 0) return [];
+        return [.. ChangeTracker.Entries<AssetRecord>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified)
+            .Select(entry => new AssetChangeEvent(
+                entry.State == EntityState.Added
+                    ? entry.Entity.ParentAssetId is not null || entry.Entity.RevisionNumber > 1 ? "revision-added" : "asset-added"
+                    // An uploaded model becomes a revision when it is attached
+                    // to a stack: the same row, newly given a parent.
+                    : entry.Property(x => x.ParentAssetId) is { IsModified: true, OriginalValue: null, CurrentValue: not null }
+                        ? "revision-added" : "asset-updated",
+                entry.Entity.Id, entry.Entity.ProjectId, entry.Entity.Kind, entry.Entity.RevisionFamilyId, entry.Entity.RevisionNumber))];
     }
 
     private void StampNewRows()
@@ -633,6 +659,8 @@ public sealed class AssetRecord
     /// </summary>
     public Guid? ReviewAnswersAssetId { get; set; }
     public string ReviewAnswersNote { get; set; } = "";
+    /// <summary>The image this asset was made from, such as a model's concept art. Shown beside it and linked back.</summary>
+    public Guid? ReferenceAssetId { get; set; }
 }
 
 public sealed class AssetCollectionRecord

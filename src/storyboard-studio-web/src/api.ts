@@ -283,6 +283,8 @@ export const studioApi = {
   assetRevisions: (assetId: string) => request<AssetSummary[]>(`/api/assets/${assetId}/revisions`),
   addAssetRevision: (parentAssetId: string, assetId: string, prompt = 'Imported revision', engine = 'Imported') => request<AssetSummary>(`/api/assets/${parentAssetId}/revisions`, { method: 'POST', body: JSON.stringify({ assetId, prompt, engine }) }),
   makeAssetRevisionCurrent: (assetId: string) => request<AssetSummary>(`/api/assets/${assetId}/make-current`, { method: 'POST' }),
+  /** Link an asset to the image it was made from, or clear the link with null. */
+  setAssetReference: (assetId: string, referenceAssetId: string | null) => request<AssetSummary>(`/api/assets/${assetId}/reference`, { method: 'PUT', body: JSON.stringify({ referenceAssetId }) }),
   updateAsset: (assetId: string, body: { displayName: string; collectionId?: string; tags: string[]; notes: string }) => request<AssetSummary>(`/api/assets/${assetId}`, { method: 'PUT', body: JSON.stringify(body) }),
   archiveAsset: (assetId: string) => request<AssetSummary>(`/api/assets/${assetId}/archive`, { method: 'POST' }),
   restoreAsset: (assetId: string) => request<AssetSummary>(`/api/assets/${assetId}/restore`, { method: 'POST' }),

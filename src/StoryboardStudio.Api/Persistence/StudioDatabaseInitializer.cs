@@ -35,6 +35,7 @@ public static class StudioDatabaseInitializer
     private const string BlockoutPersonCardMigration = "20261008-blockout-person-and-card-v24";
     private const string JobWarningMigration = "20261101-job-warnings-v25";
     private const string SfxReviewMigration = "20261113-sfx-review-decisions-v26";
+    private const string AssetReferenceMigration = "20261122-asset-reference-image-v27";
 
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -379,6 +380,16 @@ public static class StudioDatabaseInitializer
                 """, cancellationToken), cancellationToken);
         }
 
+        // A model can name the image it was made from. Nothing had one before,
+        // so the column starts empty everywhere.
+        if (!await HasMigrationAsync(db, AssetReferenceMigration, cancellationToken))
+        {
+            if (existingDatabase && !migrationBackupCreated)
+                await CreatePreMigrationBackupAsync(db, databasePath, AssetReferenceMigration, cancellationToken);
+            await RunMigrationAsync(db, AssetReferenceMigration,
+                () => EnsureColumnAsync(db, "Assets", "ReferenceAssetId", "TEXT NULL", cancellationToken), cancellationToken);
+        }
+
         await RestoreActiveProjectAsync(db, scope.ServiceProvider, cancellationToken);
         await SeedReferencesAsync(db, cancellationToken);
 
@@ -533,6 +544,7 @@ public static class StudioDatabaseInitializer
             BlockoutPersonCardMigration => "blockout-plan-items-carry-a-person-pose-and-a-card-project-image",
             JobWarningMigration => "a-running-job-carries-an-attention-warning-that-never-fails-it",
             SfxReviewMigration => "project-scoped-sound-review-decision-note-and-accepted-take-per-moss-sound-name",
+            AssetReferenceMigration => "asset-names-the-image-it-was-made-from-and-revisions-inherit-it",
             YuE2CompositionMigration => "provider-independent-immutable-music-compositions-revisions-and-render-associations",
             YuE2ArtifactManifestMigration => "music-revision-plan-artifact-manifest-linked-to-worker-output",
             _ => throw new InvalidOperationException($"Schema migration '{migrationId}' has no frozen checksum contract.")

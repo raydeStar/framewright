@@ -547,6 +547,8 @@ public sealed class AssetStore
         next.CollectionId = parent.CollectionId;
         next.TagsJson = parent.TagsJson;
         next.Notes = parent.Notes;
+        // A reworked model was still made from the same concept.
+        next.ReferenceAssetId ??= parent.ReferenceAssetId;
         // A revision of something sent back is the answer to that request, and
         // says so; so is a further revision of an answer nobody has judged yet.
         // It still starts Pending: it is a new row that nobody has looked at.
@@ -925,6 +927,33 @@ public sealed class AssetStore
         public SortedSet<string> Where { get; } = new(StringComparer.Ordinal);
     }
 
+    /// <summary>Why an asset could not be a reference image, or null when it can.</summary>
+    public async Task<string?> ReferenceProblemAsync(Guid referenceAssetId, Guid? forAssetId, CancellationToken cancellationToken)
+    {
+        if (referenceAssetId == forAssetId) return "An asset cannot be its own reference.";
+        var reference = await db.Assets.SingleOrDefaultAsync(x => x.Id == referenceAssetId, cancellationToken);
+        if (reference is null) return "There is no asset with that id in this project.";
+        return reference.Kind == nameof(AssetKind.Image) ? null : "A reference has to be an image.";
+    }
+
+    /// <summary>
+    /// Links an asset to the image it was made from, or clears the link. Only
+    /// that one row changes; earlier revisions keep whatever they had.
+    /// </summary>
+    public async Task<RepositoryResult<AssetSummary>> SetReferenceAsync(Guid assetId, Guid? referenceAssetId, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.SingleOrDefaultAsync(x => x.Id == assetId, cancellationToken);
+        if (asset is null) return RepositoryResult<AssetSummary>.NotFound();
+        if (referenceAssetId is { } referenceId && await ReferenceProblemAsync(referenceId, assetId, cancellationToken) is { } problem)
+            return RepositoryResult<AssetSummary>.Invalid(problem);
+        var previous = asset.ReferenceAssetId;
+        asset.ReferenceAssetId = referenceAssetId;
+        asset.UpdatedAt = timeProvider.GetUtcNow();
+        AddAudit("AssetReferenceLinked", "Asset", asset.Id, new { reference = referenceAssetId, previous });
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<AssetSummary>.Ok(Map(asset));
+    }
+
     private static AssetSummary Map(AssetRecord x) => new(
         x.Id, x.ProjectId, Enum.Parse<AssetKind>(x.Kind), x.OriginalFileName, x.MimeType,
         x.Bytes, x.Width, x.Height, x.DurationSeconds, x.ContentHash, $"/api/assets/{x.Id}/content", x.CreatedAt,
@@ -934,7 +963,7 @@ public sealed class AssetStore
         x.RevisionFamilyId, x.RevisionNumber, x.IsCurrentRevision, x.ParentAssetId, x.RevisionPrompt ?? "", x.RevisionEngine ?? "",
         x.PreparationAcceptedAt, x.PreparationAcceptedBy ?? "", x.PreparationAcceptanceNote ?? "", x.PreparationTopologyChanged,
         Enum.TryParse<AssetReviewDecision>(x.ReviewDecision, out var decision) ? decision : AssetReviewDecision.Pending,
-        x.ReviewNote ?? "", x.ReviewDecidedAt, x.ReviewAnswersAssetId, x.ReviewAnswersNote ?? "");
+        x.ReviewNote ?? "", x.ReviewDecidedAt, x.ReviewAnswersAssetId, x.ReviewAnswersNote ?? "", x.ReferenceAssetId);
 
     private void AddAudit(string type, string targetType, Guid targetId, object payload) => db.AuditEvents.Add(new AuditEventRecord { Id = Guid.NewGuid(), Type = type, TargetType = targetType, TargetId = targetId.ToString(), PayloadJson = JsonSerializer.Serialize(payload), CreatedAt = timeProvider.GetUtcNow() });
     private static string? ValidateCollection(string name, string color)

@@ -2465,3 +2465,29 @@ dialog.studio-dialog.edit-dialog.ship-dialog { width: min(620px, calc(100vw - 32
 .sfx-sources small{color:var(--quiet);font-weight:400}
 .sfx-sources input,.sfx-sources textarea{width:100%;padding:7px 9px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-2);color:var(--text);font:var(--text-xs) ui-monospace,monospace}
 .sfx-not-generated h2{color:var(--muted)}
+
+/* Previous and next on an asset's own view, through the list it came from. */
+.asset-stepper{display:inline-flex;align-items:center;gap:8px;margin-left:auto}
+.asset-stepper span{min-width:72px;color:var(--muted);font-size:var(--text-xs);font-variant-numeric:tabular-nums;text-align:center}
+.asset-stepper kbd{margin-left:4px;padding:1px 5px;border:1px solid var(--line-strong);border-radius:4px;background:var(--surface-2);color:var(--quiet);font:var(--text-2xs) ui-monospace,monospace}
+/* The format pill gives way to the stepper; the inspector lists the format too. */
+.asset-stepper+.model-format{display:none}
+/* The image a model was made from, and the way to link one. */
+.reference-link h2{display:flex;align-items:center;gap:7px;margin:0 0 9px;color:var(--muted);font-size:var(--text-sm);letter-spacing:.08em;text-transform:uppercase}
+.reference-thumb{display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;gap:10px;width:100%;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--text);text-align:left;cursor:pointer}
+.reference-thumb:hover{border-color:var(--accent)}
+.reference-thumb img{width:72px;height:72px;border-radius:6px;background:var(--surface-void);object-fit:contain}
+.reference-thumb span{display:grid;gap:2px;min-width:0}
+.reference-thumb strong{overflow:hidden;font-size:var(--text-xs);text-overflow:ellipsis;white-space:nowrap}
+.reference-thumb small{color:var(--accent);font-size:var(--text-2xs)}
+.reference-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+.reference-picker{display:grid;gap:8px;margin-top:8px}
+.reference-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px;max-height:260px;overflow-y:auto}
+.reference-options button{display:grid;gap:3px;padding:4px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);color:var(--muted);cursor:pointer}
+.reference-options button.is-on,.reference-options button:hover{border-color:var(--accent)}
+.reference-options img{width:100%;aspect-ratio:1;border-radius:4px;background:var(--surface-void);object-fit:contain}
+.reference-options small{overflow:hidden;font-size:var(--text-2xs);text-overflow:ellipsis;white-space:nowrap}
+.made-from-this{display:grid;gap:6px;margin:12px 0}
+.made-from-this h3{margin:0;color:var(--muted);font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase}
+.made-from-this button{justify-content:flex-start}
+.made-from-this small{margin-left:auto;color:var(--quiet)}
