@@ -119,6 +119,7 @@ public sealed class GenerationAdapterContractTests : IDisposable
         {
             Assert.StartsWith(Path.Combine(Path.GetTempPath(), "Framewright", "codex-imagegen"), workingDirectory, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("--ephemeral", arguments);
+            Assert.Contains("--json", arguments);
             Assert.Contains("workspace-write", arguments);
             Assert.Contains("--image", arguments);
             Assert.Contains(arguments, value => value.Contains("01-current-frame.png", StringComparison.OrdinalIgnoreCase));
@@ -156,6 +157,47 @@ public sealed class GenerationAdapterContractTests : IDisposable
         Assert.Contains("IMAGE 2: Lantern Trial Look (Style) v3", runtime.StandardInput, StringComparison.Ordinal);
         Assert.Contains("Apply this exemplar's rendering language globally", runtime.StandardInput, StringComparison.Ordinal);
         Assert.Contains("IMAGE 3: Mara Vey (Character) v5", runtime.StandardInput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CodexImageGenRecoversTheFinalImageFromOnlyItsOwnThread()
+    {
+        var threadId = Guid.NewGuid();
+        var images = Path.Combine(root, "generated_images");
+        var thread = Directory.CreateDirectory(Path.Combine(images, threadId.ToString("D")));
+        var otherThread = Directory.CreateDirectory(Path.Combine(images, Guid.NewGuid().ToString("D")));
+        var final = Path.Combine(thread.FullName, "final.png");
+        var draft = Path.Combine(thread.FullName, "draft.png");
+        var unrelated = Path.Combine(otherThread.FullName, "next.png");
+        await File.WriteAllBytesAsync(final, PixelPng);
+        await File.WriteAllBytesAsync(draft, [.. PixelPng, 1]);
+        await File.WriteAllBytesAsync(unrelated, [.. PixelPng, 2]);
+        var timestamp = DateTime.UtcNow;
+        File.SetLastWriteTimeUtc(draft, timestamp.AddMinutes(-2));
+        File.SetLastWriteTimeUtc(final, timestamp.AddMinutes(-1));
+        File.SetLastWriteTimeUtc(unrelated, timestamp);
+        var cliOutput = JsonSerializer.Serialize(new { type = "thread.started", thread_id = threadId })
+            + "\n{\"type\":\"turn.started\"}\n";
+        var runtime = new FakeCodexRuntime((_, _) => Task.FromResult(new CodexProcessResult(true, 0, cliOutput, "")));
+        var adapter = new CodexImageGenerationAdapter(runtime, Configuration(new Dictionary<string, string?>
+        {
+            ["Integrations:Codex:NonInteractiveImageEnabled"] = "true"
+        }));
+
+        var previousHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", root);
+            var context = Context(final) with { Route = GenerationRoute.PrecisionDraft, Composition = null, CompositionPath = null };
+            var result = await adapter.ExecuteAsync(context, CancellationToken.None);
+            await using var output = result.Content;
+            Assert.Equal(PixelPng, await ReadAllAsync(output));
+            Assert.True(File.Exists(final));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", previousHome);
+        }
     }
 
     [Fact]
