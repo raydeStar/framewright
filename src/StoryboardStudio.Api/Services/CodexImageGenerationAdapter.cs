@@ -68,7 +68,7 @@ public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfigur
             var sandbox = configuration["Integrations:Codex:Sandbox"] is "danger-full-access"
                 ? "danger-full-access"
                 : "workspace-write";
-            var arguments = new List<string> { "exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", sandbox, "-C", root };
+            var arguments = new List<string> { "exec", "--ephemeral", "--json", "--skip-git-repo-check", "--sandbox", sandbox, "-C", root };
             foreach (var image in images) { arguments.Add("--image"); arguments.Add(image); }
             arguments.Add("--color"); arguments.Add("never"); arguments.Add("-");
             // Codex cannot reconnect to an interrupted CLI child. Persist the
@@ -81,7 +81,10 @@ public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfigur
             if (!result.Started) throw new GenerationDispatchException($"Codex ImageGen could not start: {Bound(result.StandardError)}", false);
             if (result.ExitCode != 0) throw new GenerationDispatchException($"Codex ImageGen failed: {Diagnose(result.StandardError.Length > 0 ? result.StandardError : result.StandardOutput)}", true, context.JobId.ToString("N"));
             await context.ReportAsync(90, "Validating Codex ImageGen result", cancellationToken);
-            var generated = FindGeneratedImage(root, images) ?? throw new GenerationDispatchException("Codex completed without writing a PNG or JPEG result in its isolated job directory.", true, context.JobId.ToString("N"));
+            var generated = DetectMime(outputPath) is not null ? outputPath
+                : FindGeneratedImage(root, images) ?? FindThreadGeneratedImage(result.StandardOutput);
+            if (generated is null)
+                throw new GenerationDispatchException("Codex completed without writing a PNG or JPEG result in its isolated job directory or its Codex thread output directory.", true, context.JobId.ToString("N"));
             var info = new FileInfo(generated);
             if (info.Length is <= 0 or > AssetStore.MaxImageBytes) throw new GenerationDispatchException("Codex produced an empty image or one larger than Framewright's 25 MB safety limit.", true, context.JobId.ToString("N"));
             var mime = DetectMime(generated) ?? throw new GenerationDispatchException("Codex produced a file that is not a recognizable PNG or JPEG.", true, context.JobId.ToString("N"));
@@ -132,6 +135,7 @@ public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfigur
         {(context.CompositionPath is not null ? "The first attached image is the current visual base. Preserve unmentioned content and apply the labeled authorities exactly where the packet directs." : attachmentMap.Count > 0 ? "This is a new composition guided by labeled authority images; their original crops and backgrounds are not scene layout." : "This is text-to-image; construct the frame only from the supplied packet.")}
         Do not add text, labels, borders, watermarks, UI, or annotation marks unless the packet explicitly requests visible text in the scene.
         Return exactly one final raster image. Save it as PNG at this exact path: {outputPath}
+        If ImageGen saves it in the tool's output directory, copy the final image to the requested path. If the copy is unavailable, leave the final image in the tool's output directory. Generate any replacement after the draft so the most recent output is the final selection.
 
         {BuildPriorityDirection(context)}
 
@@ -275,6 +279,41 @@ public sealed class CodexImageGenerationAdapter(ICodexRuntime runtime, IConfigur
     private static string? FindGeneratedImage(string root, IReadOnlyCollection<string> inputs) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
         .Where(path => !inputs.Contains(path, StringComparer.OrdinalIgnoreCase)).Where(path => DetectMime(path) is not null)
         .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
+
+    /// <summary>ImageGen saves to the current Codex thread when the CLI cannot copy into the job workspace.</summary>
+    private static string? FindThreadGeneratedImage(string standardOutput)
+    {
+        // The CLI documents thread.started as the first JSONL event. Scoping
+        // the lookup to its GUID keeps concurrent generations independent.
+        using var events = new StringReader(standardOutput);
+        var firstEvent = events.ReadLine();
+        if (string.IsNullOrWhiteSpace(firstEvent)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(firstEvent);
+            var entry = document.RootElement;
+            if (entry.ValueKind != JsonValueKind.Object
+                || !entry.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String
+                || !type.ValueEquals("thread.started")
+                || !entry.TryGetProperty("thread_id", out var threadId) || threadId.ValueKind != JsonValueKind.String
+                || !Guid.TryParseExact(threadId.GetString(), "D", out var id)) return null;
+
+            var codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+            if (string.IsNullOrWhiteSpace(codexHome))
+                codexHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+            var directory = new DirectoryInfo(Path.Combine(codexHome, "generated_images", id.ToString("D")));
+            if (!directory.Exists || directory.Attributes.HasFlag(FileAttributes.ReparsePoint)) return null;
+            return directory.EnumerateFiles("*", new EnumerationOptions { AttributesToSkip = FileAttributes.ReparsePoint })
+                .Where(file => DetectMime(file.FullName) is not null)
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .ThenBy(file => file.Name, StringComparer.Ordinal)
+                .Select(file => file.FullName)
+                .FirstOrDefault();
+        }
+        catch (JsonException) { return null; }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
 
     private static string? DetectMime(string path)
     {

@@ -101,6 +101,9 @@ public sealed class CodexRuntime(IConfiguration configuration) : ICodexRuntime
             // stdin that never closes lets the CLI block indefinitely. Callers
             // close this pipe immediately after starting the process.
             RedirectStandardInput = true,
+            // Codex reads UTF-8 from stdin. Its prompt starts with the first
+            // character, so send no byte-order mark.
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             // Redirected streams default to the console codepage on Windows, which
             // corrupts the CLI's UTF-8 output. See RunProcessAsync for the detail.
             StandardOutputEncoding = Encoding.UTF8,
