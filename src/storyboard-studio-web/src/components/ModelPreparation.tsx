@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bone, Check, Eye, LoaderCircle, Scaling, TriangleAlert, X } from 'lucide-react'
+import { Bone, Check, Eye, LayoutGrid, LoaderCircle, Scaling, TriangleAlert, X } from 'lucide-react'
 import { studioApi } from '../api'
 import { autoOffer, manualBudgetProblem, MAXIMUM_BUDGET, MINIMUM_BUDGET, preparationBudget } from '../modelBudget'
 import BlenderInstallNote from './BlenderInstallNote'
@@ -9,6 +9,7 @@ import type {
   ModelGenerationReadiness,
   ModelPreparationEvidence,
   ModelProfileSummary,
+  ModelSectionPaintPlan,
   ModelTriangleBudget,
 } from '../types'
 
@@ -44,6 +45,11 @@ import type {
  * is shown before anything runs. Typing a number is still there, one step
  * away. When the compiler cannot answer, there is no Auto and no invented
  * number either: the artist types one.
+ *
+ * A large prop can also be painted again in sections, from the picture linked
+ * to it, because the painter saw the whole of it through the same twelve small
+ * views it gives a lantern. Whether this revision can be, and what it costs, is
+ * the server's answer for this model, shown before anything is queued.
  */
 export default function ModelPreparation({ asset, profile, budget, onQueued, onDecided }: {
   asset: AssetSummary
@@ -56,6 +62,8 @@ export default function ModelPreparation({ asset, profile, budget, onQueued, onD
   const [readiness, setReadiness] = useState<ModelGenerationReadiness>()
   const [cullReadiness, setCullReadiness] = useState<ModelGenerationReadiness>()
   const [rigReadiness, setRigReadiness] = useState<ModelGenerationReadiness>()
+  // This revision's answer about sections: undefined while asking, null if it could not be asked.
+  const [sectionPlan, setSectionPlan] = useState<ModelSectionPaintPlan | null>()
   // Only ever consulted when the compiler has already refused for this reason.
   // A ray cannot see through glass, so culling a lantern empties it through the
   // panes, and this is the artist saying nothing behind them is meant to show.
@@ -87,6 +95,17 @@ export default function ModelPreparation({ asset, profile, budget, onQueued, onD
       .catch(() => { if (live) setRigReadiness(undefined) })
     return () => { live = false }
   }, [])
+
+  // Asked again when the picture linked to it changes: that is the commonest
+  // reason it could not be painted in sections a moment ago.
+  useEffect(() => {
+    let live = true
+    setSectionPlan(undefined)
+    studioApi.modelSectionPaint(asset.id)
+      .then(answer => { if (live) setSectionPlan(answer) })
+      .catch(() => { if (live) setSectionPlan(null) })
+    return () => { live = false }
+  }, [asset.id, asset.referenceAssetId])
 
   // A typed number belongs to the revision it was typed for.
   useEffect(() => { setManual(false); setManualBudget('') }, [asset.id])
@@ -167,6 +186,19 @@ export default function ModelPreparation({ asset, profile, budget, onQueued, onD
       onQueued(`${queued.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That rig could not be queued.')
+    } finally { setBusy(false) }
+  }
+
+  // Every face painted again from the linked picture, a section at a time. It
+  // comes back the way every derivative does: beside this one, unaccepted.
+  const paintSections = async () => {
+    setBusy(true); setError(undefined); setEvidence(undefined)
+    try {
+      const queued = await studioApi.paintModelInSections(asset.id, `${asset.displayName} (painted in sections)`)
+      setJob(queued)
+      onQueued(`${queued.shotCode} queued. It keeps going if you leave this screen.`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'That could not be queued.')
     } finally { setBusy(false) }
   }
 
@@ -298,6 +330,26 @@ export default function ModelPreparation({ asset, profile, budget, onQueued, onD
       <button type="button" className="secondary" data-testid="model-rig-create"
         disabled={busy || running} onClick={() => void rig()}>
         <Bone size={15} />{running ? 'Rigging…' : 'Rig as a humanoid'}
+      </button>
+    </div>}
+
+    {sectionPlan && <div className="model-sections" data-testid="model-sections-section"
+      data-can-queue={sectionPlan.canQueue ? 'true' : 'false'}>
+      <p className="model-note">
+        Or paint a large prop again in sections. The painter saw all of it through the same twelve
+        small views it gives a lantern, so up close it is smeared; cut into parts about the size of a
+        small prop, each painted on its own from the linked picture, it is as sharp as one. This is
+        for props. Every face is painted again, so on a hero prop whose top was painted a second time
+        as if it were a head, that hard band goes along with the soft paint below it.
+      </p>
+      {sectionPlan.canQueue
+        ? <p className="model-note" data-testid="model-sections-cost">{sectionPlan.cost}</p>
+        : <p className="model-note" data-testid="model-sections-refusal">
+            <TriangleAlert size={14} /> {sectionPlan.refusal}
+          </p>}
+      <button type="button" className="secondary" data-testid="model-paint-sections"
+        disabled={busy || running || !sectionPlan.canQueue} onClick={() => void paintSections()}>
+        <LayoutGrid size={15} />{running ? 'Painting…' : 'Paint in sections'}
       </button>
     </div>}
 

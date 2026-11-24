@@ -296,6 +296,20 @@ export interface ModelGenerationReadiness {
   remeshDecidesBudget?: boolean
   /** True when preparing a painted model re-bakes its paint after the reduction and compares it with the original. */
   preparationKeepsPaint?: boolean
+  /** Present when the compiler can paint a large prop again in sections: the lengths sent, and what it costs. */
+  paintSections?: ModelSectionsOffer | null
+}
+/** What painting in sections means here: the lengths this studio sends the compiler, and the cost in a sentence. */
+export interface ModelSectionsOffer { minimumLengthMetres: number; sectionMetres: number; maximumSections: number; cost: string }
+/**
+ * Whether one model revision can be painted again in sections, and what it
+ * costs, answered before anything is queued. A refusal is one plain sentence.
+ */
+export interface ModelSectionPaintPlan {
+  assetId: string; canQueue: boolean; refusal: string | null; cost: string
+  longestMetres: number; materialCount: number
+  referenceAssetId: string | null; referenceName: string | null
+  minimumLengthMetres: number; sectionMetres: number; maximumSections: number
 }
 /**
  * Which Blender the compiler is given. An explicit setting or environment

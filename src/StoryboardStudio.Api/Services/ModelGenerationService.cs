@@ -46,6 +46,7 @@ public sealed class ModelGenerationService(
     public const string CompressTexturesStage = "compress-textures";
     public const string CullUnseenStage = "cull-unseen";
     public const string PaintHeadStage = "paint-head";
+    public const string PaintSectionsStage = "paint-sections";
     public const string RigStage = "rig";
 
     /// <summary>Which of the two things a frozen packet is asking for.</summary>
@@ -55,10 +56,11 @@ public sealed class ModelGenerationService(
     public const string CompressWork = "compress";
     public const string CullWork = "cull";
     public const string RigWork = "rig";
+    public const string SectionsWork = "sections";
 
     /// <summary>Every work kind that starts from a model and delivers a revision beside it.</summary>
     private static bool IsDerivativeWork(string? work) =>
-        work is PrepareWork or SurfaceWork or CompressWork or CullWork or RigWork;
+        work is PrepareWork or SurfaceWork or CompressWork or CullWork or RigWork or SectionsWork;
 
     /// <summary>
     /// How close the camera will get. Everything that follows from it is a
@@ -105,7 +107,48 @@ public sealed class ModelGenerationService(
     private const string SetAtlas = "2048";
     private const string HeadFrom = "0.78";
     private const string HeadFeather = "0.03";
-    private static readonly string[] HeadEnds = ["top", "left", "right"];
+
+    /// <summary>
+    /// What a hero prop says where a figure says where its head is. A prop has
+    /// no head, and the head pass on one paints its top again as if it were a
+    /// face: a 2.2 m mast came back crisp dark iron above a hard line and flat
+    /// putty below it. A prop is painted again in sections instead, which
+    /// covers every face and so leaves no line.
+    /// </summary>
+    public const string NoHead = "none";
+    private static readonly string[] HeadEnds = ["top", "left", "right", NoHead];
+
+    /// <summary>
+    /// What painting in sections is told, and what the artist is told it
+    /// costs. The painter sees a whole model through twelve views of 768
+    /// pixels whatever its size, so a 45 cm prop gets about 0.6 mm of surface
+    /// a painted pixel and a 2.2 m skiff about 3 mm. Sections of about the size
+    /// of a small prop get back the small prop's scale. A model shorter than
+    /// the minimum is already painted at that scale and passes through; the
+    /// section count is capped because each one is a painter run of its own.
+    /// These are sent rather than left to the compiler's defaults, so the
+    /// sentence the artist reads before queuing is what the stage was told.
+    ///
+    /// The finer cut is the one the owner judged. At 0.6 m a 2.2 m mast came
+    /// out at about 1.3 mm a painted pixel in six sections; at 0.45 m, a 0.2
+    /// overlap and a 0.05 margin of context a 2.2 m skiff came out at about
+    /// 0.7 mm in 45 sections, and the owner called it impressive. Overlap and
+    /// context are sent with the length because the compiler's defaults (0.25
+    /// and 0.1) would make each finer section paint a third more than it keeps.
+    /// </summary>
+    public const double SectionsMinimumLength = 1.2;
+    public const double SectionLength = 0.45;
+    public const double SectionOverlap = 0.2;
+    public const double SectionContext = 0.05;
+    public const int MaximumSections = 48;
+
+    /// <summary>
+    /// What a section costs, as measured on the workstation that ran them: six
+    /// sections of a 2.2 m mast in 11.6 minutes, 45 of the skiff in 109, and 32
+    /// of a 98k-triangle skiff at about 3.5 each. It is said as a rough figure
+    /// because another GPU and another mesh are another figure.
+    /// </summary>
+    private const int MinutesPerSection = 3;
     private const int HeroColourSize = 4096;
     private const int HeroDataSize = 2048;
     private const int HeroTextureQuality = 92;
@@ -236,6 +279,28 @@ public sealed class ModelGenerationService(
         new(ReviewViewsStage),
     ];
 
+    /// <summary>
+    /// What a large prop goes through to be painted again in sections.
+    ///
+    /// The section pass reads the reviewed model itself, not an adoption: it
+    /// moves no vertex and no UV, only lays new paint on the same sheet. The
+    /// export after it is the same gate every derivative leaves through, and
+    /// the fixed views are rendered from the source and from the result,
+    /// because "sharper and still the same object" is a claim somebody has to
+    /// be able to check by looking.
+    /// </summary>
+    private static readonly RouteStepPlan[] SectionsPlan =
+    [
+        new(ReviewViewsStage, ReadsOriginal: true),
+        new(PaintSectionsStage, ReadsOriginal: true),
+        new(BrowserPayloadStage),
+        new(ReviewViewsStage),
+    ];
+
+    /// <summary>Every stage painting in sections needs, for the capability check.</summary>
+    public static readonly string[] SectionsRoute =
+        [.. SectionsPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
+
     /// <summary>Every stage rigging needs, for the capability check.</summary>
     public static readonly string[] RigRoute =
         [.. RigPlan.Select(step => step.Stage).Distinct(StringComparer.Ordinal)];
@@ -285,17 +350,26 @@ public sealed class ModelGenerationService(
     /// this thing has glass, because most props have none and a stage that ran
     /// anyway would have to guess which colour was a window -- turning an
     /// ordinary painted surface see-through.
+    ///
+    /// A hero is painted a second time up close, one of two ways, and never
+    /// both. A figure or an animal has its head painted again on its own. A
+    /// prop has no head, and the head pass on one leaves a hard line where its
+    /// top was repainted as if it were a face; a large prop is painted again in
+    /// sections instead, which covers every face. The artist says which it is.
     /// </summary>
-    private static string[] RouteFor(string? glassColour, string detail = SetDetail)
+    private static string[] RouteFor(
+        string? glassColour, string detail = SetDetail, string headEnd = "top", bool sections = false)
     {
         var hero = string.Equals(detail, HeroDetail, StringComparison.Ordinal);
+        var prop = string.Equals(headEnd, NoHead, StringComparison.Ordinal);
         var route = new List<string>
         {
             GeometryStage, StageMeshStage, RemeshStage, UvUnwrapStage, TextureStage,
         };
-        // The head is painted again straight after the body, on the body's
-        // own paint, before anything else touches the file.
-        if (hero) route.Add(PaintHeadStage);
+        // The second paint goes straight after the first, on the first's own
+        // sheet, before anything else touches the file.
+        if (hero && !prop) route.Add(PaintHeadStage);
+        if (hero && prop && sections) route.Add(PaintSectionsStage);
         if (!string.IsNullOrWhiteSpace(glassColour)) route.Add(GlassStage);
         route.Add(BrowserPayloadStage);
         // Re-encoded last, from the exported payload, so what is compressed is
@@ -323,6 +397,7 @@ public sealed class ModelGenerationService(
         [CompressTexturesStage] = "Re-encoding its textures",
         [CullUnseenStage] = "Looking from every side, and dropping what nothing sees",
         [PaintHeadStage] = "Painting the head again, on its own, up close",
+        [PaintSectionsStage] = "Painting it again in sections, each at a small prop's scale",
         [RigStage] = "Building a skeleton, binding it, and bending it through five poses",
     };
 
@@ -405,6 +480,14 @@ public sealed class ModelGenerationService(
     /// argument six weeks later all read the same answer: these bytes, that
     /// stage, this compiler.
     /// </summary>
+    /// <param name="PaintReferenceAssetId">
+    /// The picture a model already in the library is painted again from, when
+    /// it is painted in sections: the one linked to it when the work was asked
+    /// for, frozen by identity and by hash, so re-linking the model afterwards
+    /// does not change what a queued job paints from. Generation needs none;
+    /// its source is the picture. Old packets carry none, and could never have
+    /// been asking for sections, so no new packet version is needed.
+    /// </param>
     /// <param name="AutoTriangleBudget">
     /// True when the artist left the budget to the compiler. The number is
     /// then the compiler's to decide when the stage runs, and its receipt says
@@ -420,7 +503,8 @@ public sealed class ModelGenerationService(
         int ColourSize = 0, int DataSize = 0, int Quality = 0, string? TextureFormat = null,
         int Directions = 0, double Most = 0, double LargestPart = 0,
         bool IgnoreTransparency = false, string Detail = SetDetail, string HeadEnd = "top",
-        bool AutoTriangleBudget = false);
+        bool AutoTriangleBudget = false,
+        Guid? PaintReferenceAssetId = null, string? PaintReferenceContentHash = null);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -482,6 +566,10 @@ public sealed class ModelGenerationService(
     public Task<ModelGenerationReadiness> SurfacingPreflightAsync(CancellationToken cancellationToken) =>
         PreflightAsync(SurfacingRoute, "Changing a model's surfaces", cancellationToken);
 
+    /// <summary>The same question again, for the route that paints a model again in sections.</summary>
+    public Task<ModelGenerationReadiness> SectionsPreflightAsync(CancellationToken cancellationToken) =>
+        PreflightAsync(SectionsRoute, "Painting a model in sections", cancellationToken);
+
     private async Task<ModelGenerationReadiness> PreflightAsync(
         string[] route, string work, CancellationToken cancellationToken, bool offerDetails = false)
     {
@@ -521,8 +609,24 @@ public sealed class ModelGenerationService(
             Details: offerDetails ? DetailChoices(capabilities) : null,
             BlenderInstall: capabilities.BlenderInstall,
             RemeshDecidesBudget: RemeshDecidesBudget(capabilities),
-            PreparationKeepsPaint: capabilities.CanRun(RebakeMapsStage));
+            PreparationKeepsPaint: capabilities.CanRun(RebakeMapsStage),
+            PaintSections: capabilities.CanRun(PaintSectionsStage) ? SectionsOffer : null);
     }
+
+    /// <summary>
+    /// What painting in sections costs, said the same way wherever it is
+    /// offered. The count is not known until the compiler has cut the model, so
+    /// what is promised is its ceiling and what each one takes.
+    /// </summary>
+    private static readonly ModelSectionsOffer SectionsOffer = new(
+        SectionsMinimumLength, SectionLength, MaximumSections,
+        $"A prop longer than {Metres(SectionsMinimumLength)} m is cut into sections of about {Metres(SectionLength)} m "
+        + "and each is painted again on its own, so it is as sharp up close as a small prop. One painter run a section, "
+        + $"roughly {MinutesPerSection} minutes each, up to {MaximumSections}, on a GPU with 21 GiB free; a prop shorter "
+        + "than that passes straight through at no cost.");
+
+    /// <summary>A length as a person reads one: 1.2, 0.6, 2.35.</summary>
+    private static string Metres(double metres) => metres.ToString("0.0#", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Whether this compiler's remesh stage decides a generated model's budget
@@ -554,7 +658,9 @@ public sealed class ModelGenerationService(
                 (decides
                     ? "A hero budget the compiler decides from its real size, before painting; "
                     : "80,000 triangles, ")
-                + "a 4096 sheet, the head painted a second time on its own; several minutes longer"));
+                + "a 4096 sheet, a figure's head painted a second time on its own"
+                + (capabilities.CanRun(PaintSectionsStage) ? ", a large prop painted again in sections" : "")
+                + "; several minutes longer"));
         return [.. choices];
     }
 
@@ -647,17 +753,39 @@ public sealed class ModelGenerationService(
                 + "Generate it as set dressing, or update the compiler.");
         // Where the head is in the picture. A standing figure's is at the top;
         // an animal seen from the side has it at one end, and cutting a cat
-        // at the top would paint its ears and the tip of its tail.
+        // at the top would paint its ears and the tip of its tail. A prop has
+        // none, and says so: cutting one at the top painted a mast's top 22%
+        // again as if it were a face and left a hard line around the pole.
         var headEnd = string.IsNullOrWhiteSpace(request.HeadEnd) ? "top" : request.HeadEnd.Trim().ToLowerInvariant();
         if (!HeadEnds.Contains(headEnd, StringComparer.Ordinal))
             return RepositoryResult<JobSummary>.Invalid(
-                $"The head is at the \"top\", \"left\" or \"right\" of the picture, not \"{request.HeadEnd}\".");
+                $"The head is at the \"top\", \"left\" or \"right\" of the picture, or \"{NoHead}\" for a prop, not \"{request.HeadEnd}\".");
+        var prop = headEnd == NoHead;
+
+        // Sections are for a hero prop, on by default where the compiler can
+        // paint them, and the artist's to switch off. Asking for them anywhere
+        // else is refused rather than quietly ignored: set dressing is seen
+        // from too far away to gain from them, and a figure keeps its head pass.
+        if (request.PaintSections is true && !hero)
+            return RepositoryResult<JobSummary>.Invalid(
+                "Only a hero is painted again in sections. Set dressing is seen from too far away to gain from it.");
+        if (request.PaintSections is true && !prop)
+            return RepositoryResult<JobSummary>.Invalid(
+                "Sections are for a prop. A figure or an animal has its head painted again instead; "
+                + $"say it has no head (\"{NoHead}\") to paint it in sections.");
+        if (request.PaintSections is true && readiness.PaintSections is null)
+            return RepositoryResult<JobSummary>.Invalid(
+                "This compiler cannot paint a model in sections yet: it needs the paint-sections stage. "
+                + "Leave sections off, or update the compiler.");
+        // Wanted unless switched off, where the compiler can; the route decides
+        // whether this request is one it applies to (a hero prop, and only that).
+        var sections = readiness.PaintSections is not null && request.PaintSections is not false;
 
         var now = timeProvider.GetUtcNow();
         var packet = new FrozenModelRequest(
             FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
             source.RevisionNumber ?? 1,
-            [.. RouteFor(glassColour, detail).Select(stage => new RouteStep(
+            [.. RouteFor(glassColour, detail, headEnd, sections).Select(stage => new RouteStep(
                 stage,
                 readiness.Suffixes?.GetValueOrDefault(stage) ?? ".glb"))],
             readiness.CompilerVersion, now, size, request.SizeAdjust ?? 1.0, glassColour,
@@ -989,6 +1117,72 @@ public sealed class ModelGenerationService(
             return null;
         }
     }
+
+    /// <summary>What a section pass's receipt says it did, read field for field.</summary>
+    private sealed record SectionsOutcome(
+        bool Painted, int Count, double? WholeModelMmPerPixel, double? SectionMmPerPixel, string? Note);
+
+    /// <summary>
+    /// The section pass's receipt (<c>reference-asset-compiler.section-detail-paint.v1</c>),
+    /// read: whether it painted, how many sections, and the millimetres of
+    /// surface a painted pixel covered for the whole model and for its coarsest
+    /// section. Null when there is no such receipt or it cannot be read.
+    /// </summary>
+    private static SectionsOutcome? ReadSections(string? receipt)
+    {
+        if (string.IsNullOrWhiteSpace(receipt)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(receipt);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("painted", out var painted)
+                || painted.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                return null;
+            var note = Text(root, "note") is { Length: > 0 } said ? said : null;
+            if (!root.TryGetProperty("plan", out var plan) || plan.ValueKind != JsonValueKind.Object)
+                return new SectionsOutcome(painted.GetBoolean(), 0, null, null, note);
+            var sections = plan.TryGetProperty("sections", out var listed) && listed.ValueKind == JsonValueKind.Array
+                ? listed.EnumerateArray().ToArray() : [];
+            var finest = sections
+                .Select(section => Number(section, "painted_mm_per_pixel"))
+                .Where(value => value is not null)
+                .Select(value => value!.Value)
+                .ToArray();
+            return new SectionsOutcome(
+                painted.GetBoolean(), sections.Length, Number(plan, "whole_model_mm_per_pixel"),
+                // The coarsest section, which is what the compiler's own note quotes.
+                finest.Length == 0 ? null : finest.Max(), note);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The section pass's numbers in the words a revision note uses: how many
+    /// sections, and the millimetres of surface a painted pixel covered before
+    /// and after. Null when the receipt does not carry them.
+    /// </summary>
+    private static string? SectionFigures(SectionsOutcome? outcome) =>
+        outcome is { Painted: true, Count: > 0, WholeModelMmPerPixel: { } whole, SectionMmPerPixel: { } section }
+            ? string.Create(CultureInfo.InvariantCulture,
+                $"{outcome.Count} sections, at about {section:0.0} mm of surface a painted pixel, down from {whole:0.0} mm for the whole model")
+            : null;
+
+    /// <summary>
+    /// The section pass as a generated model's lineage says it: painted again
+    /// and by how much, or passed through and the compiler's own reason.
+    /// </summary>
+    private static string? SectionsSentence(SectionsOutcome? outcome) => outcome switch
+    {
+        null => null,
+        { Painted: true } => SectionFigures(outcome) is { } figures
+            ? $" Painted again in {figures}."
+            : " Painted again in sections.",
+        _ => $" Not painted in sections: {(outcome.Note ?? "the compiler passed it through unchanged").TrimEnd('.')}.",
+    };
 
     /// <summary>
     /// The budget the compiler chose, as the receipt of the stage that chose it
@@ -1393,6 +1587,173 @@ public sealed class ModelGenerationService(
     }
 
     /// <summary>
+    /// Whether this model can be painted again in sections, and what that costs,
+    /// answered before anything is queued.
+    ///
+    /// A question rather than work, so it is answered whether or not it can
+    /// run. Every reason it cannot is a sentence the artist can act on: link
+    /// the picture, pick an earlier revision, update the compiler.
+    /// </summary>
+    public async Task<RepositoryResult<ModelSectionPaintPlan>> SectionPaintPlanAsync(
+        Guid assetId, CancellationToken cancellationToken)
+    {
+        var asset = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
+        if (asset is null) return RepositoryResult<ModelSectionPaintPlan>.NotFound();
+        if (asset.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<ModelSectionPaintPlan>.Invalid("Only a model is painted again in sections.");
+        var check = await CheckSectionsAsync(asset, cancellationToken);
+        return check.Kind == RepositoryResultKind.Ok && check.Value is not null
+            ? RepositoryResult<ModelSectionPaintPlan>.Ok(check.Value.Plan)
+            : new RepositoryResult<ModelSectionPaintPlan>(null, check.Kind, check.Error);
+    }
+
+    /// <summary>
+    /// What one model and this workstation make of painting it in sections:
+    /// the plan the artist is shown, the picture it would paint from, and how
+    /// a refusal should be reported (a missing capability is not the model's
+    /// fault, and is answered as unavailable rather than as a bad request).
+    /// </summary>
+    private sealed record SectionsCheck(
+        ModelSectionPaintPlan Plan, RepositoryResultKind RefusalKind,
+        AssetRecord? Picture, ModelGenerationReadiness Readiness);
+
+    private async Task<RepositoryResult<SectionsCheck>> CheckSectionsAsync(
+        AssetRecord source, CancellationToken cancellationToken)
+    {
+        var path = assets.StoredFilePath(source.StoragePath);
+        if (path is null)
+            return RepositoryResult<SectionsCheck>.Unavailable("That model's file is missing from the asset root.");
+        var inspection = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(path, cancellationToken));
+        if (!inspection.Ok || inspection.Profile is null)
+            return RepositoryResult<SectionsCheck>.Invalid(
+                inspection.Error ?? "That model could not be read, so it cannot be painted in sections.");
+        var profile = inspection.Profile;
+        var longest = profile.Dimensions.Length == 0 ? 0 : profile.Dimensions.Max();
+        var materials = profile.Materials.Length;
+
+        var readiness = await SectionsPreflightAsync(cancellationToken);
+        var picture = source.ReferenceAssetId is { } pictureId
+            ? await db.Assets.AsNoTracking().SingleOrDefaultAsync(asset => asset.Id == pictureId, cancellationToken)
+            : null;
+        var picturePath = picture is null ? null : assets.StoredFilePath(picture.StoragePath);
+
+        // In the order an artist would fix them: what the workstation lacks
+        // first, because linking a picture to a model the compiler cannot paint
+        // is wasted effort, then what the model lacks.
+        var kind = RepositoryResultKind.Invalid;
+        string? refusal;
+        if (source.IsArchived)
+            refusal = "That model is archived. Restore it before painting it in sections.";
+        else if (!readiness.CanRun)
+        {
+            refusal = readiness.Detail;
+            kind = RepositoryResultKind.Unavailable;
+        }
+        else if (source.ReferenceAssetId is null)
+            refusal = "This model has no linked picture. Link the picture it was made from first: "
+                + "each section is cropped out of it and painted from it.";
+        else if (picture is null || picture.Kind != nameof(AssetKind.Image))
+            refusal = "The picture linked to this model is no longer in the library. Link the picture it was made from again.";
+        else if (picturePath is null)
+            refusal = "The picture linked to this model is missing from the asset root.";
+        else if (materials == 0)
+            refusal = "This model has no material, so there is no paint to lay sections over.";
+        else if (materials > 1)
+            refusal = $"This revision carries {materials} materials. Sections are painted onto one painted sheet, "
+                + "so paint sections before surfacing: pick an earlier revision, from before its surfaces were changed.";
+        else if (profile.ImageCount == 0)
+            refusal = "This model carries no painted texture, so there is nothing to lay sections over.";
+        else if (longest < SectionsMinimumLength)
+            refusal = $"This model is {Metres(longest)} m at its longest, under {Metres(SectionsMinimumLength)} m: its "
+                + "first paint already sees it at a small prop's scale, so painting it in sections would change nothing.";
+        else refusal = null;
+
+        var cost = $"This model is {Metres(longest)} m at its longest. It is cut into sections of about "
+            + $"{Metres(SectionLength)} m, up to {MaximumSections}, and each is painted again on its own from "
+            + (picture is null ? "its linked picture" : $"\u201c{picture.DisplayName}\u201d")
+            + $": one painter run a section, roughly {MinutesPerSection} minutes each, on a GPU with 21 GiB free. "
+            + "Its fixed views are rendered before and after, and the result arrives as a revision beside this one.";
+        return RepositoryResult<SectionsCheck>.Ok(new SectionsCheck(
+            new ModelSectionPaintPlan(
+                source.Id, refusal is null, refusal, cost, longest, materials,
+                source.ReferenceAssetId, picture?.DisplayName,
+                SectionsMinimumLength, SectionLength, MaximumSections),
+            kind, refusal is null ? picture : null, readiness));
+    }
+
+    /// <summary>
+    /// Freezes a model and the picture linked to it, and queues painting it
+    /// again in sections. Same shape as every other derivative: a revision
+    /// beside the source, the source still the current one, and nobody has
+    /// judged it yet.
+    ///
+    /// Meant for props. Every face is painted again, so a hero prop that was
+    /// given a head pass loses that hard band along with the soft paint below
+    /// it; a figure painted this way loses its head pass too, which is rarely
+    /// what anybody wants.
+    /// </summary>
+    public async Task<RepositoryResult<JobSummary>> EnqueueSectionPaintAsync(
+        CreateModelSectionPaintRequest request, CancellationToken cancellationToken)
+    {
+        var source = await db.Assets.AsNoTracking()
+            .SingleOrDefaultAsync(asset => asset.Id == request.SourceAssetId, cancellationToken);
+        if (source is null) return RepositoryResult<JobSummary>.NotFound();
+        if (source.Kind != nameof(AssetKind.Model))
+            return RepositoryResult<JobSummary>.Invalid("Only a model is painted again in sections.");
+
+        var name = (request.Name ?? "").Trim();
+        if (name.Length is 0 or > 120)
+            return RepositoryResult<JobSummary>.Invalid("This needs a name of 1 to 120 characters.");
+
+        var check = await CheckSectionsAsync(source, cancellationToken);
+        if (check.Kind != RepositoryResultKind.Ok || check.Value is null)
+            return new RepositoryResult<JobSummary>(null, check.Kind, check.Error);
+        if (!check.Value.Plan.CanQueue || check.Value.Picture is not { } picture)
+            return new RepositoryResult<JobSummary>(null, check.Value.RefusalKind, check.Value.Plan.Refusal);
+        var readiness = check.Value.Readiness;
+
+        var now = timeProvider.GetUtcNow();
+        var packet = new FrozenModelRequest(
+            FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
+            source.RevisionNumber ?? 1,
+            [.. SectionsPlan.Select(step => new RouteStep(
+                step.Stage,
+                readiness.Suffixes?.GetValueOrDefault(step.Stage) ?? ".glb",
+                step.ReadsOriginal))],
+            readiness.CompilerVersion, now,
+            Size: "", SizeAdjust: 1.0, GlassColour: null,
+            Work: SectionsWork, TriangleBudget: 0,
+            // The picture is frozen by identity and by hash: re-linking the
+            // model while this waits does not change what it paints from.
+            PaintReferenceAssetId: picture.Id, PaintReferenceContentHash: picture.ContentHash);
+        var requestJson = JsonSerializer.Serialize(packet, Json);
+
+        var jobId = Guid.NewGuid();
+        var job = new JobRecord
+        {
+            Id = jobId,
+            ShotId = Guid.Empty,
+            ShotCode = name,
+            Kind = "Painted in sections",
+            WorkType = ModelWorkType,
+            State = JobState.Queued.ToString(),
+            Progress = 0,
+            Phase = "Frozen model and picture queued",
+            Backend = "Reference Asset Compiler",
+            AdapterId = string.Join(" then ", SectionsPlan.Select(step => step.Stage)),
+            RequestJson = requestJson,
+            IdempotencyKey = IdempotencyKey(requestJson, jobId),
+            CreatedAt = now,
+            LastHeartbeatAt = now,
+            Attempt = 1,
+        };
+        db.Jobs.Add(job);
+        await db.SaveChangesAsync(cancellationToken);
+        return RepositoryResult<JobSummary>.Ok(Map(job));
+    }
+
+    /// <summary>
     /// Jobs a restart should pick up again. Their identity is unchanged, so a
     /// job that was running before the lights went out is the same job after.
     /// </summary>
@@ -1442,6 +1803,25 @@ public sealed class ModelGenerationService(
         var sourcePath = assets.StoredFilePath(source.StoragePath);
         if (sourcePath is null)
             return await FailAsync(job, $"The {sourceWord} file is missing from the asset root.", cancellationToken);
+
+        // A model painted again in sections is painted from the picture that
+        // was linked to it when the work was asked for -- that row and those
+        // bytes, whatever the model is linked to now.
+        string? paintReference = null;
+        if (packet.Work == SectionsWork)
+        {
+            var picture = packet.PaintReferenceAssetId is { } pictureId
+                ? await db.Assets.AsNoTracking().SingleOrDefaultAsync(asset => asset.Id == pictureId, cancellationToken)
+                : null;
+            if (picture is null)
+                return await FailAsync(job, "The picture this job was frozen against is no longer in the library.", cancellationToken);
+            if (!string.Equals(picture.ContentHash, packet.PaintReferenceContentHash, StringComparison.OrdinalIgnoreCase))
+                return await FailAsync(job,
+                    "The picture this job was frozen against is not the same bytes any more. Ask for it again.", cancellationToken);
+            paintReference = assets.StoredFilePath(picture.StoragePath);
+            if (paintReference is null)
+                return await FailAsync(job, "The picture this job was frozen against is missing from the asset root.", cancellationToken);
+        }
 
         var workspace = Workspace(job.Id);
         Directory.CreateDirectory(workspace);
@@ -1516,7 +1896,7 @@ public sealed class ModelGenerationService(
                 run = await compiler.RunStageAsync(
                     stage, steps[index].ReadsOriginal ? sourcePath : stepSource,
                     outputPath, receiptPath, cancellationToken,
-                    StageOptions(stage, packet, job, sourcePath, completed));
+                    StageOptions(stage, packet, job, sourcePath, completed, paintReference));
                 if (!run.Ok)
                     return await FailAsync(job,
                         run.Error ?? $"The {stage} stage did not produce a result.", cancellationToken);
@@ -1525,6 +1905,16 @@ public sealed class ModelGenerationService(
                         $"The {stage} stage reported success but wrote nothing.", cancellationToken);
                 completed.Add(new StepOutcome(stage, outputPath, run.ReceiptJson, false, partial));
             }
+
+            // Painting an existing model in sections exists to change its paint.
+            // When the compiler passed it through instead, a revision would be
+            // the same model again under a new number, so the work stops here
+            // with the compiler's own reason.
+            if (stage == PaintSectionsStage && packet.Work == SectionsWork
+                && ReadSections(completed[^1].ReceiptJson) is { Painted: false } passed)
+                return await FailAsync(job,
+                    $"Nothing was painted in sections: {passed.Note ?? "the compiler passed the model through unchanged."} "
+                    + "No revision was delivered, because it would have been this one again.", cancellationToken);
 
             // A chain by default, because that is what almost every route is.
             // A step that says it reads the original keeps reading it, which is
@@ -1575,6 +1965,7 @@ public sealed class ModelGenerationService(
         var stale = !string.Equals(source.ContentHash, packet.SourceContentHash, StringComparison.OrdinalIgnoreCase);
         var topologyChanged = false;
         var budgetDecision = BudgetDecision(completed);
+        var sectionsOutcome = ReadSections(completed.LastOrDefault(step => step.Stage == PaintSectionsStage)?.ReceiptJson);
         if (preparing)
         {
             // A derivative belongs in its source's own revision stack, citing
@@ -1582,12 +1973,13 @@ public sealed class ModelGenerationService(
             // look similar.
             var stacked = await StackDerivativeAsync(
                 source, imported.Value, packet, payloadPath, sourcePath, cancellationToken, budgetDecision,
-                RebakeSummary(completed));
+                RebakeSummary(completed), sectionsOutcome);
             if (stacked.Kind != RepositoryResultKind.Ok)
                 return await RefuseDeliveryAsync(stacked.Error ?? "The derivative could not be recorded against its source.");
             topologyChanged = stacked.Value;
         }
-        await RecordLineageAsync(imported.Value.Id, packet, source, stale, cancellationToken, budgetDecision);
+        await RecordLineageAsync(imported.Value.Id, packet, source, stale, cancellationToken, budgetDecision,
+            sectionsOutcome);
 
         job.OutputAssetId = imported.Value.Id;
         job.DeliveryCount += 1;
@@ -1618,6 +2010,17 @@ public sealed class ModelGenerationService(
                 _ => null,
             },
             budgetDecision,
+            // What the section pass did, in its receipt's own numbers: whether
+            // it painted, how many sections, and the millimetres of surface a
+            // painted pixel covered before and after. Absent when it did not run.
+            sections = sectionsOutcome is null ? null : new
+            {
+                painted = sectionsOutcome.Painted,
+                count = sectionsOutcome.Count,
+                wholeModelMmPerPixel = sectionsOutcome.WholeModelMmPerPixel,
+                sectionMmPerPixel = sectionsOutcome.SectionMmPerPixel,
+                note = sectionsOutcome.Note,
+            },
             topologyChanged = preparing ? topologyChanged : (bool?)null,
             rerunAfterIncompleteAnswer = rerunAfterPartial,
             // Per step, because "the route succeeded" hides which half of it
@@ -1654,7 +2057,7 @@ public sealed class ModelGenerationService(
     /// </summary>
     private static IEnumerable<KeyValuePair<string, string>> StageOptions(
         string stage, FrozenModelRequest packet, JobRecord job, string referencePath,
-        IReadOnlyList<StepOutcome> earlier) => stage switch
+        IReadOnlyList<StepOutcome> earlier, string? paintReference = null) => stage switch
     {
         RebakeMapsStage => RebakeOptions(earlier, referencePath),
         GeometryStage => new Dictionary<string, string>()
@@ -1727,6 +2130,23 @@ public sealed class ModelGenerationService(
             ["head-from"] = HeadFrom,
             ["head-end"] = packet.HeadEnd,
             ["feather"] = HeadFeather,
+        },
+        // The whole picture the model was painted from -- the reference itself
+        // when generating, the linked picture when repainting a library model.
+        // The stage works out where each section sits in it from the model's
+        // own outline; nobody hands it a crop. The lengths are the ones the
+        // artist was quoted before queuing.
+        PaintSectionsStage => new Dictionary<string, string>
+        {
+            ["reference"] = paintReference ?? referencePath,
+            ["views"] = PaintViews,
+            ["resolution"] = PaintResolution,
+            ["atlas"] = HeroAtlas,
+            ["section"] = SectionLength.ToString(CultureInfo.InvariantCulture),
+            ["overlap"] = SectionOverlap.ToString(CultureInfo.InvariantCulture),
+            ["context"] = SectionContext.ToString(CultureInfo.InvariantCulture),
+            ["min-length"] = SectionsMinimumLength.ToString(CultureInfo.InvariantCulture),
+            ["max-sections"] = MaximumSections.ToString(CultureInfo.InvariantCulture),
         },
         GlassStage => new Dictionary<string, string> { ["colour"] = packet.GlassColour ?? "" },
         // A preparation exists to keep what a reviewed mesh already has, so a
@@ -1807,7 +2227,7 @@ public sealed class ModelGenerationService(
     private async Task<RepositoryResult<bool>> StackDerivativeAsync(
         AssetRecord source, AssetSummary derivative, FrozenModelRequest packet,
         string derivativePath, string sourcePath, CancellationToken cancellationToken,
-        JsonElement? budgetDecision = null, string? rebake = null)
+        JsonElement? budgetDecision = null, string? rebake = null, SectionsOutcome? sections = null)
     {
         var before = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(sourcePath, cancellationToken));
         var after = GlbModelInspector.Inspect(await File.ReadAllBytesAsync(derivativePath, cancellationToken));
@@ -1838,6 +2258,7 @@ public sealed class ModelGenerationService(
                 CompressWork => "Textures re-encoded from ",
                 CullWork => "Unseen faces dropped from ",
                 RigWork => "Rigged from ",
+                SectionsWork => "Painted in sections from ",
                 _ => "Runtime derivative of ",
             })
             .Append(packet.SourceName)
@@ -1866,6 +2287,11 @@ public sealed class ModelGenerationService(
         else if (string.Equals(packet.Work, SurfaceWork, StringComparison.Ordinal))
             note.Append(": ").Append(string.Join(", ", (packet.Assignments ?? [])
                 .Select(entry => $"{entry.Part} as {entry.Surface}")));
+        else if (string.Equals(packet.Work, SectionsWork, StringComparison.Ordinal))
+            // The receipt's own numbers: how many sections, and how much
+            // surface a painted pixel covered before and after.
+            note.Append(": ").Append(SectionFigures(sections) ?? "painted again in sections")
+                .Append("; same geometry and UVs");
         else if (before.Profile is not null && after.Profile is not null)
         {
             note.Append(": ").Append(before.Profile.TriangleCount.ToString("N0", CultureInfo.InvariantCulture))
@@ -1918,7 +2344,7 @@ public sealed class ModelGenerationService(
     /// </summary>
     private async Task RecordLineageAsync(
         Guid assetId, FrozenModelRequest packet, AssetRecord source, bool stale, CancellationToken cancellationToken,
-        JsonElement? budgetDecision = null)
+        JsonElement? budgetDecision = null, SectionsOutcome? sections = null)
     {
         var asset = await db.Assets.SingleOrDefaultAsync(candidate => candidate.Id == assetId, cancellationToken);
         if (asset is null) return;
@@ -1930,6 +2356,7 @@ public sealed class ModelGenerationService(
             CompressWork => "Textures re-encoded from ",
             CullWork => "Unseen faces dropped from ",
             RigWork => "Rigged from ",
+            SectionsWork => "Painted in sections from ",
             _ => "Generated from ",
         };
         var lineage = new StringBuilder()
@@ -1943,11 +2370,16 @@ public sealed class ModelGenerationService(
             lineage.Append(" That reference has changed since; this model is a candidate from the older source (now ")
                 .Append(source.ContentHash[..12]).Append("…).");
         if (packet.Work == GenerateWork && packet.Detail == HeroDetail)
-            lineage.Append(packet.AutoTriangleBudget
-                ? " Made as a hero: rebuilt at the compiler's hero budget, painted onto a 4096 sheet, "
-                  + "the head painted a second time on its own."
-                : " Made as a hero: rebuilt at 80,000 triangles, painted onto a 4096 sheet, "
-                  + "the head painted a second time on its own.");
+        {
+            // A figure's second paint is its head; a prop has no head pass, and
+            // a large one's second paint is its sections, quoted from the receipt.
+            var prop = packet.HeadEnd == NoHead;
+            lineage.Append(prop ? " Made as a hero prop: rebuilt at " : " Made as a hero: rebuilt at ")
+                .Append(packet.AutoTriangleBudget ? "the compiler's hero budget" : "80,000 triangles")
+                .Append(", painted onto a 4096 sheet, ")
+                .Append(prop ? "with no head pass." : "the head painted a second time on its own.");
+            lineage.Append(SectionsSentence(sections));
+        }
         // Who chose the triangle count, in the compiler's own sentence.
         if (packet.Work == GenerateWork && packet.AutoTriangleBudget)
             lineage.Append(" Its triangle budget was the compiler's")

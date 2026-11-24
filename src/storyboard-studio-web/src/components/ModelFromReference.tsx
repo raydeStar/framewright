@@ -31,6 +31,14 @@ import type { AssetSummary, ModelGenerationReadiness } from '../types'
  *
  * Both lists come from the compiler, which owns the vocabularies and what each
  * word means.
+ *
+ * A hero is painted a second time up close, and how depends on what it is, so
+ * the artist is asked rather than the name guessed at. A figure or an animal
+ * has its head painted again on its own. A prop has no head, and the head pass
+ * on one repaints its top as if it were a face and leaves a hard line across
+ * it; a large prop is painted again in sections instead, which covers every
+ * face. That costs one painter run a section, and the panel says so, with the
+ * choice to leave it off, before anything is queued.
  */
 export default function ModelFromReference({ asset, onQueued }: {
   asset: AssetSummary
@@ -44,7 +52,11 @@ export default function ModelFromReference({ asset, onQueued }: {
   // Set dressing unless asked: most generated things are seen from a distance,
   // and a hero costs several minutes more of GPU.
   const [detail, setDetail] = useState('set')
-  const [headEnd, setHeadEnd] = useState('top')
+  // Asked, not assumed, once the camera is close: a figure, an animal or a
+  // prop are painted a second time in different ways.
+  const [headEnd, setHeadEnd] = useState('')
+  // On unless switched off. Only ever sent for a hero prop.
+  const [sections, setSections] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -60,12 +72,22 @@ export default function ModelFromReference({ asset, onQueued }: {
     return () => { live = false }
   }, [readinessAttempt])
 
+  const hero = detail === 'hero'
+  const prop = hero && headEnd === 'none'
+  const sectionsOffer = readiness?.paintSections ?? null
+  const sectionsAsked = prop && sectionsOffer !== null
+  const headNote = headEnd === ''
+    ? 'A figure or an animal has its head painted a second time on its own. A prop has no head pass.'
+    : headEnd === 'none'
+    ? 'No head pass: on a prop it repaints the top as if it were a face and leaves a hard line across it.'
+    : 'The head is painted a second time on its own; this is where it is cut and cropped.'
+
   const generate = async () => {
     setBusy(true); setError(undefined)
     try {
       const job = await studioApi.generateModel(
         asset.id, asset.displayName, size, glass === '' ? undefined : glass, detail,
-        detail === 'hero' ? headEnd : undefined)
+        detail === 'hero' ? headEnd : undefined, sectionsAsked ? sections : undefined)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -111,16 +133,24 @@ export default function ModelFromReference({ asset, onQueued }: {
               {readiness.details.find(choice => choice.detail === detail)?.cost}
             </span>
           </label>}
-          {readiness.canRun && detail === 'hero' && <label className="model-size">
-            <span>Where is the head in the picture?</span>
+          {readiness.canRun && hero && <label className="model-size">
+            <span>Is it a figure, an animal or a prop?</span>
             <select value={headEnd} onChange={event => setHeadEnd(event.target.value)}
               data-testid="model-head-end">
-              <option value="top">At the top: a standing figure</option>
-              <option value="left">At the left: an animal seen from the side</option>
-              <option value="right">At the right: an animal seen from the side</option>
+              <option value="">Pick one…</option>
+              <option value="top">A standing figure: its head at the top</option>
+              <option value="left">An animal seen from the side: its head at the left</option>
+              <option value="right">An animal seen from the side: its head at the right</option>
+              <option value="none">A prop: it has no head</option>
             </select>
-            <span className="model-note">
-              The head is painted a second time on its own; this is where it is cut and cropped.
+            <span className="model-note" data-testid="model-head-note">{headNote}</span>
+          </label>}
+          {readiness.canRun && sectionsAsked && sectionsOffer && <label className="model-paint-sections">
+            <input type="checkbox" checked={sections} data-testid="model-paint-sections"
+              onChange={event => setSections(event.target.checked)} />
+            <span>
+              <strong>Paint a large prop again in sections.</strong>{' '}
+              <span data-testid="model-paint-sections-cost">{sectionsOffer.cost}</span>
             </span>
           </label>}
           {readiness.canRun && readiness.colours && <label className="model-size">
@@ -137,7 +167,8 @@ export default function ModelFromReference({ asset, onQueued }: {
             </span>
           </label>}
           <button type="button" className="secondary" data-testid="model-generate"
-            disabled={busy || !readiness.canRun || size === ''} onClick={() => void generate()}>
+            disabled={busy || !readiness.canRun || size === '' || (hero && headEnd === '')}
+            onClick={() => void generate()}>
             <Boxes size={15} />{busy ? 'Queuing…' : 'Generate from this reference'}
           </button>
         </>}

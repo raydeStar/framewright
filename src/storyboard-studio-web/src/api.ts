@@ -1,7 +1,7 @@
 import type { ComfyUiConnectionTest, GenerationSetup, GenerationSetupChange, AssetCollectionSummary, AssetPlacementSummary, AssetUsageSummary, AssetSummary, AudioMasteringStatus, BackupStatus, CandidateVersionSummary, CodexAssistResponse, CommentSummary, CredentialStatus, DraftWorkflowSummary, FrameMarkupSummary, GenerationAdapterSummary, GenerationManifestSummary, GenerationPreflightSummary, GenerationPurpose, GenerationRoute, ImprovedGenerationDirection, IntegrationSummary, JobSummary, LibraryAuthoritySummary, LibraryAuthorityVersionSummary, MusicCompositionDocument, MusicCompositionSummary, MusicGenerationStatus, MusicSection, PairingStatusSummary, PortableProjectImportSummary, PosePresetSummary, ProductionExportReadiness, ProjectDeletionSummary, ProjectInterviewProposal, ProjectListItem, ProjectSummary, ReferenceSummary, ReferenceVersionSummary, RuntimeReadinessSummary, ShotContinuityReport, ShotIntentSuggestion, ShotRevisionProposalSummary, ShotSummary, ShotVisualAuditSummary, SketchContent, SketchDocumentSummary, SketchJoint, SketchStroke, StudioSnapshot, TimelineClipSummary, TimelineTrackKind, VisualReconciliationAction, VisualReconciliationPlan, VoiceAuditionSummary, VoiceProfileKind, VoiceProfileSummary, VoiceSynthesisStatus, WebMcpEnvelope } from './types'
 import type { CameraMove } from './cameraMove'
 import type { FilmExportRequest, FilmExportStatus, SfxExportResult, SfxReviewBoard, SfxSoundSummary } from './types'
-import type { AssetReviewDecision, AssetReviewNoteSummary, ShipAssetsRequest, ShipmentPreview, ShipmentReceipt, ShippingTargetSummary, DirectorAssetView, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, ModelTriangleBudget, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneRenderFrameReceipt, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
+import type { AssetReviewDecision, AssetReviewNoteSummary, ShipAssetsRequest, ShipmentPreview, ShipmentReceipt, ShippingTargetSummary, DirectorAssetView, DirectorShotView, ModelGenerationReadiness, ModelPreparationEvidence, ModelProfileSummary, ModelSectionPaintPlan, ModelTriangleBudget, RigPoseSummary, SceneBlockoutPlanSummary, SceneClipBindingSummary, SceneMotionSampleSummary, ScenePlaceholderSummary, SceneRigidMotionSummary, SceneAnnotationSummary, SceneCameraSummary, SceneEnvironmentSummary, SceneListItem, SceneProposalSummary, SceneRenderFrameReceipt, SceneRenderSummary, SceneShotBindingSummary, SceneSummary, ShotRevisionInstructions } from './types'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); this.name = 'ApiError' } }
 
@@ -165,8 +165,8 @@ export const studioApi = {
     return response.json() as Promise<AssetSummary>
   },
   modelGenerationReadiness: () => request<ModelGenerationReadiness>('/api/models/generation/readiness'),
-  generateModel: (sourceAssetId: string, name: string, size: string, glassColour?: string, detail?: string, headEnd?: string) =>
-    request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, size, glassColour, detail, headEnd }) }),
+  generateModel: (sourceAssetId: string, name: string, size: string, glassColour?: string, detail?: string, headEnd?: string, paintSections?: boolean) =>
+    request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, size, glassColour, detail, headEnd, paintSections }) }),
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
   modelPreparationReadiness: () => request<ModelGenerationReadiness>('/api/models/preparation/readiness'),
   /** What the compiler says this model should cost at runtime, from its name and measured size. */
@@ -178,6 +178,10 @@ export const studioApi = {
   modelRigReadiness: () => request<ModelGenerationReadiness>('/api/models/rig/readiness'),
   rigModel: (sourceAssetId: string, name: string) =>
     request<JobSummary>('/api/models/rig', { method: 'POST', body: JSON.stringify({ sourceAssetId, name }) }),
+  /** Whether this revision can be painted again in sections, why not, and what it costs. */
+  modelSectionPaint: (assetId: string) => request<ModelSectionPaintPlan>(`/api/assets/${assetId}/section-paint`),
+  paintModelInSections: (sourceAssetId: string, name: string) =>
+    request<JobSummary>('/api/models/sections', { method: 'POST', body: JSON.stringify({ sourceAssetId, name }) }),
   cullModel: (sourceAssetId: string, name: string, ignoreTransparency: boolean) =>
     request<JobSummary>('/api/models/cull', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, ignoreTransparency }) }),
   preparationEvidence: (jobId: string) => request<ModelPreparationEvidence>(`/api/jobs/${jobId}/preparation-evidence`),

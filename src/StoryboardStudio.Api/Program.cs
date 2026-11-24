@@ -833,6 +833,23 @@ app.MapPost("/api/models/surfacing", async Task<IResult> (
         await queue.QueueAsync(queued.Value.Id, cancellationToken);
     return ToHttpResult(queued);
 });
+// Painting a large prop again in sections, from the picture linked to it. The
+// route's own readiness, then the per-model answer -- linked picture, one
+// material, long enough -- with its cost, both asked before anything is queued.
+app.MapGet("/api/models/sections/readiness", async (ModelGenerationService models, CancellationToken cancellationToken)
+    => Results.Ok(await models.SectionsPreflightAsync(cancellationToken)));
+app.MapGet("/api/assets/{assetId:guid}/section-paint", async Task<IResult> (
+    Guid assetId, ModelGenerationService models, CancellationToken cancellationToken)
+    => ToHttpResult(await models.SectionPaintPlanAsync(assetId, cancellationToken)));
+app.MapPost("/api/models/sections", async Task<IResult> (
+    CreateModelSectionPaintRequest request, ModelGenerationService models, GenerationJobSignal queue,
+    CancellationToken cancellationToken) =>
+{
+    var queued = await models.EnqueueSectionPaintAsync(request, cancellationToken);
+    if (queued.Kind == RepositoryResultKind.Ok && queued.Value is not null)
+        await queue.QueueAsync(queued.Value.Id, cancellationToken);
+    return ToHttpResult(queued);
+});
 
 // Reached from the derivative as well as from the job, so a decision can be
 // made the next day rather than only in the session that started the work.

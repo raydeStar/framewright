@@ -56,6 +56,15 @@
   whose remesh decides budgets (9af58b3 and later), generation sends
   `--triangle-budget auto` and the model's name (a hero also `--role hero`), so
   the painter paints the final mesh. Older compilers still get 20,000 / 80,000.
+- **Large props painted in sections.** A hero is asked whether it is a figure,
+  an animal or a prop. A prop gets no head pass, which left a hard line across
+  the top of a mast, and with a compiler that offers `paint-sections` a large
+  one is painted again in sections of about half a metre, on by default, with
+  the cost said before anything is queued. **Paint in sections** does the same
+  for a model already in the library, from its linked picture, as a revision
+  beside it; it refuses in one sentence when there is no picture, more than one
+  material, or less than 1.2 m to gain from. See
+  [Painting a large prop in sections](docs/REFERENCE_ASSET_COMPILER.md#painting-a-large-prop-in-sections).
 
 ### Scene setup
 - **Stand-ins by hand.** The scene inspector has a stand-in kit: a person, a
