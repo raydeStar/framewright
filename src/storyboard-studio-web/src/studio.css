@@ -1014,6 +1014,8 @@ dialog.command-backdrop::backdrop { background: rgba(5,7,6,.72); }
 .model-from-reference button { justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--text-2xs); font-weight: 650; cursor: pointer; }
 .model-from-reference button:disabled { opacity: .55; cursor: not-allowed; }
 .model-from-reference .model-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--quiet); font-size: var(--text-2xs); line-height: 1.4; }
+/* The image inspector stretches every input across its column; a checkbox stays a checkbox. */
+.model-from-reference .model-paint-sections input { width: auto; padding: 0; margin: 2px 0 0; }
 /* Preparing a runtime derivative, and the comparison that decides about it. */
 .model-preparation { display: grid; gap: 7px; }
 .model-preparation h2 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--text-xs); }

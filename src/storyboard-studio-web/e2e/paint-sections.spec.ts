@@ -222,7 +222,16 @@ test('the generation panel asks what a hero is, and tells a prop what sections c
   await expect(cost).toContainText('A prop longer than 1.2 m is cut into sections of about 0.6 m')
   await expect(cost).toContainText('One painter run a section, roughly 2 minutes each, up to 12, on a GPU with 21 GiB free')
   await expect(cost).toContainText('passes straight through at no cost')
-  await testInfo.attach('generation-hero-prop-sections', { body: await panel.screenshot(), contentType: 'image/png' })
+  // Read beside its checkbox, not squeezed out of the column by it: the image
+  // inspector stretches every input it holds across the full width.
+  await expect(cost).toBeVisible()
+  const [box, tick] = [await cost.boundingBox(), await sections.boundingBox()]
+  expect(box!.width).toBeGreaterThan(150)
+  expect(tick!.width).toBeLessThan(40)
+  for (const [name, part] of [['generation-hero-subject', subject.locator('xpath=..')], ['generation-hero-prop-sections', panel.locator('label.model-paint-sections')]] as const) {
+    await part.scrollIntoViewIfNeeded()
+    await testInfo.attach(name, { body: await part.screenshot(), contentType: 'image/png' })
+  }
 
   await panel.getByTestId('model-generate').click()
   await expect(page.getByText(/Stand-in mast queued/)).toBeVisible()
