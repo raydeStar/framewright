@@ -131,6 +131,23 @@ public sealed class CompilerGateway(
     private TimeSpan Timeout => TimeSpan.FromMinutes(
         Math.Clamp(configuration.GetValue($"{Section}:StageTimeoutMinutes", 60), 1, 600));
 
+    /// <summary>
+    /// The section pass runs the painter once a section, up to twelve times.
+    /// Each run took about two minutes on the workstation that proved it, but
+    /// the stage allows each one fifty, and a busier or slower GPU spends more
+    /// of that; an hour, which is ample for every other stage and is also the
+    /// compiler's own default, could end it partway through a model that was
+    /// going to finish. It gets four hours unless the artist says otherwise,
+    /// and the compiler is told the same limit, so neither side gives up on it
+    /// before the other.
+    /// </summary>
+    private const string SectionsStage = "paint-sections";
+
+    private TimeSpan SectionsTimeout => TimeSpan.FromMinutes(
+        Math.Clamp(configuration.GetValue($"{Section}:SectionsStageTimeoutMinutes", 240), 1, 1440));
+
+    private TimeSpan TimeoutFor(string stage) => stage == SectionsStage ? SectionsTimeout : Timeout;
+
     public async Task<CompilerAnimationExport> ExportAnimationsAsync(
         string sourcePath, IReadOnlyList<string> clips, CancellationToken cancellationToken)
     {
@@ -326,9 +343,16 @@ public sealed class CompilerGateway(
             if (value.Length > 0) arguments.Add(value);
         }
         AddLocations(arguments, await blenderLocator.LocateAsync(cancellationToken));
+        var timeout = TimeoutFor(stage);
+        if (stage == SectionsStage)
+        {
+            // run-stage's own limit, which otherwise stays at its default hour.
+            arguments.Add("--timeout");
+            arguments.Add(((int)timeout.TotalSeconds).ToString(CultureInfo.InvariantCulture));
+        }
 
         var started = timeProvider.GetTimestamp();
-        var run = await RunAsync(arguments, Timeout, cancellationToken);
+        var run = await RunAsync(arguments, timeout, cancellationToken);
         var seconds = Math.Round(timeProvider.GetElapsedTime(started).TotalSeconds, 3);
         if (!run.Started)
             return new CompilerStageRun(false, stage, -1, seconds, null, null,

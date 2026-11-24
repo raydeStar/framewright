@@ -226,6 +226,32 @@ public sealed class CompilerGatewayTests
     }
 
     [Fact]
+    public async Task PaintingInSectionsIsGivenLongerThanAnHourAndTheCompilerIsToldSo()
+    {
+        // Up to twelve painter runs of a few minutes each can outlast the hour
+        // every other stage gets, and the compiler's own default hour with it.
+        using var recording = Stub(
+            "echo %* >> \"%~f0.args\"",
+            "echo {\"ok\":true,\"stage\":\"paint-sections\",\"exit_code\":0,\"seconds\":1}");
+
+        await Gateway(("Executable", recording.Path)).RunStageAsync(
+            "paint-sections", "painted.glb", "sections.glb", "receipt.json", CancellationToken.None);
+        var sections = File.ReadAllText(recording.Path + ".args");
+        Assert.Contains("--timeout 14400", sections, StringComparison.Ordinal);
+
+        File.Delete(recording.Path + ".args");
+        await Gateway(("Executable", recording.Path), ("SectionsStageTimeoutMinutes", "300")).RunStageAsync(
+            "paint-sections", "painted.glb", "sections.glb", "receipt.json", CancellationToken.None);
+        Assert.Contains("--timeout 18000", File.ReadAllText(recording.Path + ".args"), StringComparison.Ordinal);
+
+        // Every other stage keeps the limit it had, and the compiler's default.
+        File.Delete(recording.Path + ".args");
+        await Gateway(("Executable", recording.Path)).RunStageAsync(
+            "texture", "mesh.obj", "painted.glb", "receipt.json", CancellationToken.None);
+        Assert.DoesNotContain("--timeout", File.ReadAllText(recording.Path + ".args"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NoStudioTreeIsAnOrdinaryAnswerRatherThanAFailure()
     {
         using var listing = Stub(
