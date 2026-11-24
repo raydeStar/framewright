@@ -1,11 +1,13 @@
 import { useEffect } from 'react'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
+import { stepAsked } from '../assetNavigation'
 
 /**
  * Previous and next from an asset's own view, through the library list it was
  * opened from (same view, filter, sort and search), the way quick review moves.
- * The left and right arrow keys do the same unless something is being typed;
- * Shift with an arrow is left alone, so a 3D view can still pan.
+ * The left and right arrow keys do the same, unless the key belongs to what
+ * has the keyboard: a field being typed in, or a view that moves on the
+ * arrows itself. A 3D view that has focus turns; it is never stepped away from.
  */
 export default function AssetStepper({ position, total, onPrevious, onNext }: {
   position: number
@@ -15,18 +17,24 @@ export default function AssetStepper({ position, total, onPrevious, onNext }: {
 }) {
   useEffect(() => {
     const keys = (event: KeyboardEvent) => {
-      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
       const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
-      if (document.querySelector('dialog[open]')) return
-      const step = event.key === 'ArrowLeft' ? onPrevious : onNext
+      const asked = stepAsked({
+        key: event.key,
+        modified: event.ctrlKey || event.metaKey || event.altKey || event.shiftKey,
+        used: event.defaultPrevented,
+        typing: Boolean(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)),
+        dialogOpen: Boolean(document.querySelector('dialog[open]')),
+      })
+      const step = asked === 'previous' ? onPrevious : asked === 'next' ? onNext : undefined
       if (!step) return
-      event.preventDefault(); event.stopPropagation()
+      event.preventDefault()
       step()
     }
-    window.addEventListener('keydown', keys, true)
-    return () => window.removeEventListener('keydown', keys, true)
+    // Heard last, on the key's way back up from whatever has the keyboard, so
+    // that view has already said whether the key was its own. Hearing it first
+    // is how the arrows were once taken from the 3D view they turn.
+    window.addEventListener('keydown', keys)
+    return () => window.removeEventListener('keydown', keys)
   }, [onPrevious, onNext])
 
   return <div className="asset-stepper" role="group" aria-label="Step through the library list" data-testid="asset-stepper">

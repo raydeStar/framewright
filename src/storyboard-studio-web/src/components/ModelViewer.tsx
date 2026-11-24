@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { AmbientLight, AnimationMixer, Box3, Color, DirectionalLight, GridHelper, LoopRepeat, Mesh, MeshStandardMaterial, PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Vector3, WebGLRenderer, type AnimationAction, type AnimationClip, type Material, type Object3D } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { keepsCamera, type KeptCamera } from '../inspectionCamera'
+import { keepsCamera, pinchZoom, zoomed, zoomLimits, ZOOM_IN, ZOOM_OUT, type KeptCamera } from '../inspectionCamera'
+import { lightRigs, type SurfaceLight } from '../inspectionLight'
 import { channelMaterial, openingLook, surfaceChannels, type SurfaceChannel, type SurfaceLook } from '../surfaceChannels'
 import { sharpenTextures } from './textureQuality'
 
@@ -25,11 +26,21 @@ import { sharpenTextures } from './textureQuality'
  * all four and a fault lives in one of them. Those are stand-ins beside the
  * file's materials, never edits to them.
  *
+ * The lit surface can be seen under two lights. The even inspection light is
+ * the default and leaves no face unreadable; the look-dev light is the room,
+ * one key and a filmic tone map, for judging paint and metal the way an engine
+ * will show them. Only the lights and the tone map change: the model and its
+ * materials are the same objects under both.
+ *
+ * The camera comes as close as a person would stand -- a quarter of a metre
+ * from the point it looks at -- by wheel, by pinch or by the plus and minus
+ * keys, so a part can be judged from the distance it will be seen at.
+ *
  * This surface is rebuilt for every revision, so the camera a reviewer leaves
  * is handed to the parent and picked up by the next revision of the same
  * stack: flipping between two revisions compares the same spot. Paint,
- * wireframe and channel are held by the parent too, so it compares the same
- * map.
+ * wireframe, channel and light are held by the parent too, so it compares the
+ * same map under the same light.
  *
  * Resources are released explicitly when the model changes or the surface
  * closes. A WebGL context left holding geometry is how a long session turns into
@@ -50,7 +61,7 @@ export interface ModelViewerProps {
   stack?: string
   /** Where the camera was left. Held by the parent, because this surface does not outlive its revision. */
   kept?: { current: KeptCamera | undefined }
-  /** Paint, wireframe and channel. Held by the parent for the same reason, so the next revision opens looked at the same way. */
+  /** Paint, wireframe, channel and light. Held by the parent for the same reason, so the next revision opens looked at the same way. */
   look?: { current: SurfaceLook }
 }
 
@@ -63,7 +74,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
   const host = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<ViewerState>('loading')
   const [detail, setDetail] = useState('Preparing the model surface')
-  const [readout, setReadout] = useState({ yaw: openingYaw, pitch: openingPitch })
+  const [readout, setReadout] = useState({ yaw: openingYaw, pitch: openingPitch, distance: 1 })
   // The renderer reads these rather than React state, because it runs inside an
   // effect that must not be torn down and rebuilt to change how a surface looks.
   // A parent that holds the look across revisions lends its own object, which
@@ -72,6 +83,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
   const [painted, setPainted] = useState(display.current.painted)
   const [wired, setWired] = useState(display.current.wired)
   const [channel, setChannel] = useState<SurfaceChannel>(display.current.channel)
+  const [light, setLight] = useState<SurfaceLight>(display.current.light)
   const [clipNames, setClipNames] = useState<string[]>([])
   const [selectedClip, setSelectedClip] = useState<string | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -82,9 +94,12 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
   // One camera, one source of truth. The renderer reads this; the pointer and
   // keyboard paths both write to it, so they can never drift apart.
   const view = useRef({ yaw: openingYaw, pitch: openingPitch, distance: 1, target: new Vector3() })
-  const surface = useRef<{ place: () => void; frame: () => void; show: () => void;
+  const surface = useRef<{ place: () => void; frame: () => void; show: () => void; relight: () => void; zoom: (factor: number) => void;
     selectClip: (name: string | null) => void; play: (value: boolean) => void; seek: (seconds: number) => void } | undefined>(undefined)
   const drag = useRef<{ pointerId: number; x: number; y: number; panning: boolean } | undefined>(undefined)
+  // Every pointer on the stage, so a second finger can turn a drag into a pinch.
+  const touches = useRef(new Map<number, { x: number; y: number }>())
+  const pinch = useRef<{ separation: number; x: number; y: number } | undefined>(undefined)
   const reportError = useRef(onError)
   reportError.current = onError
   // Read through a ref, like the error callback: a parent that re-renders
@@ -122,6 +137,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     const scene = new Scene()
     const camera = new PerspectiveCamera(38, 1, 0.01, 1000)
     const span = Math.max(width, height, depth, 0.001)
+    const limits = zoomLimits(span, camera.near)
     let loaded: Object3D | undefined
     let mixer: AnimationMixer | undefined
     let clips: AnimationClip[] = []
@@ -154,11 +170,14 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     const environment = new PMREMGenerator(renderer)
     const room = new RoomEnvironment()
     scene.environment = environment.fromScene(room, 0.04).texture
-    scene.environmentIntensity = 0.65
     room.dispose?.()
 
-    scene.add(new AmbientLight(0xffffff, 0.75))
-    const key = new DirectionalLight(0xffffff, 1.9)
+    // The lights are made once and only their strengths change with the rig.
+    // A light at zero adds nothing, and keeping all three in the scene means
+    // the inspection light is the same scene it always was, not a rebuilt one.
+    const ambient = new AmbientLight(0xffffff)
+    scene.add(ambient)
+    const key = new DirectionalLight(0xffffff)
     key.position.set(1, 2, 1.4)
     scene.add(key)
     // A single key from above leaves every downward face black, and the
@@ -166,13 +185,29 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     // surface. This fill is dimmer than the key and comes from the opposite
     // side and below, so the shape still reads as lit from above while nothing
     // is left unreadable.
-    const fill = new DirectionalLight(0xffffff, 1.1)
+    const fill = new DirectionalLight(0xffffff)
     fill.position.set(-1.1, -1.8, -0.9)
     scene.add(fill)
     const grid = new GridHelper(Math.max(4, span * 4), 16, new Color('#3c4a44'), new Color('#232c29'))
+    // The floor is a ruler, not a surface: it keeps its colours under either light.
+    for (const material of Array.isArray(grid.material) ? grid.material : [grid.material]) material.toneMapped = false
     scene.add(grid)
 
     const draw = () => { if (!disposed) renderer.render(scene, camera) }
+
+    // The tone map is part of each lit material's program, which the renderer
+    // swaps when it changes. The single-channel stand-ins opt out of it and
+    // use no lights, so they draw the same numbers under either rig.
+    const relight = () => {
+      const rig = lightRigs[display.current.light]
+      renderer.toneMapping = rig.toneMapping
+      renderer.toneMappingExposure = rig.exposure
+      scene.environmentIntensity = rig.environment
+      ambient.intensity = rig.ambient
+      key.intensity = rig.key
+      fill.intensity = rig.fill
+      draw()
+    }
 
     const place = () => {
       const { yaw, pitch, distance, target } = view.current
@@ -181,7 +216,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
         target.y + distance * Math.sin(pitch),
         target.z + distance * Math.cos(pitch) * Math.cos(yaw))
       camera.lookAt(target)
-      setReadout({ yaw, pitch })
+      setReadout({ yaw, pitch, distance })
       reportOrbit.current?.(yaw, pitch)
       draw()
     }
@@ -292,7 +327,11 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
       setClipTime(action.time)
       draw()
     }
-    surface.current = { place, frame, show, selectClip, play, seek }
+    const zoom = (factor: number) => {
+      view.current.distance = zoomed(view.current.distance, factor, limits)
+      place()
+    }
+    surface.current = { place, frame, show, relight, zoom, selectClip, play, seek }
 
     const resize = () => {
       const width = Math.max(1, container.clientWidth)
@@ -307,8 +346,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
 
     const wheel = (event: WheelEvent) => {
       event.preventDefault()
-      view.current.distance = Math.min(Math.max(view.current.distance * (event.deltaY > 0 ? 1.12 : 0.89), span * 0.4), span * 40)
-      place()
+      zoom(event.deltaY > 0 ? ZOOM_OUT : ZOOM_IN)
     }
     renderer.domElement.addEventListener('wheel', wheel, { passive: false })
 
@@ -328,7 +366,9 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
         dress(loaded)
         show()
         setState('ready')
-        setDetail('Drag to orbit, right-drag or shift-drag to move up and down, scroll to zoom. The model is not moved.')
+        // No longer than the hint it replaces: a third line would make the
+        // bar taller and the stage shorter than they have always been.
+        setDetail('Drag to orbit, shift-drag to slide, scroll or pinch to zoom. The model is not moved.')
         resize()
         const bounds = new Box3().setFromObject(loaded).getSize(new Vector3())
         shownSize = Math.max(bounds.x, bounds.y, bounds.z)
@@ -355,6 +395,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
         reportError.current?.(message)
       })
 
+    relight()
     resize()
     place()
 
@@ -427,15 +468,28 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
    * Scaled by distance: the same gesture should cross the same fraction of the
    * screen whether the camera is close in or far out.
    */
-  const panBy = (across: number, up: number) => {
+  const slide = (across: number, up: number) => {
     const { yaw, distance, target } = view.current
     target.x -= Math.cos(yaw) * across * distance
     target.z += Math.sin(yaw) * across * distance
     target.y += up * distance
+  }
+  const panBy = (across: number, up: number) => {
+    slide(across, up)
     surface.current?.place()
   }
 
   const nudge = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Plus and minus are the wheel for a keyboard, so close inspection needs
+    // no mouse. With a modifier they are the browser's own zoom and are left to it.
+    if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+      const step = event.key === '+' || event.key === '=' ? ZOOM_IN : event.key === '-' || event.key === '_' ? ZOOM_OUT : undefined
+      if (step) {
+        event.preventDefault()
+        surface.current?.zoom(step)
+        return
+      }
+    }
     const moves: Record<string, [number, number]> = {
       ArrowLeft: [-0.08, 0], ArrowRight: [0.08, 0], ArrowUp: [0, 0.08], ArrowDown: [0, -0.08],
     }
@@ -448,9 +502,29 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     else orbitBy(move[0], move[1])
   }
 
+  /** Where the first two fingers are: how far apart, and the point between them. */
+  const fingers = () => {
+    const [first, second] = [...touches.current.values()]
+    return { separation: Math.hypot(first.x - second.x, first.y - second.y), x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
+  }
+
   const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (state !== 'ready') return
-    event.currentTarget.setPointerCapture(event.pointerId)
+    // Capture keeps a drag alive when the pointer leaves the stage. A pointer
+    // that has already gone cannot be held, and still drags while it is inside.
+    try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* Nothing to hold. */ }
+    // The first pointer of a gesture starts it afresh, so one whose release
+    // was never heard cannot turn the next touch into half a pinch.
+    if (event.isPrimary) touches.current.clear()
+    touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (touches.current.size > 2) return
+    if (touches.current.size === 2) {
+      // A second finger makes it a pinch: the two zoom and slide together,
+      // which is the only way a touch screen reaches either.
+      drag.current = undefined
+      pinch.current = fingers()
+      return
+    }
     // Right or middle button slides; so does shift, for a trackpad with one.
     drag.current = {
       pointerId: event.pointerId, x: event.clientX, y: event.clientY,
@@ -458,6 +532,14 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     }
   }
   const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (touches.current.has(event.pointerId)) touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (pinch.current && touches.current.size >= 2) {
+      const before = pinch.current
+      const now = pinch.current = fingers()
+      slide(-(now.x - before.x) * 0.008 * 0.35, (now.y - before.y) * 0.008 * 0.35)
+      surface.current?.zoom(pinchZoom(before.separation, now.separation))
+      return
+    }
     if (!drag.current || drag.current.pointerId !== event.pointerId) return
     const deltaX = (event.clientX - drag.current.x) * 0.008
     const deltaY = (event.clientY - drag.current.y) * 0.008
@@ -467,7 +549,14 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     else orbitBy(-deltaX, deltaY)
   }
   const pointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    touches.current.delete(event.pointerId)
     if (drag.current?.pointerId === event.pointerId) drag.current = undefined
+    if (!pinch.current) return
+    if (touches.current.size >= 2) { pinch.current = fingers(); return }
+    pinch.current = undefined
+    // The finger still down carries on as an orbit from where it is now,
+    // rather than from where it was when the pinch began.
+    for (const [pointerId, last] of touches.current) drag.current = { pointerId, x: last.x, y: last.y, panning: false }
   }
 
   const cycleClip = (direction: number) => {
@@ -478,13 +567,16 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
     surface.current?.selectClip(clipNames[next])
   }
 
-  return <div className="model-viewer" data-testid="model-viewer" data-state={state}>
+  // A single channel is unlit, so there is no light to choose while one is shown.
+  const lightApplies = !painted || channel === 'lit'
+
+  return <div className="model-viewer" data-testid="model-viewer" data-state={state} data-light={light}>
     <div
       ref={host}
       className="model-stage"
       data-testid="model-stage"
       role="img"
-      aria-label={`${label}. Inspection view. Drag or use the arrow keys to orbit, right-drag or shift-drag to move up and down; the model itself is not moved.`}
+      aria-label={`${label}. Inspection view. Drag or use the arrow keys to orbit, right-drag or shift-drag to move up and down, scroll, pinch or use plus and minus to zoom; the model itself is not moved.`}
       tabIndex={0}
       onKeyDown={nudge}
       onPointerDown={pointerDown}
@@ -494,7 +586,8 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
       onContextMenu={event => event.preventDefault()}
     />
     <div className="model-viewer-bar">
-      <span data-testid="model-viewer-state" role="status">{detail}</span>
+      <span data-testid="model-viewer-state" role="status"
+        title={state === 'ready' ? 'Right-drag and a two-finger drag slide the view too; the plus and minus keys zoom' : undefined}>{detail}</span>
       <div>
         <button type="button" className={painted ? 'is-on' : undefined}
           data-testid="model-paint" aria-pressed={painted} disabled={state !== 'ready'}
@@ -515,6 +608,19 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
             {item.label}
           </button>)}
         </div>
+        <button type="button" className={light === 'lookdev' ? 'is-on' : undefined}
+          data-testid="model-light" aria-pressed={light === 'lookdev'} disabled={state !== 'ready' || !lightApplies}
+          title={!lightApplies ? 'A single channel is shown unlit. Choose Lit to change the light'
+            : light === 'lookdev' ? 'Lit by its surroundings and one key through a filmic tone map, as an engine shows it. Press for the even inspection light'
+              : 'The even inspection light, which leaves no face unreadable. Press to judge paint and metal as an engine shows them'}
+          onClick={() => {
+            const next = light === 'lookdev' ? 'inspection' : 'lookdev'
+            display.current.light = next
+            setLight(next)
+            surface.current?.relight()
+          }}>
+          {light === 'lookdev' ? 'Look-dev on' : 'Look-dev off'}
+        </button>
         <button type="button" disabled={state !== 'ready'} onClick={() => surface.current?.frame()}>Frame</button>
         <button type="button" disabled={state !== 'ready'} onClick={() => { view.current.yaw = openingYaw; view.current.pitch = openingPitch; surface.current?.frame() }}>Reset view</button>
       </div>
@@ -536,7 +642,7 @@ export default function ModelViewer({ contentUrl, label, dimensions, supportedCl
       <span>{clipTime.toFixed(1)} / {clipDuration.toFixed(1)}s</span>
     </div>}
     <p className="model-viewer-orbit" data-testid="model-viewer-orbit">
-      Inspection camera · yaw {readout.yaw.toFixed(2)} · pitch {readout.pitch.toFixed(2)}
+      Inspection camera · yaw {readout.yaw.toFixed(2)} · pitch {readout.pitch.toFixed(2)} · distance {readout.distance.toFixed(2)} m
     </p>
   </div>
 }

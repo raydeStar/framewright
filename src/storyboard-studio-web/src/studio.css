@@ -2100,10 +2100,19 @@ dialog.studio-dialog.edit-dialog.collection-dialog { width: min(430px, calc(100v
 .model-bounds,.model-hash{margin:6px 0 0;color:var(--quiet);font:var(--text-2xs) ui-monospace,monospace}
 .asset-thumbnail.model{display:grid;place-items:center;color:var(--muted)}
 @media (pointer: coarse), (max-width: 860px) {
-  .model-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(300px,1fr) auto}
+  /* The stage's row is as tall as what is in it needs: the stage's own
+     minimum, plus however many rows the controls wrap to. It used to be a
+     fixed 300px, which the stage and its controls only fitted while the
+     controls stayed on one row. When they wrapped, the stage ran out of its
+     row and under them. */
+  .model-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(min-content,1fr) auto}
+  .model-stage-shell{min-height:300px}
+  /* The row is measured from its contents, and the canvas inside the stage is
+     as tall as the last frame drawn. Left in the sum, the stage would take its
+     height from its own picture. It is sized by its row and nothing else. */
+  .model-stage-shell .model-stage{contain:size}
   .model-inspector{border-left:0;border-top:1px solid var(--line)}
-  /* A shorter stage on a narrow screen, so the frame never grows past its row
-     and covers the controls under it. */
+  /* A shorter stage on a narrow screen. */
   .model-stage{min-height:180px}
 }
 

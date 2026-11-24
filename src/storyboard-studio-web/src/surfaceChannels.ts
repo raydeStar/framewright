@@ -1,4 +1,5 @@
 import { MeshBasicMaterial, type Material, type MeshStandardMaterial } from 'three'
+import type { SurfaceLight } from './inspectionLight'
 
 /**
  * One part of a painted surface at a time.
@@ -23,18 +24,20 @@ export const surfaceChannels = [
 export type SurfaceChannel = typeof surfaceChannels[number]['id']
 
 /**
- * How a surface is being looked at: paint or clay, wireframe, and which
- * channel. A reviewer comparing two revisions' normal maps is comparing that
- * channel, so the look is carried to the next revision like the camera is.
+ * How a surface is being looked at: paint or clay, wireframe, which channel,
+ * and under which light. A reviewer comparing two revisions' normal maps is
+ * comparing that channel, and one judging two paint jobs is judging them under
+ * one light, so the look is carried to the next revision like the camera is.
  */
 export interface SurfaceLook {
   painted: boolean
   wired: boolean
   channel: SurfaceChannel
+  light: SurfaceLight
 }
 
-/** A newly opened model: painted, no wireframe, lit. */
-export const openingLook = (): SurfaceLook => ({ painted: true, wired: false, channel: 'lit' })
+/** A newly opened model: painted, no wireframe, lit, under the even inspection light. */
+export const openingLook = (): SurfaceLook => ({ painted: true, wired: false, channel: 'lit', light: 'inspection' })
 
 /** What a file's material may carry. An unlit one has no roughness or metalness at all. */
 type Painted = Material & Partial<Pick<MeshStandardMaterial,

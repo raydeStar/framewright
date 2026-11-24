@@ -54,7 +54,10 @@ test('export film shows each shot’s picture, sends the chosen options, and off
   await expect(dialog.getByRole('checkbox', { name: /Fade in and out/ })).not.toBeChecked()
   await expect(dialog.getByRole('checkbox', { name: /English captions/ })).toBeChecked()
   await page.reload()
-  await page.getByRole('button', { name: 'Sequence' }).click()
+  // A refresh comes back to the sequence it left, by its address, rather
+  // than to the front page with the sequence a click away.
+  await expect(page).toHaveURL(/\/sequence$/)
+  await expect(page.getByRole('button', { name: 'Sequence', exact: true })).toHaveAttribute('aria-current', 'page')
   await page.getByRole('button', { name: 'Export film' }).click()
   await expect(dialog.getByRole('checkbox', { name: /Fade in and out/ })).not.toBeChecked()
 })

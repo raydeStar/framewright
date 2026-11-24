@@ -189,7 +189,10 @@ test.describe('browser WebMCP collaboration', () => {
     const proof = await page.request.post(`/api/manifests/${manifests[0].id}/dispatch`, { data: { expectedManifestHash: manifests[0].manifestHash, adapterId: 'local-proof' } })
     expect(proof.ok()).toBe(true)
     await page.reload()
-    await page.getByRole('button', { name: new RegExp(`Open ${code},`) }).click()
+    // A refresh comes back to the shot it left, by its address, rather than to
+    // the board with the shot a click away.
+    await expect(page).toHaveURL(new RegExp(`/shot/${shot.id}$`))
+    await expect(page.getByTestId('shot-workspace')).toBeVisible()
     await expect.poll(() => page.evaluate(() => (window as unknown as { __framewrightTools: Map<string, unknown> }).__framewrightTools.size)).toBe(12)
     // The proof job lands a new head asynchronously; read context only once the
     // artist would actually see both revisions.

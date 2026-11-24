@@ -131,11 +131,13 @@ test('this three.js still has the place and the function the data channels rely 
   assert.match(ShaderChunk.colorspace_pars_fragment, /vec4 sRGBTransferEOTF\( in vec4 value \)/)
 })
 
-test('a newly opened model is painted, lit and without wireframe, and each viewer gets its own look', () => {
+test('a newly opened model is painted, lit and without wireframe, under the inspection light, and each viewer gets its own look', () => {
   const first = openingLook()
-  assert.deepEqual(first, { painted: true, wired: false, channel: 'lit' })
+  assert.deepEqual(first, { painted: true, wired: false, channel: 'lit', light: 'inspection' })
   // A look is mutated in place as the reviewer changes it, so two holders
   // must never share one: changing channel on one stack would change another.
   first.channel = 'normal'
+  first.light = 'lookdev'
   assert.equal(openingLook().channel, 'lit')
+  assert.equal(openingLook().light, 'inspection')
 })
