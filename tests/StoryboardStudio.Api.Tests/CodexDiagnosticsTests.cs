@@ -1,9 +1,36 @@
+using System.Text;
+using Microsoft.Extensions.Configuration;
 using StoryboardStudio.Api.Services;
 
 namespace StoryboardStudio.Api.Tests;
 
 public sealed class CodexDiagnosticsTests
 {
+    [Fact]
+    public async Task RuntimeSendsPromptBytesAsBomlessUtf8OnWindows()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell", "v1.0", "powershell.exe");
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Integrations:Codex:Executable"] = executable
+        }).Build();
+        var runtime = new CodexRuntime(configuration);
+        const string prompt = "Frastown · café awning — 布";
+        const string readBytes = "$bytes = [IO.MemoryStream]::new(); "
+            + "[Console]::OpenStandardInput().CopyTo($bytes); "
+            + "[Console]::Write([Convert]::ToBase64String($bytes.ToArray()))";
+
+        var result = await runtime.RunAsync(["-NoProfile", "-NonInteractive", "-Command", readBytes],
+            Path.GetTempPath(), TimeSpan.FromSeconds(15), CancellationToken.None, prompt);
+
+        Assert.True(result.Started, result.StandardError);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(Encoding.UTF8.GetBytes(prompt), Convert.FromBase64String(result.StandardOutput));
+    }
+
     [Fact]
     public void FailureReportsCodexErrorMessageInsteadOfItsEchoedBannerAndPrompt()
     {
