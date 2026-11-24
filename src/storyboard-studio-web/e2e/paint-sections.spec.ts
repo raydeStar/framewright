@@ -141,7 +141,7 @@ test('Paint in sections states its cost, then delivers a revision beside the mod
   // The cost, for this model, before anything is queued.
   const cost = section.getByTestId('model-sections-cost')
   await expect(cost).toContainText('This model is 2.4 m at its longest.')
-  await expect(cost).toContainText('one painter run a section, roughly 2 minutes each, on a GPU with 21 GiB free')
+  await expect(cost).toContainText('one painter run a section, roughly 3 minutes each, on a GPU with 21 GiB free')
   await expect(cost).toContainText(`${name}-concept`)
   await expect(section).toContainText('that hard band goes along with the soft paint below it')
   await testInfo.attach('paint-sections-ready', { body: await section.screenshot(), contentType: 'image/png' })
@@ -219,8 +219,8 @@ test('the generation panel asks what a hero is, and tells a prop what sections c
   const sections = panel.getByTestId('model-paint-sections')
   await expect(sections).toBeChecked()
   const cost = panel.getByTestId('model-paint-sections-cost')
-  await expect(cost).toContainText('A prop longer than 1.2 m is cut into sections of about 0.6 m')
-  await expect(cost).toContainText('One painter run a section, roughly 2 minutes each, up to 12, on a GPU with 21 GiB free')
+  await expect(cost).toContainText('A prop longer than 1.2 m is cut into sections of about 0.45 m')
+  await expect(cost).toContainText('One painter run a section, roughly 3 minutes each, up to 48, on a GPU with 21 GiB free')
   await expect(cost).toContainText('passes straight through at no cost')
   // Read beside its checkbox, not squeezed out of the column by it: the image
   // inspector stretches every input it holds across the full width.

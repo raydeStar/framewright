@@ -1195,10 +1195,10 @@ public sealed class ModelGenerationApiTests
             ?? throw new InvalidOperationException();
         var offer = readiness.RootElement.GetProperty("paintSections");
         Assert.Equal(1.2, offer.GetProperty("minimumLengthMetres").GetDouble());
-        Assert.Equal(12, offer.GetProperty("maximumSections").GetInt32());
+        Assert.Equal(48, offer.GetProperty("maximumSections").GetInt32());
         var cost = offer.GetProperty("cost").GetString()!;
-        Assert.Contains("One painter run a section, roughly 2 minutes each", cost, StringComparison.Ordinal);
-        Assert.Contains("up to 12", cost, StringComparison.Ordinal);
+        Assert.Contains("One painter run a section, roughly 3 minutes each", cost, StringComparison.Ordinal);
+        Assert.Contains("up to 48", cost, StringComparison.Ordinal);
         Assert.Contains("21 GiB", cost, StringComparison.Ordinal);
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
@@ -1224,9 +1224,11 @@ public sealed class ModelGenerationApiTests
         Assert.Equal("12", told["views"]);
         Assert.Equal("768", told["resolution"]);
         Assert.Equal("4096", told["atlas"]);
-        Assert.Equal("0.6", told["section"]);
+        Assert.Equal("0.45", told["section"]);
+        Assert.Equal("0.2", told["overlap"]);
+        Assert.Equal("0.05", told["context"]);
         Assert.Equal("1.2", told["min-length"]);
-        Assert.Equal("12", told["max-sections"]);
+        Assert.Equal("48", told["max-sections"]);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();

@@ -128,17 +128,27 @@ public sealed class ModelGenerationService(
     /// section count is capped because each one is a painter run of its own.
     /// These are sent rather than left to the compiler's defaults, so the
     /// sentence the artist reads before queuing is what the stage was told.
+    ///
+    /// The finer cut is the one the owner judged. At 0.6 m a 2.2 m mast came
+    /// out at about 1.3 mm a painted pixel in six sections; at 0.45 m, a 0.2
+    /// overlap and a 0.05 margin of context a 2.2 m skiff came out at about
+    /// 0.7 mm in 45 sections, and the owner called it impressive. Overlap and
+    /// context are sent with the length because the compiler's defaults (0.25
+    /// and 0.1) would make each finer section paint a third more than it keeps.
     /// </summary>
     public const double SectionsMinimumLength = 1.2;
-    public const double SectionLength = 0.6;
-    public const int MaximumSections = 12;
+    public const double SectionLength = 0.45;
+    public const double SectionOverlap = 0.2;
+    public const double SectionContext = 0.05;
+    public const int MaximumSections = 48;
 
     /// <summary>
-    /// What a section costs, as measured: the first proof on a 2.2 m mast
-    /// painted six sections in 11.6 minutes on the workstation that ran it. It
-    /// is said as a rough figure because another GPU is another figure.
+    /// What a section costs, as measured on the workstation that ran them: six
+    /// sections of a 2.2 m mast in 11.6 minutes, 45 of the skiff in 109, and 32
+    /// of a 98k-triangle skiff at about 3.5 each. It is said as a rough figure
+    /// because another GPU and another mesh are another figure.
     /// </summary>
-    private const int MinutesPerSection = 2;
+    private const int MinutesPerSection = 3;
     private const int HeroColourSize = 4096;
     private const int HeroDataSize = 2048;
     private const int HeroTextureQuality = 92;
@@ -2133,6 +2143,8 @@ public sealed class ModelGenerationService(
             ["resolution"] = PaintResolution,
             ["atlas"] = HeroAtlas,
             ["section"] = SectionLength.ToString(CultureInfo.InvariantCulture),
+            ["overlap"] = SectionOverlap.ToString(CultureInfo.InvariantCulture),
+            ["context"] = SectionContext.ToString(CultureInfo.InvariantCulture),
             ["min-length"] = SectionsMinimumLength.ToString(CultureInfo.InvariantCulture),
             ["max-sections"] = MaximumSections.ToString(CultureInfo.InvariantCulture),
         },

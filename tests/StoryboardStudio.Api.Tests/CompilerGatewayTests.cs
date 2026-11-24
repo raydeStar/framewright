@@ -228,7 +228,7 @@ public sealed class CompilerGatewayTests
     [Fact]
     public async Task PaintingInSectionsIsGivenLongerThanAnHourAndTheCompilerIsToldSo()
     {
-        // Up to twelve painter runs of a few minutes each can outlast the hour
+        // Up to 48 painter runs of a few minutes each can outlast the hour
         // every other stage gets, and the compiler's own default hour with it.
         using var recording = Stub(
             "echo %* >> \"%~f0.args\"",

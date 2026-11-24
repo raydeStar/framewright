@@ -1564,8 +1564,8 @@ public sealed class ModelPreparationApiTests
         Assert.Equal(1, plan.MaterialCount);
         Assert.Equal(picture.Id, plan.ReferenceAssetId);
         Assert.Contains("2.4 m at its longest", plan.Cost, StringComparison.Ordinal);
-        Assert.Contains("one painter run a section, roughly 2 minutes each", plan.Cost, StringComparison.Ordinal);
-        Assert.Contains("up to 12", plan.Cost, StringComparison.Ordinal);
+        Assert.Contains("one painter run a section, roughly 3 minutes each", plan.Cost, StringComparison.Ordinal);
+        Assert.Contains("up to 48", plan.Cost, StringComparison.Ordinal);
         Assert.Contains("21 GiB", plan.Cost, StringComparison.Ordinal);
         Assert.Contains("skiff-concept", plan.Cost, StringComparison.Ordinal);
         Assert.Equal(0, compiler.Runs);
@@ -1587,9 +1587,11 @@ public sealed class ModelPreparationApiTests
         // Painted from the linked picture, whole, with the numbers it was quoted.
         var told = compiler.Options["paint-sections"];
         Assert.Equal(StoredPath(factory, picture), told["reference"]);
-        Assert.Equal("0.6", told["section"]);
+        Assert.Equal("0.45", told["section"]);
+        Assert.Equal("0.2", told["overlap"]);
+        Assert.Equal("0.05", told["context"]);
         Assert.Equal("1.2", told["min-length"]);
-        Assert.Equal("12", told["max-sections"]);
+        Assert.Equal("48", told["max-sections"]);
         Assert.Equal("12", told["views"]);
         Assert.Equal("768", told["resolution"]);
 

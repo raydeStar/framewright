@@ -221,22 +221,27 @@ The painter sees a whole model through twelve views of 768 pixels, whatever its
 size. A 45 cm prop gets about 0.6 mm of surface to a painted pixel and comes
 out sharp; a 2.2 m skiff gets about 3 mm and is smeared and grainy up close. No
 sheet size puts back what the painter never saw. The compiler's
-`paint-sections` stage (compiler `8dff1a7`, which merged
-raydeStar/reference-asset-compiler#15, and later)
+`paint-sections` stage (compiler `e6b418f`, which merged
+raydeStar/reference-asset-compiler#16, and later)
 cuts a large model into sections of about half a metre, paints each one again
 on its own from the same picture, and lays them back on the same UVs. Nothing
 moves a vertex or a UV.
 
 - **What it is told.** `--reference`, `--views 12 --resolution 768 --atlas
-  4096`, and `--section 0.6 --min-length 1.2 --max-sections 12`. These are sent
-  rather than left to the compiler's defaults, so the sentence the artist reads
-  before queuing is what the stage was told.
-- **What it costs.** One painter run a section, roughly 2 minutes each, up to 12,
+  4096`, and `--section 0.45 --overlap 0.2 --context 0.05 --min-length 1.2
+  --max-sections 48`. These are sent rather than left to the compiler's
+  defaults, so the sentence the artist reads before queuing is what the stage
+  was told. It is the cut the owner judged on the Frastown skiff. The compiler
+  keeps the first paint's colour above 3 cm by default, so sections add fine
+  light and dark without repainting the design.
+- **What it costs.** One painter run a section, roughly 3 minutes each, up to 48,
   on a GPU with 21 GiB free. The first proof, a 2.2 m mast, took 11.6 minutes
-  for six sections and went from about 3.2 mm to about 1.3 mm of surface a
-  painted pixel. The exact count is the compiler's, decided when it cuts the
-  model, so the panels quote the ceiling. Each painter run is allowed fifty
-  minutes by the stage, so twelve can outlast an hour on a busy GPU; this stage
+  for six sections at the old 0.6 m cut and went from about 3.2 mm to about
+  1.3 mm of surface a painted pixel. The 2.2 m skiff at the finer cut took 109
+  minutes for 45 sections and came out at about 0.7 mm. The exact count is the
+  compiler's, decided when it cuts the model, so the panels quote the ceiling.
+  Each painter run is allowed fifty minutes by the stage, and 48 of them outlast
+  any hour; this stage
   gets `Integrations:ReferenceAssetCompiler:SectionsStageTimeoutMinutes`
   (240 by default) instead of `StageTimeoutMinutes`, and `rac run-stage` is
   passed the same limit as `--timeout`.
