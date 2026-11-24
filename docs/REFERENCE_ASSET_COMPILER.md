@@ -214,3 +214,64 @@ size.
   lit and unlit similarity. The panel says this before **Prepare for runtime** is
   pressed (`preparationKeepsPaint` on the readiness answer). An untextured model
   or an older compiler keeps the route it had.
+
+## Painting a large prop in sections
+
+The painter sees a whole model through twelve views of 768 pixels, whatever its
+size. A 45 cm prop gets about 0.6 mm of surface to a painted pixel and comes
+out sharp; a 2.2 m skiff gets about 3 mm and is smeared and grainy up close. No
+sheet size puts back what the painter never saw. The compiler's
+`paint-sections` stage (compiler `8dff1a7`, which merged
+raydeStar/reference-asset-compiler#15, and later)
+cuts a large model into sections of about half a metre, paints each one again
+on its own from the same picture, and lays them back on the same UVs. Nothing
+moves a vertex or a UV.
+
+- **What it is told.** `--reference`, `--views 12 --resolution 768 --atlas
+  4096`, and `--section 0.6 --min-length 1.2 --max-sections 12`. These are sent
+  rather than left to the compiler's defaults, so the sentence the artist reads
+  before queuing is what the stage was told.
+- **What it costs.** One painter run a section, roughly 2 minutes each, up to 12,
+  on a GPU with 21 GiB free. The first proof, a 2.2 m mast, took 11.6 minutes
+  for six sections and went from about 3.2 mm to about 1.3 mm of surface a
+  painted pixel. The exact count is the compiler's, decided when it cuts the
+  model, so the panels quote the ceiling. Each painter run is allowed fifty
+  minutes by the stage, so twelve can outlast an hour on a busy GPU; this stage
+  gets `Integrations:ReferenceAssetCompiler:SectionsStageTimeoutMinutes`
+  (240 by default) instead of `StageTimeoutMinutes`, and `rac run-stage` is
+  passed the same limit as `--timeout`.
+- **Generating a hero.** A hero is asked what it is: a standing figure, an
+  animal seen from the side, or a prop (`headEnd` `top`, `left`, `right` or
+  `none`; unnamed is `top`, as before). A figure or an animal keeps its head
+  pass. A prop gets none: the head pass repaints the top of a model as if it
+  were a face, and on a 2.2 m mast it left crisp iron above a hard line and flat
+  putty below it. When `run-stage --list` offers `paint-sections`, a hero prop is
+  painted again in sections straight after `texture`. It is on by default, the
+  generation panel says what it costs before anything is queued, and the artist
+  can switch it off (`paintSections: false`). Set dressing never runs it, and
+  asking for it on set dressing or on a figure is refused. A prop under 1.2 m
+  passes through at no cost. The model's revision note quotes the receipt: how
+  many sections, and the millimetres a painted pixel covered for the whole model
+  and for the coarsest section, or that it was passed through and why.
+- **A model already in the library.** **Paint in sections** on a model
+  revision routes `review-views → paint-sections → browser-payload →
+  review-views` and delivers a revision beside it, unaccepted, with the same
+  before-and-after views every derivative has. It paints from the picture linked
+  to the model (its reference image), frozen by identity and hash when it is
+  queued. It is for props: every face is painted again, so a hero prop that was
+  given a head pass loses that hard band along with the soft paint below it.
+  Before anything is queued it states its cost, or refuses in one sentence when
+  the model has no linked picture, the compiler lacks the stage or the paint
+  stack, the revision carries more than one material (sections are painted
+  before surfacing; pick an earlier revision), it carries no painted texture, or
+  its longest side is under 1.2 m. If the compiler passes it through anyway
+  (it fits one section), the job stops with the compiler's reason rather than
+  deliver the same model again under a new number.
+- **For an agent.** `GET /api/models/sections/readiness` answers for the route;
+  `GET /api/assets/{id}/section-paint` answers for one model (`canQueue`,
+  `refusal`, `cost`, `longestMetres`, `materialCount`, `referenceAssetId`); and
+  `POST /api/models/sections` with `{ sourceAssetId, name }` queues it. The
+  generation readiness carries `paintSections` (the lengths and the cost). A
+  finished job's result carries `sections`: `painted`, `count`,
+  `wholeModelMmPerPixel`, `sectionMmPerPixel` and `note`, copied from the
+  receipt (`reference-asset-compiler.section-detail-paint.v1`).

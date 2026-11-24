@@ -316,11 +316,20 @@ public sealed record RigPoseSummary(
 /// <param name="HeadEnd">
 /// Where the head is in the picture, for a hero: "top" for a standing figure,
 /// "left" or "right" for an animal seen from the side. The head pass cuts the
-/// model and crops the picture at that end. Unnamed means top.
+/// model and crops the picture at that end. "none" says the hero is a prop with
+/// no head: it gets no head pass, which on a prop paints its top again as if it
+/// were a face and leaves a hard line across it. Unnamed means top.
+/// </param>
+/// <param name="PaintSections">
+/// For a hero prop: whether a large one is painted again in sections of about
+/// half a metre, so it is as sharp up close as a small prop. Unnamed means yes
+/// where the compiler can; false switches it off. Never asked of set dressing,
+/// nor of a hero with a head, which keeps its head pass instead.
 /// </param>
 public sealed record CreateModelGenerationRequest(
     Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null,
-    string? GlassColour = null, string? Detail = null, string? HeadEnd = null);
+    string? GlassColour = null, string? Detail = null, string? HeadEnd = null,
+    bool? PaintSections = null);
 
 /// <summary>
 /// Whether model generation can run on this workstation, and whether it is
@@ -353,6 +362,29 @@ public sealed record CreateModelCompressionRequest(
 /// </param>
 /// <summary>Rigs one prepared humanoid model to the UE5 Manny browser skeleton, as a candidate revision.</summary>
 public sealed record CreateModelRigRequest(Guid SourceAssetId, string? Name);
+
+/// <summary>
+/// Paint a large prop again in sections of about half a metre, from the picture
+/// linked to it, and deliver the result as a revision beside it. The picture is
+/// the model's own <c>ReferenceAssetId</c>; nothing else is asked.
+/// </summary>
+public sealed record CreateModelSectionPaintRequest(Guid SourceAssetId, string? Name);
+
+/// <summary>
+/// Whether one model revision can be painted again in sections, and what it
+/// would cost, answered before anything is queued.
+/// </summary>
+/// <param name="CanQueue">True when nothing stands in the way.</param>
+/// <param name="Refusal">Why it cannot be queued, in one plain sentence; null when it can.</param>
+/// <param name="Cost">What it costs in painter runs and GPU, said before it is queued.</param>
+/// <param name="LongestMetres">The model's longest side, measured from its stored bytes.</param>
+/// <param name="MaterialCount">How many materials this revision carries. Sections need exactly one.</param>
+/// <param name="ReferenceAssetId">The picture linked to the model, which each section is cropped from.</param>
+/// <param name="ReferenceName">That picture's name in the library.</param>
+public sealed record ModelSectionPaintPlan(
+    Guid AssetId, bool CanQueue, string? Refusal, string Cost,
+    double LongestMetres, int MaterialCount, Guid? ReferenceAssetId, string? ReferenceName,
+    double MinimumLengthMetres, double SectionMetres, int MaximumSections);
 
 public sealed record CreateModelCullRequest(
     Guid SourceAssetId, string? Name,
@@ -495,13 +527,29 @@ public sealed record ModelPreparationView(
 /// a textured model then routes through it; false for an older compiler, whose
 /// reduction slides painted detail with the UVs.
 /// </param>
+/// <param name="PaintSections">
+/// Present when the compiler can paint a large model again in sections: the
+/// lengths this studio asks for and what it costs, in a sentence. Null for a
+/// compiler without the stage.
+/// </param>
 public sealed record ModelGenerationReadiness(
     bool Installed, bool Commissioned, bool CanRun,
     string? CompilerVersion, string? Checkout, string? Blender,
     string[] Missing, string Detail, ModelSizeChoice[]? Sizes = null,
     IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null,
     ModelDetailChoice[]? Details = null, BlenderInstallSummary? BlenderInstall = null,
-    bool RemeshDecidesBudget = false, bool PreparationKeepsPaint = false);
+    bool RemeshDecidesBudget = false, bool PreparationKeepsPaint = false,
+    ModelSectionsOffer? PaintSections = null);
+
+/// <summary>
+/// What painting in sections means on this compiler, in the numbers this
+/// studio sends it: a model shorter than <c>MinimumLengthMetres</c> passes
+/// through untouched, a longer one is cut into sections of about
+/// <c>SectionMetres</c>, at most <c>MaximumSections</c> of them, each one
+/// painter run.
+/// </summary>
+public sealed record ModelSectionsOffer(
+    double MinimumLengthMetres, double SectionMetres, int MaximumSections, string Cost);
 
 /// <summary>
 /// How close the camera will get to a generated model, offered in those terms

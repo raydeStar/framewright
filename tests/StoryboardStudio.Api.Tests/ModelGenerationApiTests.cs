@@ -80,6 +80,22 @@ public sealed class ModelGenerationApiTests
                 : stage)],
         };
 
+        /// <summary>A compiler that can also paint a large model again in sections.</summary>
+        public static CompilerCapabilities WithSections => Ready with
+        {
+            Stages = [.. Ready.Stages, Stage("paint-sections")],
+        };
+
+        /// <summary>
+        /// Whether the section pass paints, or passes the model through as the
+        /// real one does for anything under its minimum length.
+        /// </summary>
+        public bool SectionsPainted { get; set; } = true;
+
+        /// <summary>The plan a section pass's answer carries: its grid, and each section's millimetres a painted pixel.</summary>
+        private static readonly int[] SectionGrid = [4, 1, 1];
+        private static readonly double[] SectionMillimetres = [0.86, 0.9, 0.88, 0.71];
+
         /// <summary>A compiler from before heads could be painted on their own.</summary>
         public static CompilerCapabilities WithoutHero => Ready with
         {
@@ -148,6 +164,30 @@ public sealed class ModelGenerationApiTests
                         ? "A medium hero piece: about 25,000 triangles."
                         : "A medium prop: about 10,000 triangles.",
                 };
+            // The section pass answers in its contract's shape: whether it
+            // painted, the plan it cut, and a sentence saying what it did.
+            if (stage == "paint-sections")
+            {
+                fields["schema"] = "reference-asset-compiler.section-detail-paint.v1";
+                fields["painted"] = SectionsPainted;
+                if (SectionsPainted)
+                {
+                    fields["plan"] = new
+                    {
+                        grid = SectionGrid,
+                        section_m = 0.6,
+                        whole_model_mm_per_pixel = 3.14,
+                        sections = SectionMillimetres
+                            .Select((mm, number) => new { number, painted_mm_per_pixel = mm }).ToArray(),
+                    };
+                    fields["note"] = "laid 4 sections over the first paint: about 0.9 mm a painted pixel, down from 3.1";
+                }
+                else
+                {
+                    fields["note"] = "the model is 0.95 m at its longest, under 1.2 m: the whole-model paint "
+                        + "already sees it at section scale, so it is passed through unchanged";
+                }
+            }
             var receipt = JsonSerializer.Serialize(fields);
             await File.WriteAllTextAsync(reportPath, receipt, cancellationToken);
             return new CompilerStageRun(true, stage, 0, 0.5, outputPath, receipt, null, ["exported"]);
@@ -1140,6 +1180,191 @@ public sealed class ModelGenerationApiTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
         Assert.Empty(await db.Assets.Where(asset => asset.Kind == "Model").ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task AHeroPropIsPaintedAgainInSectionsAndNeverGivenAHeadPass()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "mast-reference.png");
+
+        // Said before anything is queued: what sections are for, and what they cost.
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/generation/readiness")
+            ?? throw new InvalidOperationException();
+        var offer = readiness.RootElement.GetProperty("paintSections");
+        Assert.Equal(1.2, offer.GetProperty("minimumLengthMetres").GetDouble());
+        Assert.Equal(12, offer.GetProperty("maximumSections").GetInt32());
+        var cost = offer.GetProperty("cost").GetString()!;
+        Assert.Contains("One painter run a section, roughly 2 minutes each", cost, StringComparison.Ordinal);
+        Assert.Contains("up to 12", cost, StringComparison.Ordinal);
+        Assert.Contains("21 GiB", cost, StringComparison.Ordinal);
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Mast", size = "head", detail = "hero", headEnd = "none" });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Completed, finished.State);
+
+        // A prop has no head. The head pass on one repainted a mast's top as if
+        // it were a face and left a hard line around the pole; the sections
+        // cover every face instead, straight after the first paint.
+        Assert.Equal(["geometry", "stage-mesh", "remesh", "uv-unwrap", "texture", "paint-sections",
+                      "browser-payload", "compress-textures"],
+            compiler.Calls.Select(call => call.Stage));
+        Assert.Equal("step-5-texture.glb", compiler.Calls[5].Source);
+        Assert.Equal("step-6-paint-sections.glb", compiler.Calls[6].Source);
+
+        // The same picture as the first paint, uncropped, and the numbers the
+        // artist was quoted.
+        var told = compiler.Options["paint-sections"];
+        Assert.Equal(compiler.Options["texture"]["reference"], told["reference"]);
+        Assert.Equal("12", told["views"]);
+        Assert.Equal("768", told["resolution"]);
+        Assert.Equal("4096", told["atlas"]);
+        Assert.Equal("0.6", told["section"]);
+        Assert.Equal("1.2", told["min-length"]);
+        Assert.Equal("12", told["max-sections"]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var delivered = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        // The revision note quotes the receipt: how many sections, and the
+        // surface a painted pixel covered before and after.
+        Assert.Contains("Made as a hero prop", delivered.RevisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("with no head pass", delivered.RevisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("Painted again in 4 sections, at about 0.9 mm of surface a painted pixel, "
+            + "down from 3.1 mm for the whole model.", delivered.RevisionPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("head painted a second time", delivered.RevisionPrompt, StringComparison.Ordinal);
+
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == finished.Id);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        var sections = result.RootElement.GetProperty("sections");
+        Assert.True(sections.GetProperty("painted").GetBoolean());
+        Assert.Equal(4, sections.GetProperty("count").GetInt32());
+        Assert.Equal(3.14, sections.GetProperty("wholeModelMmPerPixel").GetDouble());
+        Assert.Equal(0.9, sections.GetProperty("sectionMmPerPixel").GetDouble());
+        Assert.Equal("none", result.RootElement.GetProperty("headEnd").GetString());
+    }
+
+    [Fact]
+    public async Task AHeroWithAHeadKeepsItsHeadPassAndIsNeverPaintedInSections()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "figure-with-head-reference.png");
+
+        // Unnamed is a standing figure, as it always was.
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Figure", size = "head", detail = "hero" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.Contains("paint-head", compiler.Calls.Select(call => call.Stage));
+        Assert.DoesNotContain("paint-sections", compiler.Calls.Select(call => call.Stage));
+
+        // Asking for both is refused by name rather than quietly half-honoured.
+        var runs = compiler.Runs;
+        var both = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Both", size = "head", detail = "hero", headEnd = "left", paintSections = true });
+        Assert.Equal(HttpStatusCode.BadRequest, both.StatusCode);
+        Assert.Contains("Sections are for a prop", await both.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(runs, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task SetDressingIsNeverPaintedInSections()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "set-sections-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Distant mast", size = "head", headEnd = "none" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.DoesNotContain("paint-sections", compiler.Calls.Select(call => call.Stage));
+
+        var runs = compiler.Runs;
+        var asked = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Asked", size = "head", headEnd = "none", paintSections = true });
+        Assert.Equal(HttpStatusCode.BadRequest, asked.StatusCode);
+        Assert.Contains("Only a hero", await asked.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(runs, compiler.Runs);
+    }
+
+    [Fact]
+    public async Task AnArtistCanLeaveSectionsOffForAHeroProp()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "sections-off-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Cheaper mast", size = "head", detail = "hero", headEnd = "none", paintSections = false });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+
+        Assert.Equal(JobState.Completed, finished.State);
+        // Off is off, and a prop still never gets the head pass that leaves its seam.
+        Assert.DoesNotContain("paint-sections", compiler.Calls.Select(call => call.Stage));
+        Assert.DoesNotContain("paint-head", compiler.Calls.Select(call => call.Stage));
+    }
+
+    [Fact]
+    public async Task ASmallHeroPropPassesThroughAndItsNoteSaysSo()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithSections, SectionsPainted = false };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "small-prop-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Lantern", size = "knee", detail = "hero", headEnd = "none" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+
+        // Passed through at no cost, and the note says so in the compiler's words.
+        Assert.Equal(JobState.Completed, finished.State);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var delivered = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.Contains("Not painted in sections: the model is 0.95 m at its longest, under 1.2 m",
+            delivered.RevisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("passed through unchanged.", delivered.RevisionPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ACompilerWithoutTheSectionPassStillMakesAHeroPropWithoutAHeadPass()
+    {
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "older-prop-reference.png");
+
+        using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/generation/readiness")
+            ?? throw new InvalidOperationException();
+        Assert.Equal(JsonValueKind.Null, readiness.RootElement.GetProperty("paintSections").ValueKind);
+
+        var refused = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Asked", size = "head", detail = "hero", headEnd = "none", paintSections = true });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("paint-sections", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Older mast", size = "head", detail = "hero", headEnd = "none" });
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.DoesNotContain("paint-head", compiler.Calls.Select(call => call.Stage));
+        Assert.DoesNotContain("paint-sections", compiler.Calls.Select(call => call.Stage));
     }
 
     private static async Task<JobSummary> RunAsync(StudioApiFactory factory, Guid jobId)

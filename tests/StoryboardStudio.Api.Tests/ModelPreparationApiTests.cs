@@ -63,6 +63,19 @@ public sealed class ModelPreparationApiTests
                      Stage("survey-surfaces"), Stage("compress-textures"),
                      Stage("cull-unseen")]);
 
+        /// <summary>A compiler that can also paint a large model again in sections.</summary>
+        public static CompilerCapabilities ReadyToPaintSections => Ready with
+        {
+            Stages = [.. Ready.Stages, Stage("paint-sections")],
+        };
+
+        /// <summary>Whether the section pass paints, or passes the model through unchanged.</summary>
+        public bool SectionsPainted { get; set; } = true;
+
+        /// <summary>The plan a section pass's answer carries: its grid, and each section's millimetres a painted pixel.</summary>
+        private static readonly int[] SectionGrid = [3, 1, 2];
+        private static readonly double[] SectionMillimetres = [0.78, 0.81, 0.8, 0.79, 0.77, 0.74];
+
         /// <summary>A compiler that can also bake a reduced model's paint back.</summary>
         public static CompilerCapabilities ReadyToKeepPaint => Ready with
         {
@@ -197,6 +210,30 @@ public sealed class ModelPreparationApiTests
                             },
                         },
                     };
+                }
+                // The section pass's receipt, in its contract's shape.
+                if (stage == "paint-sections")
+                {
+                    fields["schema"] = "reference-asset-compiler.section-detail-paint.v1";
+                    fields["painted"] = SectionsPainted;
+                    fields["geometry_unchanged"] = true;
+                    fields["uvs_unchanged"] = true;
+                    if (SectionsPainted)
+                    {
+                        fields["plan"] = new
+                        {
+                            grid = SectionGrid,
+                            whole_model_mm_per_pixel = 3.44,
+                            sections = SectionMillimetres
+                                .Select((mm, number) => new { number, painted_mm_per_pixel = mm }).ToArray(),
+                        };
+                        fields["note"] = "laid 6 sections over the first paint: about 0.8 mm a painted pixel, down from 3.4";
+                    }
+                    else
+                    {
+                        File.Copy(sourcePath, outputPath, overwrite: true);
+                        fields["note"] = "the model fits one section, so it is passed through unchanged";
+                    }
                 }
                 receipt = JsonSerializer.Serialize(fields);
             }
@@ -1494,6 +1531,258 @@ public sealed class ModelPreparationApiTests
         // No stack invented around a model that never had one: a refusal should
         // leave the library exactly as it found it.
         Assert.Null(kept.RevisionFamilyId);
+    }
+
+    /// <summary>
+    /// A painted prop, one material and one image, made long enough to be cut
+    /// into sections (2.4 m) or short enough not to be (0.6 m) by scaling its
+    /// node: the size is measured from the stored file, transforms included.
+    /// </summary>
+    private static byte[] PaintedProp(double scale) => ModelFixtures.Mutate(ModelFixtures.TexturedDenseProp(),
+        document => document["nodes"]![0]!["scale"] = new System.Text.Json.Nodes.JsonArray(scale, scale, scale));
+
+    private static async Task LinkAsync(HttpClient client, Guid model, Guid picture) =>
+        (await client.PutAsJsonAsync($"/api/assets/{model}/reference", new { referenceAssetId = picture }))
+            .EnsureSuccessStatusCode();
+
+    [Fact]
+    public async Task PaintingInSectionsDeliversARevisionBesideItsSourceAndQuotesTheReceipt()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.ReadyToPaintSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "skiff.glb", PaintedProp(2));
+        var picture = await ImportImageAsync(client, "skiff-concept.png");
+        await LinkAsync(client, source.Id, picture.Id);
+
+        // The cost is said before anything is queued, for this model.
+        var plan = await client.GetFromJsonAsync<ModelSectionPaintPlan>($"/api/assets/{source.Id}/section-paint")
+            ?? throw new InvalidOperationException();
+        Assert.True(plan.CanQueue);
+        Assert.Null(plan.Refusal);
+        Assert.Equal(2.4, plan.LongestMetres, 3);
+        Assert.Equal(1, plan.MaterialCount);
+        Assert.Equal(picture.Id, plan.ReferenceAssetId);
+        Assert.Contains("2.4 m at its longest", plan.Cost, StringComparison.Ordinal);
+        Assert.Contains("one painter run a section, roughly 2 minutes each", plan.Cost, StringComparison.Ordinal);
+        Assert.Contains("up to 12", plan.Cost, StringComparison.Ordinal);
+        Assert.Contains("21 GiB", plan.Cost, StringComparison.Ordinal);
+        Assert.Contains("skiff-concept", plan.Cost, StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+
+        var queued = await client.PostAsJsonAsync("/api/models/sections",
+            new { sourceAssetId = source.Id, name = "Skiff (painted in sections)" });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        Assert.Equal("Painted in sections", job.Kind);
+        var finished = await RunAsync(factory, job.Id);
+        Assert.Equal(JobState.Completed, finished.State);
+
+        // Views of the original, the section pass on the original itself, the
+        // export, and views of what came back.
+        Assert.Equal(["review-views", "paint-sections", "browser-payload", "review-views"],
+            compiler.Calls.Select(call => call.Stage).ToArray());
+        Assert.Equal(compiler.Calls[0].Source, compiler.Calls[1].Source);
+        Assert.Equal("step-2-paint-sections.glb", compiler.Calls[2].Source);
+        // Painted from the linked picture, whole, with the numbers it was quoted.
+        var told = compiler.Options["paint-sections"];
+        Assert.Equal(StoredPath(factory, picture), told["reference"]);
+        Assert.Equal("0.6", told["section"]);
+        Assert.Equal("1.2", told["min-length"]);
+        Assert.Equal("12", told["max-sections"]);
+        Assert.Equal("12", told["views"]);
+        Assert.Equal("768", told["resolution"]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var before = await db.Assets.SingleAsync(asset => asset.Id == source.Id);
+        var after = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.Equal(before.RevisionFamilyId, after.RevisionFamilyId);
+        Assert.True(before.IsCurrentRevision);
+        Assert.False(after.IsCurrentRevision);
+        Assert.Null(after.PreparationAcceptedAt);
+        // The note quotes the receipt: sections, and millimetres before and after.
+        Assert.Contains("Painted in sections from", after.RevisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("6 sections, at about 0.8 mm of surface a painted pixel, down from 3.4 mm for the whole model",
+            after.RevisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("Painted in sections from", after.Notes, StringComparison.Ordinal);
+        // A reworked model was still made from the same concept.
+        Assert.Equal(picture.Id, after.ReferenceAssetId);
+
+        var evidence = await client.GetFromJsonAsync<ModelPreparationEvidence>(
+            $"/api/assets/{finished.OutputAssetId}/preparation-evidence") ?? throw new InvalidOperationException();
+        Assert.Equal(8, evidence.Source!.Views.Length);
+        Assert.Equal(8, evidence.Derivative!.Views.Length);
+
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == job.Id);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.Equal(6, result.RootElement.GetProperty("sections").GetProperty("count").GetInt32());
+        Assert.Equal("sections", result.RootElement.GetProperty("work").GetString());
+    }
+
+    [Fact]
+    public async Task ASectionPassIsPaintedFromThePictureLinkedWhenItWasAskedFor()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.ReadyToPaintSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "frozen.glb", PaintedProp(2));
+        var asked = await ImportImageAsync(client, "asked-from.png");
+        var later = await ImportImageAsync(client, "linked-later.png");
+        await LinkAsync(client, source.Id, asked.Id);
+
+        var queued = await client.PostAsJsonAsync("/api/models/sections", new { sourceAssetId = source.Id, name = "Frozen" });
+        queued.EnsureSuccessStatusCode();
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        // Re-linked while it waits: the queued job still paints from what it froze.
+        await LinkAsync(client, source.Id, later.Id);
+        var finished = await RunAsync(factory, job.Id);
+
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.Equal(StoredPath(factory, asked), compiler.Options["paint-sections"]["reference"]);
+    }
+
+    [Fact]
+    public async Task WithoutALinkedPictureNothingIsQueued()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.ReadyToPaintSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "unlinked.glb", PaintedProp(2));
+
+        var plan = await client.GetFromJsonAsync<ModelSectionPaintPlan>($"/api/assets/{source.Id}/section-paint")
+            ?? throw new InvalidOperationException();
+        Assert.False(plan.CanQueue);
+        Assert.Contains("no linked picture", plan.Refusal, StringComparison.Ordinal);
+
+        var refused = await client.PostAsJsonAsync("/api/models/sections", new { sourceAssetId = source.Id, name = "Unlinked" });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("no linked picture", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+        await AssertNothingQueuedAsync(factory);
+    }
+
+    [Fact]
+    public async Task ARevisionWithMoreThanOneMaterialIsSentBackToAnEarlierOne()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.ReadyToPaintSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        // Two materials, two metres: what a surfaced revision looks like.
+        var source = await ImportModelAsync(client, "surfaced.glb", ModelFixtures.AsymmetricBlock());
+        var picture = await ImportImageAsync(client, "surfaced-concept.png");
+        await LinkAsync(client, source.Id, picture.Id);
+
+        var plan = await client.GetFromJsonAsync<ModelSectionPaintPlan>($"/api/assets/{source.Id}/section-paint")
+            ?? throw new InvalidOperationException();
+        Assert.False(plan.CanQueue);
+        Assert.Equal(2, plan.MaterialCount);
+        Assert.Contains("carries 2 materials", plan.Refusal, StringComparison.Ordinal);
+        Assert.Contains("paint sections before surfacing", plan.Refusal, StringComparison.Ordinal);
+        Assert.Contains("pick an earlier revision", plan.Refusal, StringComparison.Ordinal);
+
+        var refused = await client.PostAsJsonAsync("/api/models/sections", new { sourceAssetId = source.Id, name = "Surfaced" });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("before surfacing", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0, compiler.Runs);
+        await AssertNothingQueuedAsync(factory);
+    }
+
+    [Fact]
+    public async Task AModelShorterThanSectionScaleIsNotPaintedInSections()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.ReadyToPaintSections };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "lantern.glb", PaintedProp(0.5));
+        var picture = await ImportImageAsync(client, "lantern-concept.png");
+        await LinkAsync(client, source.Id, picture.Id);
+
+        var plan = await client.GetFromJsonAsync<ModelSectionPaintPlan>($"/api/assets/{source.Id}/section-paint")
+            ?? throw new InvalidOperationException();
+        Assert.False(plan.CanQueue);
+        Assert.Contains("0.6 m at its longest, under 1.2 m", plan.Refusal, StringComparison.Ordinal);
+
+        var refused = await client.PostAsJsonAsync("/api/models/sections", new { sourceAssetId = source.Id, name = "Lantern" });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(0, compiler.Runs);
+        await AssertNothingQueuedAsync(factory);
+    }
+
+    [Fact]
+    public async Task ACompilerWithoutTheStageOrThePaintStackRefusesBeforeQueuing()
+    {
+        // No stage at all: an older compiler.
+        var compiler = new ControlledCompiler();
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "older.glb", PaintedProp(2));
+        var picture = await ImportImageAsync(client, "older-concept.png");
+        await LinkAsync(client, source.Id, picture.Id);
+
+        var plan = await client.GetFromJsonAsync<ModelSectionPaintPlan>($"/api/assets/{source.Id}/section-paint")
+            ?? throw new InvalidOperationException();
+        Assert.False(plan.CanQueue);
+        Assert.Equal("This compiler does not offer the paint-sections stage.", plan.Refusal);
+        var refused = await client.PostAsJsonAsync("/api/models/sections", new { sourceAssetId = source.Id, name = "Older" });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
+        Assert.Contains("paint-sections", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        // The stage, but no painter on this machine.
+        compiler.Capabilities = ControlledCompiler.Ready with
+        {
+            Stages = [.. ControlledCompiler.Ready.Stages,
+                ControlledCompiler.Stage("paint-sections") with { Available = false, Missing = ["paint-stack"] }],
+        };
+        var readiness = await client.GetFromJsonAsync<ModelGenerationReadiness>("/api/models/sections/readiness")
+            ?? throw new InvalidOperationException();
+        Assert.False(readiness.CanRun);
+        Assert.Contains("paint-stack", readiness.Missing);
+        var stackless = await client.GetFromJsonAsync<ModelSectionPaintPlan>($"/api/assets/{source.Id}/section-paint")
+            ?? throw new InvalidOperationException();
+        Assert.Equal("The compiler cannot run the paint-sections stage yet: paint-stack missing.", stackless.Refusal);
+        var unpainted = await client.PostAsJsonAsync("/api/models/sections", new { sourceAssetId = source.Id, name = "Stackless" });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, unpainted.StatusCode);
+
+        Assert.Equal(0, compiler.Runs);
+        await AssertNothingQueuedAsync(factory);
+    }
+
+    [Fact]
+    public async Task ASectionPassTheCompilerPassesThroughDeliversNoRevision()
+    {
+        var compiler = new ControlledCompiler
+        {
+            Capabilities = ControlledCompiler.ReadyToPaintSections,
+            SectionsPainted = false,
+        };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var source = await ImportModelAsync(client, "one-section.glb", PaintedProp(2));
+        var picture = await ImportImageAsync(client, "one-section-concept.png");
+        await LinkAsync(client, source.Id, picture.Id);
+
+        var queued = await client.PostAsJsonAsync("/api/models/sections", new { sourceAssetId = source.Id, name = "One section" });
+        queued.EnsureSuccessStatusCode();
+        var job = await queued.Content.ReadFromJsonAsync<JobSummary>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.Id);
+
+        // The same model under a new number is not a result; the compiler's
+        // reason is, and nothing after it runs.
+        Assert.Equal(JobState.Failed, finished.State);
+        Assert.Null(finished.OutputAssetId);
+        Assert.Contains("Nothing was painted in sections: the model fits one section", finished.Error, StringComparison.Ordinal);
+        Assert.Equal(["review-views", "paint-sections"], compiler.Calls.Select(call => call.Stage).ToArray());
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        Assert.Null((await db.Assets.SingleAsync(asset => asset.Id == source.Id)).RevisionFamilyId);
+    }
+
+    private static async Task AssertNothingQueuedAsync(StudioApiFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        Assert.Empty(await db.Jobs.Where(job => job.WorkType == ModelGenerationService.ModelWorkType).ToArrayAsync());
     }
 
     private static async Task RetryAsync(StudioApiFactory factory, Guid jobId)

@@ -253,6 +253,18 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
                     available = $true
                     missing   = @()
                 },
+                # A hero prop's second paint, and the derivative route that
+                # repaints a large library prop from its linked picture.
+                [ordered]@{
+                    stage     = 'paint-sections'
+                    runner    = 'python'
+                    summary   = 'Paint a large model again in sections of about half a metre and lay them over its first paint.'
+                    produces  = 'reference-asset-compiler.section-detail-paint.v1'
+                    arguments = @('source', 'output', 'report')
+                    options   = @('reference', 'views', 'resolution', 'atlas', 'section', 'overlap', 'keep_tone', 'min_length', 'max_sections', 'min_free_vram')
+                    available = $true
+                    missing   = @()
+                },
                 # Fixed views and the humanoid rig, so the rig journey runs
                 # the studio's real route with pictures a browser can show.
                 [ordered]@{
@@ -294,7 +306,7 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     $stage = $arguments[1]
-    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'glass', 'browser-payload', 'paint-head', 'compress-textures', 'review-views', 'rig')) {
+    if ($stage -notin @('geometry', 'stage-mesh', 'remesh', 'uv-unwrap', 'texture', 'glass', 'browser-payload', 'paint-head', 'paint-sections', 'compress-textures', 'review-views', 'rig')) {
         Write-Error "RAC_ERROR unknown stage: $stage"
         exit 2
     }
@@ -380,6 +392,64 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
         exit 0
     }
 
+    if ($stage -eq 'paint-sections') {
+        # The same model with new paint, as the real stage delivers it: nothing
+        # moves. The stand-in cannot paint, so it renames the scene after the
+        # source instead -- a real repaint of a different model is different
+        # bytes, and two journeys must never deliver one content-addressed file
+        # into two revision stacks. It does not measure the model: the studio
+        # refuses anything under the minimum length before it gets here.
+        $reference = Read-Option '--reference'
+        if (-not $reference -or -not (Test-Path -LiteralPath $reference)) {
+            Write-Error 'RAC_ERROR Painting in sections needs the reference the model was painted from: pass --reference.'
+            exit 2
+        }
+        $of = (Get-Sha256 $source)
+        $bytes = [IO.File]::ReadAllBytes($source)
+        $jsonLength = [int][BitConverter]::ToUInt32($bytes, 12)
+        $document = [Text.Encoding]::UTF8.GetString($bytes, 20, $jsonLength) | ConvertFrom-Json
+        $document.scenes[0].name = "$($document.scenes[0].name) painted in sections from $($of.Substring(0, 12))"
+        $json = [Text.Encoding]::UTF8.GetBytes(($document | ConvertTo-Json -Depth 100 -Compress))
+        $padding = (4 - ($json.Length % 4)) % 4
+        $remainderStart = 20 + $jsonLength
+        $result = New-Object byte[] (20 + $json.Length + $padding + $bytes.Length - $remainderStart)
+        [BitConverter]::GetBytes([uint32]0x46546c67).CopyTo($result, 0)
+        [BitConverter]::GetBytes([uint32]2).CopyTo($result, 4)
+        [BitConverter]::GetBytes([uint32]$result.Length).CopyTo($result, 8)
+        [BitConverter]::GetBytes([uint32]($json.Length + $padding)).CopyTo($result, 12)
+        [BitConverter]::GetBytes([uint32]0x4e4f534a).CopyTo($result, 16)
+        $json.CopyTo($result, 20)
+        for ($index = 0; $index -lt $padding; $index++) { $result[20 + $json.Length + $index] = 32 }
+        [Array]::Copy($bytes, $remainderStart, $result, 20 + $json.Length + $padding, $bytes.Length - $remainderStart)
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
+        [IO.File]::WriteAllBytes($output, $result)
+        $sections = @(0.82, 0.86, 0.84, 0.79) | ForEach-Object -Begin { $number = 0 } -Process {
+            [ordered]@{ number = $number++; painted_mm_per_pixel = $_ } }
+        $sectionsReceipt = [ordered]@{
+            schema = 'reference-asset-compiler.section-detail-paint.v1'
+            source = $source
+            source_sha256 = $of
+            output = $output
+            output_sha256 = (Get-Sha256 $output)
+            reference = $reference
+            reference_sha256 = (Get-Sha256 $reference)
+            settings = [ordered]@{ section_m = [double](Read-Option '--section'); min_length_m = [double](Read-Option '--min-length')
+                max_sections = [int](Read-Option '--max-sections') }
+            geometry_unchanged = $true
+            uvs_unchanged = $true
+            requires_fixed_view_review = $true
+            production_grade = $false
+            plan = [ordered]@{ grid = @(4, 1, 1); section_m = 0.6; whole_model_mm_per_pixel = 3.14; sections = @($sections) }
+            painted = $true
+            note = 'laid 4 sections over the first paint: about 0.9 mm a painted pixel, down from 3.1'
+        }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $receipt) | Out-Null
+        Set-Content -LiteralPath $receipt -Value ($sectionsReceipt | ConvertTo-Json -Depth 6) -Encoding utf8
+        Write-Output ([ordered]@{ ok = $true; schema = 'reference-asset-compiler.stage-run.v1'; stage = $stage; runner = 'python'
+            blender = 'e2e-stand-in'; exit_code = 0; seconds = 0.2; report = $receipt; receipt = $sectionsReceipt } | ConvertTo-Json -Depth 8)
+        exit 0
+    }
+
     # A real rigged model, so the studio's import validates a real GLB and the
     # delivered asset is genuinely inspectable in the browser.
     $fixture = Join-Path $repoRoot 'fixtures/glb/rigged-figure.glb'
@@ -389,7 +459,11 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     }
 
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
-    Copy-Item -LiteralPath $fixture -Destination $output -Force
+    # An export of a model is that model. Every other stage here hands back the
+    # fixture, so on the generation route this is the same bytes it always was;
+    # on a derivative route it is the derivative rather than a stranger.
+    $exported = if ($stage -eq 'browser-payload' -and $source.EndsWith('.glb', [StringComparison]::OrdinalIgnoreCase)) { $source } else { $fixture }
+    Copy-Item -LiteralPath $exported -Destination $output -Force
     $payloadHash = (Get-Sha256 $output)
     $sourceHash = (Get-Sha256 $source)
 
