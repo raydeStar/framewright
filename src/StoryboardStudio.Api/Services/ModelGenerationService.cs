@@ -1957,7 +1957,11 @@ public sealed class ModelGenerationService(
         // else has written one. A prepared derivative already has a better one --
         // it names what the reduction cost, in triangles -- and overwriting it
         // here threw that away.
-        if (!preparing) asset.RevisionPrompt = lineage.ToString();
+        if (!preparing)
+        {
+            asset.ReferenceAssetId = source.Id;
+            asset.RevisionPrompt = lineage.ToString();
+        }
         asset.UpdatedAt = timeProvider.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
     }

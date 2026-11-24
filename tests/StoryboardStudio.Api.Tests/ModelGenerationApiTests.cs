@@ -210,6 +210,8 @@ public sealed class ModelGenerationApiTests
         Assert.Contains("figure-reference", asset.Notes, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(reference.ContentHash[..12], asset.Notes, StringComparison.Ordinal);
         Assert.Contains("0.1.2", asset.Notes, StringComparison.Ordinal);
+        var library = await client.GetFromJsonAsync<AssetSummary[]>("/api/assets") ?? throw new InvalidOperationException();
+        Assert.Equal(reference.Id, Assert.Single(library, item => item.Id == finished.OutputAssetId).ReferenceAssetId);
 
         var record = await db.Jobs.SingleAsync(candidate => candidate.Id == jobId);
         using var result = JsonDocument.Parse(record.ResultJson!);
