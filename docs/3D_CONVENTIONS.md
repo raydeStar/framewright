@@ -279,6 +279,18 @@ pinch, and the plus and minus keys all move it between the same two limits:
 Two fingers moved together slide the view, as right-drag and shift-drag do, so
 a touch screen reaches every part of a model it has closed in on.
 
+### Keys on the 3D view
+
+While the 3D view has the keyboard, its keys are its own: the arrows turn the
+inspection camera, Shift with an arrow slides it, and plus and minus move it in
+and out. An asset's own page also steps to the previous and next asset in the
+library list on the left and right arrows, and that shortcut stands aside for
+any key the focused view has used, as it does for a field being typed in. The
+arrows step through the list from anywhere else on the page. Stepping away from
+a model because its view was being turned would lose the artist's place to a
+shortcut. Quick review is the exception and says so: there the left and right
+arrows always move through the queue, and up and down still tilt the model.
+
 The point the camera looks at starts at the middle of the model's bounds. On a
 thin part that is just behind the surface. On a thick one it is deep inside, and
 the nearest views are from within the mesh: slide the view until the point is on

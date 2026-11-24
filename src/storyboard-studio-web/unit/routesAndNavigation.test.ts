@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { exactReference, madeFrom, neighbours, referenceSuggestions, referencesByName } from '../src/assetNavigation.ts'
+import { exactReference, madeFrom, neighbours, referenceSuggestions, referencesByName, stepAsked, type StepKey } from '../src/assetNavigation.ts'
 import { formatAssetRoute, formatWorkspaceRoute, parseRoute } from '../src/routes.ts'
 import type { AssetSummary } from '../src/types.ts'
 
@@ -36,6 +36,30 @@ test('next and previous step through the list the asset was opened from', () => 
   assert.deepEqual(neighbours(['a', 'b', 'c'], 'b'), { position: 2, total: 3, previous: 'a', next: 'c' })
   assert.deepEqual(neighbours(['a', 'b', 'c'], 'a'), { position: 1, total: 3, previous: undefined, next: 'b' })
   assert.equal(neighbours(['a'], 'z'), undefined)
+})
+
+const press = (overrides: Partial<StepKey> = {}): StepKey => ({ key: 'ArrowRight', modified: false, used: false, typing: false, dialogOpen: false, ...overrides })
+
+test('the left and right arrows step when nothing else has the key', () => {
+  assert.equal(stepAsked(press({ key: 'ArrowLeft' })), 'previous')
+  assert.equal(stepAsked(press({ key: 'ArrowRight' })), 'next')
+  for (const key of ['ArrowUp', 'ArrowDown', 'a', 'Enter', '+', ' ']) assert.equal(stepAsked(press({ key })), undefined, key)
+})
+
+test('a key the focused view has used is never also a step', () => {
+  // The 3D view turns on the arrows and says so by taking the key. Stepping
+  // as well would open another model in the middle of looking at this one.
+  assert.equal(stepAsked(press({ key: 'ArrowLeft', used: true })), undefined)
+  assert.equal(stepAsked(press({ key: 'ArrowRight', used: true })), undefined)
+})
+
+test('typing, an open dialog and a held modifier each keep the arrows for themselves', () => {
+  for (const key of ['ArrowLeft', 'ArrowRight']) {
+    assert.equal(stepAsked(press({ key, typing: true })), undefined, `typing ${key}`)
+    assert.equal(stepAsked(press({ key, dialogOpen: true })), undefined, `dialog ${key}`)
+    // Shift with an arrow slides a 3D view; Ctrl, Alt and Meta are the browser's.
+    assert.equal(stepAsked(press({ key, modified: true })), undefined, `modified ${key}`)
+  }
 })
 
 const asset = (overrides: Partial<AssetSummary>): AssetSummary => ({

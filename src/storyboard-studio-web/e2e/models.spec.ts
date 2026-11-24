@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { inflateSync } from 'node:zlib'
 
 const block = fileURLToPath(new URL('../../../fixtures/glb/asymmetric-block.glb', import.meta.url))
 const post = fileURLToPath(new URL('../../../fixtures/glb/asymmetric-post.glb', import.meta.url))
@@ -277,11 +278,17 @@ test('a model is a reusable library record with revisions that never overwrite e
   await revisions.getByRole('button', { name: 'Make current' }).click()
   await expect(revisions.getByRole('button', { name: /^v1 Current/ })).toBeVisible()
 
-  // Reopening the workspace shows exactly what was saved.
+  // Reopening the workspace shows exactly what was saved. A refresh comes
+  // back to the model it left, by its address, rather than to the front page.
   await page.reload()
-  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await expect(page.getByTestId('model-workspace')).toBeVisible()
+  await expect(page.getByRole('heading', { name })).toBeVisible()
+  // And the library still lists it under the name it was given.
+  await page.getByRole('button', { name: 'Asset library' }).click()
+  await expect(page.getByTestId('model-workspace')).toHaveCount(0)
   await page.getByRole('button', { name: /^Models/ }).click()
   await page.getByRole('button', { name: `Open ${name}` }).click()
+  await expect(page.getByTestId('model-workspace')).toBeVisible()
   await expect(page.getByTestId('model-revisions').getByRole('button', { name: /^v2/ })).toBeVisible()
   await expect(page.getByTestId('model-library').getByLabel(/^Tags/)).toHaveValue(/chain-court/)
   await expect(page.getByTestId('model-dimensions')).toContainText('2.00 m')
@@ -488,7 +495,7 @@ async function settled(stage: Locator) {
   let previous: Buffer | undefined
   for (let attempt = 0; attempt < 40; attempt++) {
     const shot = await pictureOf(stage)
-    if (previous?.equals(shot)) return shot
+    if (previous && differenceBetween(shot, previous) === 'nothing') return shot
     previous = shot
     await stage.page().waitForTimeout(150)
   }
@@ -496,35 +503,119 @@ async function settled(stage: Locator) {
 }
 
 /**
+ * The pixels of a screenshot, read here rather than in a browser page. A
+ * second page opened beside the one under test puts that one behind it, and a
+ * page behind another answers every action slowly. Playwright writes plain
+ * 8-bit RGB or RGBA; anything else is refused rather than guessed at.
+ */
+function pixelsOf(png: Buffer) {
+  let width = 0
+  let height = 0
+  let channels = 0
+  const packed: Buffer[] = []
+  for (let at = 8; at < png.length;) {
+    const length = png.readUInt32BE(at)
+    const kind = png.toString('latin1', at + 4, at + 8)
+    const body = png.subarray(at + 8, at + 8 + length)
+    if (kind === 'IHDR') {
+      width = body.readUInt32BE(0)
+      height = body.readUInt32BE(4)
+      if (body[8] !== 8 || (body[9] !== 2 && body[9] !== 6) || body[12] !== 0)
+        throw new Error(`A screenshot in a form this test does not read: depth ${body[8]}, colour type ${body[9]}, interlace ${body[12]}.`)
+      channels = body[9] === 6 ? 4 : 3
+    } else if (kind === 'IDAT') packed.push(body)
+    at += 12 + length
+  }
+  const lines = inflateSync(Buffer.concat(packed))
+  const stride = width * channels
+  const data = Buffer.alloc(height * stride)
+  for (let y = 0; y < height; y++) {
+    const filter = lines[y * (stride + 1)]
+    const line = y * (stride + 1) + 1
+    const row = y * stride
+    for (let x = 0; x < stride; x++) {
+      const left = x >= channels ? data[row + x - channels] : 0
+      const up = y > 0 ? data[row - stride + x] : 0
+      const corner = x >= channels && y > 0 ? data[row - stride + x - channels] : 0
+      let predicted = 0
+      if (filter === 1) predicted = left
+      else if (filter === 2) predicted = up
+      else if (filter === 3) predicted = (left + up) >> 1
+      else if (filter === 4) {
+        const guess = left + up - corner
+        const [byLeft, byUp, byCorner] = [Math.abs(guess - left), Math.abs(guess - up), Math.abs(guess - corner)]
+        predicted = byLeft <= byUp && byLeft <= byCorner ? left : byUp <= byCorner ? up : corner
+      }
+      data[row + x] = (lines[line + x] + predicted) & 255
+    }
+  }
+  return { width, height, channels, data }
+}
+
+/**
  * What a picture of the stage shows: how much of it is the model's surface
  * rather than the dark floor behind it, and the middle value of that surface.
- * Read on a blank page, so nothing about the app decides what can be decoded.
  */
-async function surfaceOf(lab: Page, picture: Buffer) {
-  return lab.evaluate(async encoded => {
-    const image = new Image()
-    image.src = `data:image/png;base64,${encoded}`
-    await image.decode()
-    const canvas = document.createElement('canvas')
-    canvas.width = image.naturalWidth
-    canvas.height = image.naturalHeight
-    const context = canvas.getContext('2d', { willReadFrequently: true })!
-    context.drawImage(image, 0, 0)
-    const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
-    const seen: number[] = []
-    let sampled = 0
-    for (let y = 0; y < canvas.height; y += 3) {
-      for (let x = 0; x < canvas.width; x += 3) {
-        sampled++
-        const green = data[(y * canvas.width + x) * 4 + 1]
-        // The floor and its grid are darker than any lit face of this part.
-        if (green > 85) seen.push(green)
-      }
+function surfaceOf(picture: Buffer) {
+  const { width, height, channels, data } = pixelsOf(picture)
+  const seen: number[] = []
+  let sampled = 0
+  for (let y = 0; y < height; y += 3) {
+    for (let x = 0; x < width; x += 3) {
+      sampled++
+      const green = data[(y * width + x) * channels + 1]
+      // The floor and its grid are darker than any lit face of this part.
+      if (green > 85) seen.push(green)
     }
-    seen.sort((a, b) => a - b)
-    return { coverage: seen.length / sampled, value: seen[Math.floor(seen.length / 2)] ?? 0 }
-  }, picture.toString('base64'))
+  }
+  seen.sort((a, b) => a - b)
+  return { coverage: seen.length / sampled, value: seen[Math.floor(seen.length / 2)] ?? 0 }
 }
+
+/**
+ * Where two pictures of the stage differ, in words, or 'nothing'. Two
+ * pictures that are not the same should say where, so a failure on a machine
+ * nobody is sitting at still names the corner of the stage it happened in.
+ */
+function differenceBetween(seen: Buffer, expected: Buffer) {
+  if (seen.equals(expected)) return 'nothing'
+  const [one, other] = [pixelsOf(seen), pixelsOf(expected)]
+  if (one.width !== other.width || one.height !== other.height) return `a ${one.width}x${one.height} picture, not ${other.width}x${other.height}`
+  let differing = 0
+  let largest = 0
+  let [left, top, right, bottom] = [one.width, one.height, -1, -1]
+  for (let y = 0; y < one.height; y++) {
+    for (let x = 0; x < one.width; x++) {
+      const [here, there] = [(y * one.width + x) * one.channels, (y * other.width + x) * other.channels]
+      const apart = Math.max(Math.abs(one.data[here] - other.data[there]), Math.abs(one.data[here + 1] - other.data[there + 1]), Math.abs(one.data[here + 2] - other.data[there + 2]))
+      if (apart === 0) continue
+      differing++
+      largest = Math.max(largest, apart)
+      left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); bottom = Math.max(bottom, y)
+    }
+  }
+  return differing === 0 ? 'nothing'
+    : `${differing} pixels differ by up to ${largest}, inside (${left},${top})-(${right},${bottom}) of ${one.width}x${one.height}`
+}
+
+/**
+ * Where the 3D view and the controls under it have ended up, in pixels.
+ * `overStage` is how far the control bar reaches up over the view, and
+ * `pastPanel` how far the camera readout runs out of the bottom of the view's
+ * own panel, into whatever is next. Each is nought or less when the layout
+ * holds.
+ */
+const controlsOutOfPlace = (page: Page) => page.evaluate(() => {
+  const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect()
+  const panel = document.querySelector('.model-stage-shell')!
+  const inside = panel.getBoundingClientRect().bottom - parseFloat(getComputedStyle(panel).paddingBottom)
+  const tenths = (value: number) => Math.round(value * 10) / 10
+  return {
+    stageHeight: tenths(box('.model-stage').height),
+    overStage: tenths(box('.model-stage').bottom - box('.model-viewer-bar').top),
+    pastPanel: tenths(box('.model-viewer-orbit').bottom - inside),
+  }
+})
 
 const distanceShown = (metres: string) => new RegExp(`distance ${metres.replace('.', '\\.')} m$`)
 
@@ -534,7 +625,6 @@ test('a part is judged under a look-dev light and from as close as it will be se
   const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
   const touchScreen = testInfo.project.name === 'tablet'
   const name = `lookdev-panel-${testInfo.project.name}-${Date.now()}`
-  const lab = await page.context().newPage()
   await openAssets(page)
   await page.locator('input[type="file"]').setInputFiles({ name: `${name}.glb`, mimeType: 'model/gltf-binary', buffer: greyPanel(name) })
   await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
@@ -554,7 +644,15 @@ test('a part is judged under a look-dev light and from as close as it will be se
   await expect(orbit).toHaveText(distanceShown('5.20'))
   const opening = await settled(stage)
   await testInfo.attach('opening-inspection', { body: opening, contentType: 'image/png' })
-  expect((await surfaceOf(lab, opening)).coverage, 'the whole part is in view, with floor around it').toBeLessThan(0.3)
+  expect(surfaceOf(opening).coverage, 'the whole part is in view, with floor around it').toBeLessThan(0.3)
+  // The controls sit under the 3D view, never over it, and inside its panel,
+  // however many rows they wrap to on this screen and in this machine's fonts.
+  const controls = await controlsOutOfPlace(page)
+  expect(controls.overStage, 'the control bar starts below the 3D view').toBeLessThanOrEqual(0)
+  expect(controls.pastPanel, 'the camera readout stays inside the view’s panel').toBeLessThanOrEqual(0)
+  // Where the page is longer than the screen, the view keeps its minimum
+  // height. It does not take a height from the frame it last drew.
+  if (touchScreen) expect(controls.stageHeight, 'the 3D view is its minimum height on a tablet').toBe(180)
 
   // The keys bring the camera in to a quarter of a metre and no nearer. On a
   // two-metre part the limit used to be 80 cm.
@@ -570,7 +668,7 @@ test('a part is judged under a look-dev light and from as close as it will be se
   // The numbers are not the proof: at that distance the surface fills the view.
   const closeInspection = await settled(stage)
   await testInfo.attach('close-inspection', { body: closeInspection, contentType: 'image/png' })
-  const even = await surfaceOf(lab, closeInspection)
+  const even = surfaceOf(closeInspection)
   // A tablet's stage is a wide strip, and its far end looks past the part.
   expect(even.coverage, 'the face of the part fills most of the stage').toBeGreaterThan(0.6)
   // The even light shows an 18% grey well above the 118 it is stored as.
@@ -583,10 +681,10 @@ test('a part is judged under a look-dev light and from as close as it will be se
   await expect(light).toHaveAttribute('aria-pressed', 'true')
   await expect(light).toHaveText('Look-dev on')
   await expect(viewer).toHaveAttribute('data-light', 'lookdev')
-  await expect.poll(async () => (await pictureOf(stage)).equals(closeInspection)).toBe(false)
+  await expect.poll(async () => differenceBetween(await pictureOf(stage), closeInspection)).not.toBe('nothing')
   const closeLookdev = await settled(stage)
   await testInfo.attach('close-lookdev', { body: closeLookdev, contentType: 'image/png' })
-  const filmic = await surfaceOf(lab, closeLookdev)
+  const filmic = surfaceOf(closeLookdev)
   expect(filmic.coverage).toBeGreaterThan(0.6)
   // Mid-grey reads as mid-grey: within a sixth of a stop of the stored 118 on
   // a face that is turned a little away from the key.
@@ -597,7 +695,7 @@ test('a part is judged under a look-dev light and from as close as it will be se
   if (touchScreen) await light.tap()
   else await light.click()
   await expect(light).toHaveAttribute('aria-pressed', 'false')
-  await expect.poll(async () => (await pictureOf(stage)).equals(closeInspection)).toBe(true)
+  await expect.poll(async () => differenceBetween(await pictureOf(stage), closeInspection), 'the default view is the picture it was').toBe('nothing')
 
   // A single channel is unlit and is not tone-mapped, so it shows the stored
   // numbers under either light: base colour 0.18 is sRGB 118 and roughness 1
@@ -616,15 +714,15 @@ test('a part is judged under a look-dev light and from as close as it will be se
   await expect(viewer).toHaveAttribute('data-light', 'lookdev')
   const colourFilmic = await channelUnder('colour')
   const roughnessFilmic = await channelUnder('roughness')
-  expect(colourFilmic.equals(colourEven), 'base colour is the same picture under both lights').toBe(true)
-  expect(roughnessFilmic.equals(roughnessEven), 'roughness is the same picture under both lights').toBe(true)
-  expect(colourFilmic.equals(roughnessFilmic)).toBe(false)
-  const storedColour = (await surfaceOf(lab, colourFilmic)).value
+  expect(differenceBetween(colourFilmic, colourEven), 'base colour is the same picture under both lights').toBe('nothing')
+  expect(differenceBetween(roughnessFilmic, roughnessEven), 'roughness is the same picture under both lights').toBe('nothing')
+  expect(differenceBetween(colourFilmic, roughnessFilmic)).not.toBe('nothing')
+  const storedColour = surfaceOf(colourFilmic).value
   expect(storedColour).toBeGreaterThanOrEqual(117)
   expect(storedColour).toBeLessThanOrEqual(119)
-  expect((await surfaceOf(lab, roughnessFilmic)).value).toBe(255)
+  expect(surfaceOf(roughnessFilmic).value).toBe(255)
   await page.getByTestId('model-channel-lit').click()
-  await expect.poll(async () => (await pictureOf(stage)).equals(closeLookdev)).toBe(true)
+  await expect.poll(async () => differenceBetween(await pictureOf(stage), closeLookdev), 'look-dev is the picture it was').toBe('nothing')
 
   // Sliding the view at this distance moves the camera without turning it or
   // changing how far away it is.
@@ -650,14 +748,14 @@ test('a part is judged under a look-dev light and from as close as it will be se
     await expect(viewer).toHaveAttribute('data-light', 'lookdev')
     await expect(light).toHaveAttribute('aria-pressed', 'true')
     await expect(orbit).toHaveText(beforeSlide)
-    await expect.poll(async () => (await pictureOf(stage)).equals(leftAt)).toBe(true)
+    await expect.poll(async () => differenceBetween(await pictureOf(stage), leftAt), 'this revision is the same picture from the same spot').toBe('nothing')
   }
   // Seen whole again, it is not the picture it opened with: the light stayed.
   await page.getByRole('button', { name: 'Frame', exact: true }).click()
   await expect(orbit).toHaveText(distanceShown('5.20'))
   const openingLookdev = await settled(stage)
   await testInfo.attach('opening-lookdev', { body: openingLookdev, contentType: 'image/png' })
-  expect(openingLookdev.equals(opening)).toBe(false)
+  expect(differenceBetween(openingLookdev, opening)).not.toBe('nothing')
 
   // Two fingers: moving them apart brings the camera in by the same ratio.
   // These are touch pointers handed to the stage, not a finger on glass.
@@ -688,7 +786,7 @@ test('a part is judged under a look-dev light and from as close as it will be se
   await stage.dispatchEvent('pointermove', finger(11, true, centreX - 50, centreY + 60))
   await stage.dispatchEvent('pointermove', finger(12, false, centreX + 50, centreY + 60))
   await expect(orbit).toHaveText(beforeTwoFingers)
-  expect((await settled(stage)).equals(framed)).toBe(false)
+  expect(differenceBetween(await settled(stage), framed)).not.toBe('nothing')
   // The finger left down when the other lifts carries on as an orbit.
   await stage.dispatchEvent('pointerup', finger(12, false, centreX + 50, centreY + 60))
   await stage.dispatchEvent('pointermove', finger(11, true, centreX + 30, centreY + 60))
@@ -712,6 +810,73 @@ test('a part is judged under a look-dev light and from as close as it will be se
   await expect(viewer).toHaveAttribute('data-state', 'ready')
   await expect(viewer).toHaveAttribute('data-light', 'inspection')
   await expect(orbit).toHaveText(distanceShown('5.20'))
-  await lab.close()
+  verifyConsole()
+})
+
+test('the arrow keys turn a focused 3D view, and step through the library only from outside it', async ({ page }, testInfo) => {
+  test.setTimeout(90_000)
+  // Stepping to another model aborts a GLB still in flight; WebKit reports the abort.
+  const verifyConsole = failOnConsoleErrors(page, [/due to access control checks/, /TypeError: Load failed/])
+  const label = `${testInfo.project.name}-${Date.now()}`
+  const mine = `arrow-keys-block-${label}`
+  const other = `arrow-keys-post-${label}`
+  await openAssets(page)
+  // Two models, so the one opened always has a neighbour to be stepped to.
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: `${mine}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(block, mine) },
+    { name: `${other}.glb`, mimeType: 'model/gltf-binary', buffer: ownFixture(post, other) },
+  ])
+  await expect(page.getByText('2 assets imported into the library.')).toBeVisible()
+  await page.getByRole('button', { name: /^Models/ }).click()
+  await page.getByRole('button', { name: `Open ${mine}` }).click()
+  const viewer = page.getByTestId('model-viewer')
+  const stage = page.getByTestId('model-stage')
+  const orbit = page.getByTestId('model-viewer-orbit')
+  const position = page.getByTestId('asset-step-position')
+  const heading = page.getByTestId('model-workspace').getByRole('heading', { level: 1 })
+  await expect(viewer).toHaveAttribute('data-state', 'ready')
+  await expect(heading).toHaveText(mine)
+  const place = await position.innerText()
+  const hasNext = await page.getByTestId('asset-step-next').isEnabled()
+  const hasPrevious = await page.getByTestId('asset-step-previous').isEnabled()
+  expect(hasNext || hasPrevious, 'the model has a neighbour in the list').toBe(true)
+
+  // On the focused view, left and right turn the inspection camera. The model
+  // on screen stays the model on screen: same name, same place in the list,
+  // same drawing surface.
+  await stage.locator('canvas').evaluate(canvas => { canvas.dataset.sameSurface = 'yes' })
+  await expect(orbit).toContainText('yaw 0.90')
+  await stage.focus()
+  await stage.press('ArrowRight')
+  await expect(orbit).toContainText('yaw 0.98')
+  await stage.press('ArrowLeft')
+  await stage.press('ArrowLeft')
+  await expect(orbit).toContainText('yaw 0.82')
+  await expect(heading).toHaveText(mine)
+  await expect(position).toHaveText(place)
+  await expect(stage.locator('canvas')).toHaveAttribute('data-same-surface', 'yes')
+  await expect(stage).toHaveAttribute('data-loaded-max', '2,1,0.75')
+
+  // A field being typed in keeps its arrows too.
+  const nameField = page.getByTestId('model-library').getByLabel('Name', { exact: true })
+  await nameField.focus()
+  await nameField.press('ArrowLeft')
+  await nameField.press('ArrowRight')
+  await expect(heading).toHaveText(mine)
+  await expect(position).toHaveText(place)
+
+  // From a plain button the same keys step through the list, and step back.
+  const [away, back] = hasNext ? ['ArrowRight', 'ArrowLeft'] : ['ArrowLeft', 'ArrowRight']
+  await page.getByRole('button', { name: 'Frame', exact: true }).focus()
+  await page.keyboard.press(away)
+  await expect(heading).not.toHaveText(mine)
+  await expect(position).not.toHaveText(place)
+  await expect(viewer).toHaveAttribute('data-state', 'ready')
+  await page.getByRole('button', { name: 'Frame', exact: true }).focus()
+  await page.keyboard.press(back)
+  await expect(heading).toHaveText(mine)
+  await expect(position).toHaveText(place)
+  await expect(viewer).toHaveAttribute('data-state', 'ready')
+  await expect(stage).toHaveAttribute('data-loaded-max', '2,1,0.75')
   verifyConsole()
 })

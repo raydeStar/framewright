@@ -12,6 +12,35 @@ export function neighbours(ids: string[], id: string): { position: number; total
   return { position: at + 1, total: ids.length, previous: ids[at - 1], next: ids[at + 1] }
 }
 
+/** A key press, as the previous and next arrows need to see it. */
+export interface StepKey {
+  key: string
+  /** Ctrl, Alt, Meta or Shift is held. */
+  modified: boolean
+  /** Something on the page has already acted on this press. */
+  used: boolean
+  /** The press went to a field that is being typed in or chosen from. */
+  typing: boolean
+  /** A dialog is open over the page. */
+  dialogOpen: boolean
+}
+
+/**
+ * Which way a key press steps through the list, if it steps at all.
+ *
+ * The left and right arrows step, unless the press already belongs to
+ * something. A 3D view that has the keyboard turns on those arrows, a review
+ * pin moves on them, a field moves its caret: each has used the key by the
+ * time this is asked, and a key is never spent twice. Stepping away from a
+ * model because its view was being turned is losing the artist's place to a
+ * shortcut. So the arrows step when nothing in particular has the keyboard,
+ * or a plain button does, and nowhere else.
+ */
+export function stepAsked(press: StepKey): 'previous' | 'next' | undefined {
+  if (press.modified || press.used || press.typing || press.dialogOpen) return undefined
+  return press.key === 'ArrowLeft' ? 'previous' : press.key === 'ArrowRight' ? 'next' : undefined
+}
+
 /** "SM_Gear (req 1.2) - concept.png" → "sm_gear (req 1.2)": a name without its file type or its "- concept" label. */
 const stem = (name: string) => name.trim().toLowerCase()
   .replace(/\.(png|jpe?g|webp|glb)$/i, '')

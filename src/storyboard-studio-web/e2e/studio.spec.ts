@@ -1058,7 +1058,10 @@ test('a sound effect gets its own lane and survives a reload', async ({ page }, 
   // mid-fetch makes WebKit report an access-control error; let the bard finish.
   await expect(clip.locator('.wave')).toHaveAttribute('data-waveform', canDecodeWaveforms ? 'decoded' : 'guide')
   await page.reload()
-  await page.getByRole('button', { name: 'Sequence' }).click()
+  // A refresh comes back to the sequence it left, by its address, rather
+  // than to the front page with the sequence a click away.
+  await expect(page).toHaveURL(/\/sequence$/)
+  await expect(page.getByRole('button', { name: 'Sequence', exact: true })).toHaveAttribute('aria-current', 'page')
   const reopened = page.getByRole('button', { name: `Edit effects clip Hauler fire ${suffix}`, exact: true })
   await expect(reopened).toBeVisible()
   await expect(reopened.locator('.wave')).toHaveAttribute('data-waveform', canDecodeWaveforms ? 'decoded' : 'guide')
@@ -1133,7 +1136,10 @@ test('inline candidate review keeps versions, feedback, and tablet controls in p
   const proof = await page.request.post(`/api/manifests/${manifests[0].id}/dispatch`, { data: { expectedManifestHash: manifests[0].manifestHash, adapterId: 'local-proof' } })
   expect(proof.ok()).toBe(true)
   await page.reload()
-  await page.getByRole('button', { name: new RegExp(`Open ${shotCode},`) }).click()
+  // A refresh comes back to the shot it left, by its address, rather than to
+  // the board with the shot a click away.
+  await expect(page).toHaveURL(new RegExp(`/shot/${shot.id}$`))
+  await expect(page.getByTestId('shot-workspace')).toBeVisible()
 
   const options = page.getByRole('listbox', { name: 'Versions' }).getByRole('option')
   await expect(options).toHaveCount(2)
@@ -2099,7 +2105,10 @@ test('director mode gives the frame the whole workstation without forking shot s
   const proof = await page.request.post(`/api/manifests/${manifests[0].id}/dispatch`, { data: { expectedManifestHash: manifests[0].manifestHash, adapterId: 'local-proof' } })
   expect(proof.ok()).toBe(true)
   await page.reload()
-  await page.getByRole('button', { name: opener }).click()
+  // A refresh comes back to the shot it left, by its address, rather than to
+  // the board with the shot a click away.
+  await expect(page).toHaveURL(new RegExp(`/shot/${shot.id}$`))
+  await expect(page.getByTestId('shot-workspace')).toBeVisible()
 
   // An unsaved inspector draft is the strictest proof that full view restyles
   // the shell rather than remounting the workspace.
@@ -2207,9 +2216,10 @@ test('director mode gives the frame the whole workstation without forking shot s
   await page.getByRole('listbox', { name: 'Versions' }).getByRole('option').first().click()
 
   // Reopening the workspace shows exactly what was saved, and nothing that was
-  // only ever a draft.
+  // only ever a draft. The refresh comes back to this shot by its address.
   await page.reload()
-  await page.getByRole('button', { name: opener }).click()
+  await expect(page).toHaveURL(new RegExp(`/shot/${shot.id}$`))
+  await expect(page.getByTestId('shot-workspace')).toBeVisible()
   await expect(pin).toBeVisible()
   await expect(page.getByText(/Apply & regenerate attaches this guide/)).toBeVisible()
   await expect(description).not.toHaveValue(new RegExp(draftSuffix.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
