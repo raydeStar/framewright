@@ -302,6 +302,7 @@ export interface ModelGenerationReadiness {
   engines?: ModelEngineChoice[] | null
   pixalGeometryChecks?: boolean
   pixalSolidExport?: boolean
+  pixalMounts?: boolean
 }
 /** A way of making the shape, in an artist's terms, and what it costs. */
 export interface ModelEngineChoice { engine: string; description: string; cost: string }

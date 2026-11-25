@@ -166,7 +166,7 @@ export const studioApi = {
   },
   modelGenerationReadiness: () => request<ModelGenerationReadiness>('/api/models/generation/readiness'),
   generateModel: (sourceAssetId: string, name: string, size: string, glassColour?: string, detail?: string, headEnd?: string, paintSections?: boolean, engine?: string, seed?: number, up?: string,
-    geometry?: { topology: string; sizeM?: number; sizeIs?: string; gameExport?: string }) =>
+    geometry?: { topology: string; sizeM?: number; sizeIs?: string; gameExport?: string; mounts?: { lowerFoot: number[]; upperFoot: number[]; postTop: number[]; riseM: number } }) =>
     request<JobSummary>('/api/models/generation', { method: 'POST', body: JSON.stringify({ sourceAssetId, name, size, glassColour, detail, headEnd, paintSections, engine, seed, up, ...geometry }) }),
   modelProfile: (assetId: string) => request<ModelProfileSummary>(`/api/assets/${assetId}/model-profile`),
   modelPreparationReadiness: () => request<ModelGenerationReadiness>('/api/models/preparation/readiness'),

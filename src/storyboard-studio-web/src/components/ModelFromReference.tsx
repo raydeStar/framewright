@@ -65,6 +65,10 @@ export default function ModelFromReference({ asset, onQueued }: {
   const [topology, setTopology] = useState('closed')
   const [axis, setAxis] = useState('landmark')
   const [metres, setMetres] = useState('')
+  const [mounting, setMounting] = useState(false)
+  const [rise, setRise] = useState('')
+  const [landmarks, setLandmarks] = useState<number[][]>([])
+  const pointNames = ['lower mounting foot', 'upper mounting foot', 'top of the lower post']
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -86,6 +90,9 @@ export default function ModelFromReference({ asset, onQueued }: {
   const pixal = chosenEngine === 'pixal3d'
   const checks = pixal && readiness?.pixalGeometryChecks
   const measured = checks && axis !== 'landmark'
+  const mountOffer = checks && readiness?.pixalMounts && topology === 'open' && axis === 'width'
+  const mounted = mountOffer && mounting
+  const validMounts = !mounted || (landmarks.length === 3 && rise !== '' && Number(rise) >= 0 && Number(rise) <= 50)
   const validSize = measured ? Number(metres) >= 0.01 && Number(metres) <= 50 : size !== ''
   const hero = detail === 'hero'
   const prop = hero && (pixal || headEnd === 'none')
@@ -106,7 +113,8 @@ export default function ModelFromReference({ asset, onQueued }: {
         engines.length > 1 || pixal ? chosenEngine : undefined,
         pixal && seed.trim() !== '' ? Number(seed) : undefined, pixal ? up : undefined,
         checks ? { ...(topology === 'solid' ? { topology: 'closed', gameExport: 'solid' } : { topology }),
-          ...(measured ? { sizeM: Number(metres), sizeIs: axis } : {}) } : undefined)
+          ...(measured ? { sizeM: Number(metres), sizeIs: axis } : {}),
+          ...(mounted ? { mounts: { lowerFoot: landmarks[0], upperFoot: landmarks[1], postTop: landmarks[2], riseM: Number(rise) } } : {}) } : undefined)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -134,7 +142,7 @@ export default function ModelFromReference({ asset, onQueued }: {
                 <option value="height">Height</option><option value="longest">Longest side</option>
               </select>
             </label>
-            {measured && <label className="model-size"><span>Length in metres</span>
+            {measured && <label className="model-size"><span>{mounted ? 'Horizontal run between feet in metres' : 'Length in metres'}</span>
               <input type="number" min="0.01" max="50" step="any" value={metres}
                 onChange={event => setMetres(event.target.value)} /></label>}
             <label className="model-size"><span>Shell construction</span>
@@ -144,6 +152,20 @@ export default function ModelFromReference({ asset, onQueued }: {
                 <option value="open">Preserve intentional open edges</option>
               </select>
             </label>
+            {mountOffer && <label><input type="checkbox" checked={mounting} onChange={e => setMounting(e.target.checked)} /> Align to mounting feet</label>}
+            {mounted && <fieldset><legend>Mounting points</legend>
+              <label>Rise between feet in metres <input type="number" step="any" min="0" max="50" value={rise} onChange={e => setRise(e.target.value)} /></label>
+              <p>{landmarks.length < 3 ? 'Mark the ' + pointNames[landmarks.length] + ' on the picture.' : 'Three mounting points marked.'}</p>
+              <div style={{ position: 'relative', lineHeight: 0 }}>
+                <img alt="Reference for mounting points" src={asset.contentUrl} style={{ width: '100%', cursor: 'crosshair' }} onClick={e => {
+                  if (landmarks.length >= 3) return
+                  const box = e.currentTarget.getBoundingClientRect()
+                  setLandmarks([...landmarks, [(e.clientX-box.left)/box.width, (e.clientY-box.top)/box.height]])
+                }} />
+                {landmarks.map(([x, y], i) => <b key={i} title={pointNames[i]} style={{ position: 'absolute', left: (x*100)+'%', top: (y*100)+'%', transform: 'translate(-50%, -50%)', border: '2px solid white', background: '#17282d', color: 'white', borderRadius: '50%', padding: '3px', lineHeight: 1, pointerEvents: 'none' }}>{i+1}</b>)}
+              </div>
+              <button className="secondary" type="button" disabled={!landmarks.length} onClick={() => setLandmarks(landmarks.slice(0,-1))}>Undo last point</button>
+            </fieldset>}
           </>}
           {readiness.canRun && !measured && readiness.sizes && <label className="model-size">
             <span>Roughly how big is it?</span>
@@ -231,7 +253,7 @@ export default function ModelFromReference({ asset, onQueued }: {
             </span>
           </label>}
           <button type="button" className="secondary" data-testid="model-generate"
-            disabled={busy || !readiness.canRun || !validSize || (hero && !pixal && headEnd === '')}
+            disabled={busy || !readiness.canRun || !validSize || !validMounts || (hero && !pixal && headEnd === '')}
             onClick={() => void generate()}>
             <Boxes size={15} />{busy ? 'Queuing…' : 'Generate from this reference'}
           </button>

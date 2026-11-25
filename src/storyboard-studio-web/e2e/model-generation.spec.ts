@@ -34,7 +34,7 @@ test('a measured crate carries its actual width and closed shell from the model 
   await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
   await page.route('**/api/models/generation/readiness', async route => {
     const response = await route.fetch()
-    await route.fulfill({ json: { ...(await response.json()), canRun: true, pixalGeometryChecks: true, pixalSolidExport: true,
+    await route.fulfill({ json: { ...(await response.json()), canRun: true, pixalGeometryChecks: true, pixalSolidExport: true, pixalMounts: true,
       engines: [{ engine: 'pixal3d', description: 'Pixal3D', cost: '' }] } })
   })
   await page.getByRole('button', { name: /^Images/ }).click()
@@ -53,6 +53,26 @@ test('a measured crate carries its actual width and closed shell from the model 
   await panel.getByTestId('model-generate').click()
   await expect(panel.getByRole('alert')).toContainText('Fixture stops')
   expect(submitted).toMatchObject({ engine: 'pixal3d', topology: 'closed', gameExport: 'solid', sizeIs: 'width', sizeM: 0.55, size: '' })
+  await panel.getByLabel('Shell construction').selectOption('open')
+  await panel.getByLabel('Align to mounting feet').check()
+  await panel.getByLabel('Horizontal run between feet in metres').fill('3')
+  await panel.getByLabel('Rise between feet in metres').fill('2')
+  await expect(panel.getByTestId('model-generate')).toBeDisabled()
+  const picture = panel.getByAltText('Reference for mounting points')
+  const box = await picture.boundingBox()
+  if (!box) throw new Error('The mounting picture has no visible bounds')
+  for (const [x, y] of [[.1, .9], [.9, .4], [.1, .6]]) {
+    await picture.click({ position: { x: box.width * x, y: box.height * y } })
+  }
+  await expect(panel.getByText('Three mounting points marked.')).toBeVisible()
+  const sent = page.waitForRequest(req => req.method() === 'POST' && req.url().endsWith('/api/models/generation'))
+  await panel.getByTestId('model-generate').click()
+  const frame = (await sent).postDataJSON()
+  expect(frame).toMatchObject({ topology: 'open', sizeIs: 'width', sizeM: 3, mounts: { riseM: 2 } })
+  for (const [name, x, y] of [['lowerFoot', .1, .9], ['upperFoot', .9, .4], ['postTop', .1, .6]] as const) {
+    expect(frame.mounts[name][0]).toBeCloseTo(x, 1)
+    expect(frame.mounts[name][1]).toBeCloseTo(y, 1)
+  }
 })
 
 test('a direct WSL RAC worker holds a Framewright model job until it releases the GPU', async ({ page }) => {

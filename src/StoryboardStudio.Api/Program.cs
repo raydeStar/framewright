@@ -856,6 +856,10 @@ app.MapPost("/api/models/sections", async Task<IResult> (
 app.MapGet("/api/assets/{assetId:guid}/preparation-evidence", async Task<IResult> (
     Guid assetId, ModelGenerationService models, CancellationToken cancellationToken)
     => ToHttpResult(await models.PreparationEvidenceForAssetAsync(assetId, cancellationToken)));
+app.MapGet("/api/jobs/{jobId:guid}/frame-overlay/{surface}", async Task<IResult> (
+    Guid jobId, string surface, ModelGenerationService models, CancellationToken cancellationToken) =>
+    await models.FrameOverlayAsync(jobId, surface, cancellationToken) is { } file
+        ? Results.File(file, "image/png") : Results.NotFound());
 app.MapGet("/api/jobs/{jobId:guid}/preparation-views/{step:int}/{file}", async Task<IResult> (
     Guid jobId, int step, string file, ModelGenerationService models, CancellationToken cancellationToken) =>
 {

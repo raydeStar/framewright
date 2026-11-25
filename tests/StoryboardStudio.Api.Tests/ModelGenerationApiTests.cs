@@ -60,7 +60,7 @@ public sealed class ModelGenerationApiTests
                 Colours: name == "glass"
                     ? [new CompilerColour("teal", "teal or cyan"), new CompilerColour("amber", "amber or orange")]
                     : null,
-                Options: name == "pixal-geometry" ? ["topology", "geometry", "game_export"] : null);
+                Options: name == "pixal-geometry" ? ["topology", "geometry", "game_export", "mounts"] : null);
 
         public static CompilerCapabilities Ready => new(
             Installed: true, Commissioned: true, Version: "reference-asset-compiler 0.1.2",
@@ -1347,6 +1347,29 @@ public sealed class ModelGenerationApiTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
         Assert.Empty(await db.Assets.Where(asset => asset.Kind == "Model").ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task MountedFrameFreezesPointsAndRequiresItsOwnPassingMeasurement()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithPixal };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "rail.png");
+        var mounts = new { lowerFoot = new[] { .1, .9 }, upperFoot = new[] { .9, .4 },
+            postTop = new[] { .1, .5 }, riseM = 2.0 };
+        var response = await client.PostAsJsonAsync("/api/models/generation", new {
+            sourceAssetId = reference.Id, name = "Rail", sizeM = 3, sizeIs = "width", topology = "open",
+            engine = "pixal3d", mounts });
+        response.EnsureSuccessStatusCode();
+        using var job = await response.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var failed = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Failed, failed.State);
+        Assert.Null(failed.OutputAssetId);
+        Assert.DoesNotContain(compiler.Calls, call => call.Stage == "uv-unwrap");
+        Assert.Contains("no passing frame measurement", failed.Error);
+        using var saved = JsonDocument.Parse(compiler.Options["pixal-geometry"]["mounts"]);
+        Assert.Equal(.9, saved.RootElement.GetProperty("lowerFoot")[1].GetDouble());
     }
 
     [Theory]
