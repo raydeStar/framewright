@@ -656,7 +656,9 @@ public sealed class ModelGenerationService(
             Checkout: capabilities.Checkout,
             Blender: capabilities.Blender,
             Missing: capabilities.Installed ? missing : ["compiler"],
-            Detail: Explain(capabilities, canRun, route, work),
+            Detail: Explain(capabilities, canRun, route, work)
+                + (offerDetails && capabilities.CanRun(PixalGeometryStage) && !HasPixalChecks(capabilities)
+                    ? " Update the Reference Asset Compiler to enable checked Pixal3D prop generation." : ""),
             Sizes: capabilities.Stages
                 .FirstOrDefault(candidate => candidate.Stage == StageMeshStage)?.Sizes
                 ?.Select(size => new ModelSizeChoice(size.Size, size.Description, size.Metres))
@@ -2394,12 +2396,7 @@ public sealed class ModelGenerationService(
         _ => [],
     };
 
-    /// <summary>
-    /// What Pixal3D is told: the size as the landmark the artist chose (a
-    /// height, as everywhere in this studio), the game mesh's vertices for the
-    /// detail, and the seed and the way the piece stands only when they were
-    /// said, so an unnamed one is the compiler's own default.
-    /// </summary>
+    /// <summary>Read the compiler's verdict on the game mesh before continuing a frozen job.</summary>
     private static string? PixalCheckError(string? receipt)
     {
         try
@@ -2419,6 +2416,7 @@ public sealed class ModelGenerationService(
         return "The compiler supplied no passing game-mesh check. Painting is held.";
     }
 
+    /// <summary>Carry the frozen size, shell, orientation and detail to the geometry stage.</summary>
     private static Dictionary<string, string> PixalGeometryOptions(FrozenModelRequest packet)
     {
         var options = new Dictionary<string, string>
