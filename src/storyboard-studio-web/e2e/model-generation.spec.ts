@@ -22,6 +22,36 @@ function ownReference(label: string) {
   return Buffer.concat([png, Buffer.from(`model-generation-${label}`, 'utf8')])
 }
 
+test('a measured crate carries its actual width and closed shell from the model panel', async ({ page }, testInfo) => {
+  const name = `crate-check-${testInfo.project.name}`
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('.asset-hero input[type="file"]').setInputFiles({
+    name: `${name}.png`, mimeType: 'image/png', buffer: ownReference(name),
+  })
+  await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
+  await page.route('**/api/models/generation/readiness', async route => {
+    const response = await route.fetch()
+    await route.fulfill({ json: { ...(await response.json()), canRun: true, pixalGeometryChecks: true,
+      engines: [{ engine: 'pixal3d', description: 'Pixal3D', cost: '' }] } })
+  })
+  await page.getByRole('button', { name: /^Images/ }).click()
+  await page.getByRole('button', { name: `Open ${name}` }).click()
+  const panel = page.getByTestId('model-from-reference')
+  await panel.getByLabel('Measure by').selectOption('width')
+  await expect(panel.getByTestId('model-generate')).toBeDisabled()
+  await panel.getByLabel('Length in metres').fill('0.55')
+  await expect(panel.getByLabel('Shell construction')).toHaveValue('closed')
+  let submitted: unknown
+  await page.route('**/api/models/generation', async route => {
+    submitted = route.request().postDataJSON()
+    await route.fulfill({ status: 422, json: { error: 'Fixture stops before generation.' } })
+  })
+  await panel.getByTestId('model-generate').click()
+  await expect(panel.getByRole('alert')).toContainText('Fixture stops')
+  expect(submitted).toMatchObject({ engine: 'pixal3d', topology: 'closed', sizeIs: 'width', sizeM: 0.55, size: '' })
+})
+
 test('a failed readiness check stops loading and can be retried without queuing work', async ({ page }, testInfo) => {
   const referenceName = `readiness-error-${testInfo.project.name}`
   await page.goto('/')
