@@ -2029,10 +2029,29 @@ public sealed class ModelGenerationService(
                 await ProgressAsync(job, JobState.Running, progress,
                     partial ? $"{step} — running again: the previous attempt left an incomplete answer" : step,
                     cancellationToken);
-                run = await compiler.RunStageAsync(
+                var execution = compiler.RunStageAsync(
                     stage, steps[index].ReadsOriginal ? sourcePath : stepSource,
                     outputPath, receiptPath, cancellationToken,
                     StageOptions(stage, packet, job, sourcePath, completed, paintReference));
+                string? previousWait = null;
+                while (!execution.IsCompleted)
+                {
+                    if (await Task.WhenAny(execution, Task.Delay(TimeSpan.FromSeconds(2), cancellationToken)) == execution)
+                        break;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var waitFile = receiptPath + ".gpu-wait";
+                    string? waiting = null;
+                    try
+                    {
+                        if (File.Exists(waitFile)) waiting = await File.ReadAllTextAsync(waitFile, cancellationToken);
+                    }
+                    catch (IOException) { continue; } // The worker just acquired the reservation.
+                    if (waiting == previousWait) continue;
+                    previousWait = waiting;
+                    await ProgressAsync(job, JobState.Running, progress,
+                        waiting is null ? step : $"{step} · {waiting}", cancellationToken);
+                }
+                run = await execution;
                 if (!run.Ok)
                     return await FailAsync(job, $"{job.ShotCode}: "
                         + (run.Error ?? $"The {stage} stage did not produce a result."), cancellationToken);
