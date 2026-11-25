@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 
 /**
  * A reference image becomes a model candidate, in the real application, with a
@@ -50,6 +52,42 @@ test('a measured crate carries its actual width and closed shell from the model 
   await panel.getByTestId('model-generate').click()
   await expect(panel.getByRole('alert')).toContainText('Fixture stops')
   expect(submitted).toMatchObject({ engine: 'pixal3d', topology: 'closed', sizeIs: 'width', sizeM: 0.55, size: '' })
+})
+
+test('a direct WSL RAC worker holds a Framewright model job until it releases the GPU', async ({ page }) => {
+  const guard = process.env.FRAMEWRIGHT_TEST_RAC_GUARD
+  test.skip(process.platform !== 'win32' || !guard || !process.env.FRAMEWRIGHT_TEST_PYTHON
+    || !process.env.RAC_GPU_LOCK_PATH, 'Opt-in Windows and Pixal WSL host test with CPU-only workers')
+  test.setTimeout(100_000)
+  const path = guard!.replaceAll('\\', '/').replace(/^([a-z]):/i, (_, drive: string) => `/mnt/${drive.toLowerCase()}`)
+  const owner = spawn('wsl.exe', ['-d', process.env.RAC_WSL_DISTRO ?? 'Ubuntu-22.04', '--',
+    'env', `RAC_GPU_LOCK_PATH=${process.env.RAC_GPU_LOCK_PATH}`, 'python3', path, '0',
+    'python3', '-u', '-c', "import sys; print('reserved'); sys.stdin.readline()"], { windowsHide: true })
+  const exited = once(owner, 'exit')
+  try {
+    expect(String((await once(owner.stdout!, 'data'))[0])).toContain('reserved')
+    const name = 'local-gpu-overlap-test'
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Assets', exact: true }).click()
+    await page.locator('.asset-hero input[type="file"]').setInputFiles({
+      name: `${name}.png`, mimeType: 'image/png', buffer: ownReference(name),
+    })
+    await page.getByRole('button', { name: /^Images/ }).click()
+    await page.getByRole('button', { name: `Open ${name}` }).click()
+    await page.getByTestId('model-size').selectOption('knee')
+    await page.getByTestId('model-generate').click()
+    const job = async () => {
+      const studio = await (await page.request.get('/api/studio')).json()
+      return studio.jobs.find((entry: { shotCode: string }) => entry.shotCode === name)
+    }
+    await expect.poll(async () => (await job())?.phase, {timeout: 40_000}).toContain('GPU reservation')
+    expect((await job()).outputAssetId).toBeFalsy()
+    owner.stdin!.end()
+    expect((await exited)[0]).toBe(0)
+    await expect.poll(async () => (await job())?.state, {timeout: 50_000}).toBe('Completed')
+  } finally {
+    owner.stdin!.end()
+  }
 })
 
 test('a failed readiness check stops loading and can be retried without queuing work', async ({ page }, testInfo) => {
