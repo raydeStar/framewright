@@ -29,7 +29,9 @@
   (`engine: "pixal3d"`), the route the owner chose for props. The steps are:
   - Pixal3D's own game mesh and dense mesh, levelled at the real size;
   - an 8192 sheet for a hero, painted in sections;
-  - relief and the dense mesh's shape baked into the normal map;
+  - the reference picture itself laid onto the faces it shows, so the model
+    carries the picture's own scratches and colour, not the painter's guess;
+  - occlusion and the dense mesh's shape baked into the maps;
   - 8192 JPEG for the browser.
 
   It is offered only where the compiler can run every stage of the route, and the

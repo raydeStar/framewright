@@ -239,11 +239,15 @@ it one stage. One picture in: a levelled game mesh from Pixal's own simplifier
   2. `uv-unwrap`.
   3. `texture`: an 8192 sheet for a hero, 4096 for set dressing.
   4. `paint-sections`: a hero only, at 8192, under the same rules as above.
-  5. `bake-detail`: `--resolution 2048 --relief-tilt 6`.
-  6. `bake-shape`: `--dense` is the dense mesh step 1 wrote.
-  7. `glass`, if asked for.
-  8. `browser-payload`.
-  9. `compress-textures`: 8192 colour and data maps for a hero, 4096 and 2048
+  5. `project-reference`: the frozen reference laid onto the faces it shows,
+     with `--geometry` the report step 1 wrote. Pixal3D built the mesh in that
+     picture's camera; the compiler fits it and refuses any other picture.
+  6. `bake-detail`: `--resolution 2048`, with occlusion and no relief from the
+     paint (after a projection, relief raises the picture's grain into lumps).
+  7. `bake-shape`: `--dense` is the dense mesh step 1 wrote.
+  8. `glass`, if asked for.
+  9. `browser-payload`.
+  10. `compress-textures`: 8192 colour and data maps for a hero, 4096 and 2048
      for set dressing; JPEG at 92.
 
   There is no staging and no remesh, because neither of the compiler's
