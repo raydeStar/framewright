@@ -215,6 +215,55 @@ size.
   pressed (`preparationKeepsPaint` on the readiness answer). An untextured model
   or an older compiler keeps the route it had.
 
+## Making a prop with Pixal3D
+
+Pixal3D (TencentARC) keeps rivets, straps and plank seams as real geometry,
+where Hunyuan3D rounds them into blobs. The owner compared the two on the
+Frastown skiff and chose Pixal3D for props on 24 November. The compiler's
+`pixal-geometry` stage (raydeStar/reference-asset-compiler#22 and later) makes
+it one stage. One picture in: a levelled game mesh from Pixal's own simplifier
+(a `.blend`) out, and beside it the levelled million-triangle dense mesh.
+
+- **Asking for it.** `POST /api/models/generation` with `engine: "pixal3d"`.
+  - Unnamed is `hunyuan3d`, as before.
+  - Pixal3D makes props only. Its head end is `none`, and any other is refused.
+  - `seed` (1 or more) picks another design from the same picture. A seed picks
+    the design, not exact triangles: Pixal3D is not deterministic.
+  - `up` says how the piece stands: `shortest` (unnamed: a boat, a bench),
+    `longest` (a lantern, a column) or `middle` (a panel on its edge). Pixal3D
+    keeps the picture's camera tilt, and this is how the compiler stands it up.
+  - Seed and up are refused on a Hunyuan3D request.
+- **The route.**
+  1. `pixal-geometry`: the size is the landmark the artist chose, a height;
+     `--vertex-target` is 100000 for a hero and 40000 for set dressing.
+  2. `uv-unwrap`.
+  3. `texture`: an 8192 sheet for a hero, 4096 for set dressing.
+  4. `paint-sections`: a hero only, at 8192, under the same rules as above.
+  5. `bake-detail`: `--resolution 2048 --relief-tilt 6`.
+  6. `bake-shape`: `--dense` is the dense mesh step 1 wrote.
+  7. `glass`, if asked for.
+  8. `browser-payload`.
+  9. `compress-textures`: 8192 colour and data maps for a hero, 4096 and 2048
+     for set dressing; JPEG at 92.
+
+  There is no staging and no remesh, because neither of the compiler's
+  reductions keeps Pixal's hard edges. The bakes come after every paint,
+  because they read its colour. Glass comes after the bakes, because the shape
+  bake wants the one painted material it was given.
+- **What it costs.** About 3 minutes for the shape on a GPU with 9 GiB free.
+  The skiff took 179 s: a 97,938-triangle game mesh and a 991,833-triangle dense
+  one, levelled to 2.2 m. The paints and sections then cost what they do on any
+  route.
+- **Where it is offered.** The readiness answer's `engines` lists `hunyuan3d`
+  and, only where every stage of the Pixal3D route is listed and available,
+  `pixal3d`. The generation panel shows the choice when there is one, and
+  defaults to Pixal3D for that reason. Pixal3D runs in its own Linux
+  environment (WSL on Windows), which the compiler finds through
+  `RAC_PIXAL3D_ROOT`, `RAC_PIXAL3D_PYTHON` and `RAC_WSL_DISTRO`.
+- **What the model records.** Its revision note says it was made with Pixal3D,
+  with its seed, game mesh, sheet and bakes. The job's result carries `engine`,
+  `seed` and `up`.
+
 ## Painting a large prop in sections
 
 The painter sees a whole model through twelve views of 768 pixels, whatever its
@@ -235,7 +284,7 @@ moves a vertex or a UV.
   keeps the first paint's colour above 3 cm by default, so sections add fine
   light and dark without repainting the design.
 - **What it costs.** One painter run a section, roughly 3 minutes each, up to 48,
-  on a GPU with 21 GiB free. The first proof, a 2.2 m mast, took 11.6 minutes
+  on a GPU with 10.5 GiB free (21 GiB until the compiler's 12 GB work). The first proof, a 2.2 m mast, took 11.6 minutes
   for six sections at the old 0.6 m cut and went from about 3.2 mm to about
   1.3 mm of surface a painted pixel. The 2.2 m skiff at the finer cut took 109
   minutes for 45 sections and came out at about 0.7 mm. The exact count is the

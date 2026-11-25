@@ -326,10 +326,27 @@ public sealed record RigPoseSummary(
 /// where the compiler can; false switches it off. Never asked of set dressing,
 /// nor of a hero with a head, which keeps its head pass instead.
 /// </param>
+/// <param name="Engine">
+/// What makes the shape: "hunyuan3d" (unnamed: the route every model was made
+/// by until now) or "pixal3d", which keeps rivets, straps and plank seams as
+/// real geometry and is the route the owner chose for props. Pixal3D is for a
+/// prop ("none" for the head end): it has no head pass. Its model is painted
+/// onto an 8192 sheet for a hero, and its dense mesh baked into the normal map.
+/// </param>
+/// <param name="Seed">
+/// Pixal3D only: which of its designs to make. A seed picks the design, not
+/// exact triangles, since Pixal3D is not deterministic. Unnamed is the
+/// compiler's default.
+/// </param>
+/// <param name="Up">
+/// Pixal3D only: how the piece stands. "shortest" (unnamed) for a long, low
+/// piece such as a boat or a bench; "longest" for a tall one, a lantern or a
+/// column; "middle" for a panel standing on its edge.
+/// </param>
 public sealed record CreateModelGenerationRequest(
     Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null,
     string? GlassColour = null, string? Detail = null, string? HeadEnd = null,
-    bool? PaintSections = null);
+    bool? PaintSections = null, string? Engine = null, int? Seed = null, string? Up = null);
 
 /// <summary>
 /// Whether model generation can run on this workstation, and whether it is
@@ -539,7 +556,13 @@ public sealed record ModelGenerationReadiness(
     IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null,
     ModelDetailChoice[]? Details = null, BlenderInstallSummary? BlenderInstall = null,
     bool RemeshDecidesBudget = false, bool PreparationKeepsPaint = false,
-    ModelSectionsOffer? PaintSections = null);
+    ModelSectionsOffer? PaintSections = null, ModelEngineChoice[]? Engines = null);
+
+/// <summary>
+/// A way of making the shape that this compiler can run: "hunyuan3d" or
+/// "pixal3d", said in an artist's terms, with what it costs.
+/// </summary>
+public sealed record ModelEngineChoice(string Engine, string Description, string Cost);
 
 /// <summary>
 /// What painting in sections means on this compiler, in the numbers this

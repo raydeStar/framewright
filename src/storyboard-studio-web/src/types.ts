@@ -298,7 +298,11 @@ export interface ModelGenerationReadiness {
   preparationKeepsPaint?: boolean
   /** Present when the compiler can paint a large prop again in sections: the lengths sent, and what it costs. */
   paintSections?: ModelSectionsOffer | null
+  /** The ways of making the shape this compiler can run: hunyuan3d, and pixal3d where its whole route can. */
+  engines?: ModelEngineChoice[] | null
 }
+/** A way of making the shape, in an artist's terms, and what it costs. */
+export interface ModelEngineChoice { engine: string; description: string; cost: string }
 /** What painting in sections means here: the lengths this studio sends the compiler, and the cost in a sentence. */
 export interface ModelSectionsOffer { minimumLengthMetres: number; sectionMetres: number; maximumSections: number; cost: string }
 /**
