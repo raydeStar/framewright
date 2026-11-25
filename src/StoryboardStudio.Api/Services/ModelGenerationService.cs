@@ -50,6 +50,7 @@ public sealed class ModelGenerationService(
     public const string RigStage = "rig";
     public const string PixalGeometryStage = "pixal-geometry";
     public const string BakeShapeStage = "bake-shape";
+    public const string ProjectReferenceStage = "project-reference";
 
     /// <summary>
     /// What makes the shape. Hunyuan3D is the route every model was made by
@@ -74,7 +75,6 @@ public sealed class ModelGenerationService(
     private const string PixalHeroAtlas = "8192";
     private const string PixalSetAtlas = "4096";
     private const string PixalBakeResolution = "2048";
-    private const string PixalReliefTilt = "6";
     private const int PixalHeroColourSize = 8192;
     private const int PixalHeroDataSize = 8192;
     private const int PixalSetColourSize = 4096;
@@ -217,13 +217,14 @@ public sealed class ModelGenerationService(
     /// The Pixal3D prop route's own stages. Pixal3D makes the shape and its
     /// game mesh in one generation, levelled at the real size by the same stage,
     /// so there is no staging or remesh: neither of the compiler's reductions
-    /// keeps Pixal's hard edges. After the paint, the relief raised from it and
-    /// the dense mesh's shape go into the normal map, and the result is
-    /// re-encoded for a browser.
+    /// keeps Pixal's hard edges. After the paint, the reference picture itself
+    /// is laid onto the faces it shows (Pixal3D built the mesh in that
+    /// picture's camera), then occlusion and the dense mesh's shape go into the
+    /// maps, and the result is re-encoded for a browser.
     /// </summary>
     public static readonly string[] PixalRoute =
     [
-        PixalGeometryStage, UvUnwrapStage, TextureStage, BakeDetailStage, BakeShapeStage,
+        PixalGeometryStage, UvUnwrapStage, TextureStage, ProjectReferenceStage, BakeDetailStage, BakeShapeStage,
         BrowserPayloadStage, CompressTexturesStage,
     ];
 
@@ -416,7 +417,7 @@ public sealed class ModelGenerationService(
             // shape bake wants the one painted material it was given.
             var pixal = new List<string> { PixalGeometryStage, UvUnwrapStage, TextureStage };
             if (hero && sections) pixal.Add(PaintSectionsStage);
-            pixal.AddRange([BakeDetailStage, BakeShapeStage]);
+            pixal.AddRange([ProjectReferenceStage, BakeDetailStage, BakeShapeStage]);
             if (!string.IsNullOrWhiteSpace(glassColour)) pixal.Add(GlassStage);
             pixal.AddRange([BrowserPayloadStage, CompressTexturesStage]);
             return [.. pixal];
@@ -460,6 +461,7 @@ public sealed class ModelGenerationService(
         [RigStage] = "Building a skeleton, binding it, and bending it through five poses",
         [PixalGeometryStage] = "Making the shape with Pixal3D, and standing it up at its real size",
         [BakeShapeStage] = "Baking the dense mesh's bolts, seams and edges into the normal map",
+        [ProjectReferenceStage] = "Laying the reference picture onto the faces it shows",
     };
 
     /// <summary>
@@ -2277,17 +2279,22 @@ public sealed class ModelGenerationService(
         // as it stands rather than welded or remeshed, which would change the
         // geometry the reduction gate already measured.
         UvUnwrapStage => new Dictionary<string, string> { ["allow-triangulated-glb"] = "" },
-        // The relief raised from the paint, to a measured steepness rather than
-        // a strength (the same strength meant different things on different
-        // paints), and then the dense mesh's own shape under it. No occlusion
-        // map: Pixal3D's game meshes carry interior shells, and an occlusion
-        // bake on them darkens visible triangles here and in Unreal alike (the
-        // compiler's decision of 25 November 2026).
+        // The picture the geometry was made from, laid onto the faces it shows:
+        // the compiler fits Pixal3D's camera from the geometry step's report and
+        // refuses any other picture. It is the frozen reference both used.
+        ProjectReferenceStage => new Dictionary<string, string>
+        {
+            ["geometry"] = GeometryReportOf(earlier),
+            ["reference"] = referencePath,
+        },
+        // Occlusion and curvature, and no relief from the paint: after a
+        // projection it raises the picture's grain into lumps, and the dense
+        // mesh's own shape follows in the normal map. Occlusion is back since
+        // the compiler's unwrap stopped two faces sharing a texel, which was the
+        // cause of the dark triangles it was once left out for.
         BakeDetailStage when packet.Engine == PixalEngine => new Dictionary<string, string>
         {
             ["resolution"] = PixalBakeResolution,
-            ["relief-tilt"] = PixalReliefTilt,
-            ["no-occlusion"] = "",
         },
         BakeShapeStage => new Dictionary<string, string> { ["dense"] = DenseMeshOf(earlier) },
         // The paint is conditioned on the same picture the geometry came from.
@@ -2444,6 +2451,13 @@ public sealed class ModelGenerationService(
     /// generation and levelled by the same transform: what the shape bake
     /// reads its bolts and seams from.
     /// </summary>
+    private static string GeometryReportOf(IReadOnlyList<StepOutcome> earlier)
+    {
+        var geometry = earlier.LastOrDefault(step => step.Stage == PixalGeometryStage)
+            ?? throw new InvalidOperationException("The projection comes after Pixal3D's geometry, which has not run.");
+        return Path.ChangeExtension(geometry.OutputPath, ".json");
+    }
+
     private static string DenseMeshOf(IReadOnlyList<StepOutcome> earlier)
     {
         var geometry = earlier.LastOrDefault(step => step.Stage == PixalGeometryStage)
