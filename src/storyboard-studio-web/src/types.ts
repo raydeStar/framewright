@@ -300,6 +300,7 @@ export interface ModelGenerationReadiness {
   paintSections?: ModelSectionsOffer | null
   /** The ways of making the shape this compiler can run: hunyuan3d, and pixal3d where its whole route can. */
   engines?: ModelEngineChoice[] | null
+  pixalGeometryChecks?: boolean
 }
 /** A way of making the shape, in an artist's terms, and what it costs. */
 export interface ModelEngineChoice { engine: string; description: string; cost: string }

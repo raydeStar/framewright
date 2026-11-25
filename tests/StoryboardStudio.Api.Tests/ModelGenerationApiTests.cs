@@ -92,7 +92,7 @@ public sealed class ModelGenerationApiTests
         /// </summary>
         public static CompilerCapabilities WithPixal => WithSections with
         {
-            Stages = [.. WithSections.Stages, Stage("pixal-geometry"), Stage("bake-detail"), Stage("bake-shape")],
+            Stages = [.. WithSections.Stages, Stage("pixal-geometry") with { Options = ["topology"] }, Stage("bake-detail"), Stage("bake-shape")],
         };
 
         /// <summary>
@@ -160,6 +160,8 @@ public sealed class ModelGenerationApiTests
                 ["payload"] = outputPath,
                 ["payload_sha256"] = "stand-in",
             };
+            if (stage == "pixal-geometry")
+                fields["game_mesh_check"] = new { ok = true };
             // A remesh told to decide records what it decided, as the real one does.
             if (stage == "remesh" && Options[stage].GetValueOrDefault("triangle-budget") == "auto")
                 fields["budget_decision"] = new
@@ -1310,6 +1312,61 @@ public sealed class ModelGenerationApiTests
         using var result = JsonDocument.Parse(record.ResultJson!);
         Assert.Equal("pixal3d", result.RootElement.GetProperty("engine").GetString());
         Assert.Equal(45, result.RootElement.GetProperty("seed").GetInt32());
+    }
+
+    [Fact]
+    public async Task CrateGeometryRejectionHoldsPaintAndNeverCreatesAModel()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithPixal,
+            Failure = "seed 41: 105 open edges remain on the closed game mesh" };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "crate.png");
+        var queued = await client.PostAsJsonAsync("/api/models/generation", new {
+            sourceAssetId = reference.Id, name = "PR-04.2 crate", sizeM = 0.55, sizeIs = "width",
+            topology = "closed", engine = "pixal3d", seed = 41 });
+        queued.EnsureSuccessStatusCode();
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var failed = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Failed, failed.State);
+        Assert.Contains("PR-04.2 crate: seed 41: 105 open edges", failed.Error!, StringComparison.Ordinal);
+        Assert.Null(failed.OutputAssetId);
+        Assert.Equal(["pixal-geometry"], compiler.Calls.Select(call => call.Stage));
+        var options = compiler.Options["pixal-geometry"];
+        Assert.Equal("0.55", options["size-m"]);
+        Assert.Equal("width", options["size-is"]);
+        Assert.Equal("closed", options["topology"]);
+        Assert.False(options.ContainsKey("size"));
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        Assert.Empty(await db.Assets.Where(asset => asset.Kind == "Model").ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResumingARejectedPixalSeedCannotAdoptOrRepeatIt(bool hasOutput)
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithPixal };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "crate.png");
+        var queued = await client.PostAsJsonAsync("/api/models/generation", new {
+            sourceAssetId = reference.Id, name = "Crate", size = "knee", engine = "pixal3d", seed = 41 });
+        queued.EnsureSuccessStatusCode();
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var id = job.RootElement.GetProperty("id").GetGuid();
+        var workspace = Path.Combine(factory.DataRoot, "generated-models", id.ToString("N"));
+        Directory.CreateDirectory(workspace);
+        var step = Path.Combine(workspace, "step-1-pixal-geometry");
+        await File.WriteAllTextAsync(step + ".json",
+            """{"game_mesh_check":{"ok":false},"note":"seed 41: 105 open edges"}""");
+        if (hasOutput) await File.WriteAllBytesAsync(step + ".blend", [1]);
+        var failed = await RunAsync(factory, id);
+        Assert.Equal(JobState.Failed, failed.State);
+        Assert.Contains("seed 41: 105 open edges", failed.Error!, StringComparison.Ordinal);
+        Assert.Null(failed.OutputAssetId);
+        Assert.Empty(compiler.Calls);
     }
 
     [Fact]

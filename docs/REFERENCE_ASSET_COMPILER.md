@@ -44,6 +44,12 @@ fork the modeling or texturing implementation.
 
 ## Implemented consumer checks
 
+Pixal3D generation requires a compiler advertising the `topology` option.
+The artist can request a closed shell or preserve open boundaries and give
+a width, height or longest side in metres. The job freezes these settings.
+A failed game-mesh check stops before UVs and paint and remains visible in
+the job history, including after recovery. Only the compiler measures the mesh.
+
 - **Profiles come from the compiler checkout.** Framewright reads
   `profiles/skeletons/*.json` from the configured checkout and enforces required
   bones, expected parents, optional and unlisted bones, exact counts, roots,

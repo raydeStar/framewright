@@ -566,7 +566,8 @@ public sealed class ModelGenerationService(
         bool IgnoreTransparency = false, string Detail = SetDetail, string HeadEnd = "top",
         bool AutoTriangleBudget = false,
         Guid? PaintReferenceAssetId = null, string? PaintReferenceContentHash = null,
-        string Engine = HunyuanEngine, int Seed = 0, string? Up = null);
+        string Engine = HunyuanEngine, int Seed = 0, string? Up = null,
+        string? Topology = null, double? SizeM = null, string? SizeIs = null);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -673,7 +674,8 @@ public sealed class ModelGenerationService(
             RemeshDecidesBudget: RemeshDecidesBudget(capabilities),
             PreparationKeepsPaint: capabilities.CanRun(RebakeMapsStage),
             PaintSections: capabilities.CanRun(PaintSectionsStage) ? SectionsOffer : null,
-            Engines: offerDetails ? EngineChoices(capabilities) : null);
+            Engines: offerDetails ? EngineChoices(capabilities) : null,
+            PixalGeometryChecks: HasPixalChecks(capabilities));
     }
 
     /// <summary>
@@ -687,7 +689,7 @@ public sealed class ModelGenerationService(
         if (ReferenceToModelRoute.All(capabilities.CanRun))
             choices.Add(new(HunyuanEngine, "Hunyuan3D: characters, animals, anything with a head",
                 "The shape in about a minute; rebuilt evenly at a budget the compiler decides"));
-        if (PixalRoute.All(capabilities.CanRun))
+        if (PixalRoute.All(capabilities.CanRun) && HasPixalChecks(capabilities))
             choices.Add(new(PixalEngine, "Pixal3D: hard-surface props, with rivets, straps and seams as real geometry",
                 "The shape in about 3 minutes on a GPU with 9 GiB free; a hero is painted on an 8192 sheet and "
                 + "its million-triangle dense mesh baked into the normal map"));
@@ -716,6 +718,10 @@ public sealed class ModelGenerationService(
     private static bool RemeshDecidesBudget(CompilerCapabilities capabilities) =>
         capabilities.Stages.FirstOrDefault(stage => stage.Stage == RemeshStage)?.Options
             ?.Contains(RemeshDecidesBudgetOption, StringComparer.Ordinal) ?? false;
+
+    private static bool HasPixalChecks(CompilerCapabilities capabilities) =>
+        capabilities.Stages.Any(stage => stage.Stage == PixalGeometryStage
+            && stage.Available && stage.Options?.Contains("topology", StringComparer.Ordinal) == true);
 
     /// <summary>
     /// Set dressing is always offered. A hero needs the compiler to paint a
@@ -799,7 +805,7 @@ public sealed class ModelGenerationService(
         // reduction gate makes afterwards is taken against it, so a default
         // here would quietly turn a real verdict into a meaningless one.
         var size = (request.Size ?? "").Trim();
-        if (size.Length == 0)
+        if (size.Length == 0 && request.SizeM is null)
             return RepositoryResult<JobSummary>.Invalid(
                 "Say roughly how big this is, as a height on a person — for example knee height.");
         if (request.SizeAdjust is { } adjust && (adjust < 0.25 || adjust > 4.0))
@@ -817,6 +823,16 @@ public sealed class ModelGenerationService(
             return RepositoryResult<JobSummary>.Invalid(
                 $"The shape is made by \"{HunyuanEngine}\" or \"{PixalEngine}\", not \"{request.Engine}\".");
         var pixal = engine == PixalEngine;
+        var customGeometry = request.Topology is not null || request.SizeM is not null || request.SizeIs is not null;
+        if (customGeometry && !pixal)
+            return RepositoryResult<JobSummary>.Invalid("Measured prop dimensions and shell settings require Pixal3D.");
+        if (request.Topology is not (null or "closed" or "open"))
+            return RepositoryResult<JobSummary>.Invalid("Choose a closed prop or a surface with intentional openings.");
+        if (request.SizeM is { } metres && (!double.IsFinite(metres) || metres is < 0.01 or > 50
+            || size.Length != 0 || request.SizeAdjust is not null || request.SizeIs is not ("height" or "width" or "longest")))
+            return RepositoryResult<JobSummary>.Invalid("Give one measured width, height or longest side between 0.01 and 50 metres.");
+        if (request.SizeIs is not null && request.SizeM is null)
+            return RepositoryResult<JobSummary>.Invalid("A measured dimension needs its length in metres.");
         var up = string.IsNullOrWhiteSpace(request.Up) ? null : request.Up.Trim().ToLowerInvariant();
         if (!pixal && (request.Seed is not null || up is not null))
             return RepositoryResult<JobSummary>.Invalid(
@@ -832,6 +848,8 @@ public sealed class ModelGenerationService(
             cancellationToken, offerDetails: true);
         if (!readiness.CanRun)
             return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+        if (pixal && !readiness.PixalGeometryChecks)
+            return RepositoryResult<JobSummary>.Unavailable("Update the Reference Asset Compiler to use measured prop checks.");
         if (glassColour is not null
             && readiness.Colours is { Length: > 0 } offered
             && !offered.Any(colour => string.Equals(colour.Colour, glassColour, StringComparison.OrdinalIgnoreCase)))
@@ -906,7 +924,9 @@ public sealed class ModelGenerationService(
             ColourSize: pixal ? (hero ? PixalHeroColourSize : PixalSetColourSize) : hero ? HeroColourSize : 0,
             DataSize: pixal ? (hero ? PixalHeroDataSize : PixalSetDataSize) : hero ? HeroDataSize : 0,
             Quality: pixal || hero ? HeroTextureQuality : 0, TextureFormat: pixal || hero ? "jpeg" : null,
-            Engine: engine, Seed: request.Seed ?? 0, Up: up);
+            Engine: engine, Seed: request.Seed ?? 0, Up: up,
+            Topology: pixal && readiness.PixalGeometryChecks ? request.Topology ?? "closed" : null,
+            SizeM: request.SizeM, SizeIs: request.SizeIs);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -1959,6 +1979,12 @@ public sealed class ModelGenerationService(
             var receiptPath = Path.Combine(workspace, $"step-{index + 1}-{stage}.json");
             var hasOutput = Produced(outputPath);
             var hasReceipt = File.Exists(receiptPath);
+            if (stage == PixalGeometryStage && packet.Topology is not null && hasReceipt)
+            {
+                var receipt = await File.ReadAllTextAsync(receiptPath, cancellationToken);
+                if (PixalCheckError(receipt) is { } error)
+                    return await FailAsync(job, $"{job.ShotCode}: {error}", cancellationToken);
+            }
             // Each step gets an equal share of the span between reading the
             // reference and validating the result. Equal because the studio has
             // no honest basis for claiming one step is a given fraction of the
@@ -2008,8 +2034,10 @@ public sealed class ModelGenerationService(
                     outputPath, receiptPath, cancellationToken,
                     StageOptions(stage, packet, job, sourcePath, completed, paintReference));
                 if (!run.Ok)
-                    return await FailAsync(job,
-                        run.Error ?? $"The {stage} stage did not produce a result.", cancellationToken);
+                    return await FailAsync(job, $"{job.ShotCode}: "
+                        + (run.Error ?? $"The {stage} stage did not produce a result."), cancellationToken);
+                if (stage == PixalGeometryStage && packet.Topology is not null && PixalCheckError(run.ReceiptJson) is { } error)
+                    return await FailAsync(job, $"{job.ShotCode}: {error}", cancellationToken);
                 if (!Produced(outputPath))
                     return await FailAsync(job,
                         $"The {stage} stage reported success but wrote nothing.", cancellationToken);
@@ -2104,6 +2132,7 @@ public sealed class ModelGenerationService(
             work = packet.Work,
             size = packet.Size,
             sizeAdjust = packet.SizeAdjust,
+            packet.SizeM, packet.SizeIs, packet.Topology,
             glassColour = packet.GlassColour,
             detail = packet.Work == GenerateWork ? packet.Detail : null,
             headEnd = packet.Work == GenerateWork && packet.Detail == HeroDetail ? packet.HeadEnd : null,
@@ -2352,14 +2381,42 @@ public sealed class ModelGenerationService(
     /// detail, and the seed and the way the piece stands only when they were
     /// said, so an unnamed one is the compiler's own default.
     /// </summary>
+    private static string? PixalCheckError(string? receipt)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(receipt ?? "{}");
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("game_mesh_check", out var check)
+                && check.ValueKind == JsonValueKind.Object && check.TryGetProperty("ok", out var ok))
+            {
+                if (ok.ValueKind == JsonValueKind.True) return null;
+                if (root.TryGetProperty("note", out var note) && note.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(note.GetString()))
+                    return note.GetString();
+            }
+        }
+        catch (JsonException) { }
+        return "The compiler supplied no passing game-mesh check. Painting is held.";
+    }
+
     private static Dictionary<string, string> PixalGeometryOptions(FrozenModelRequest packet)
     {
         var options = new Dictionary<string, string>
         {
-            ["size"] = packet.Size,
-            ["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture),
             ["vertex-target"] = packet.Detail == HeroDetail ? PixalHeroVertices : PixalSetVertices,
         };
+        if (packet.SizeM is { } metres)
+        {
+            options["size-m"] = metres.ToString("R", CultureInfo.InvariantCulture);
+            options["size-is"] = packet.SizeIs!;
+        }
+        else
+        {
+            options["size"] = packet.Size;
+            options["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture);
+        }
+        if (packet.Topology is not null) options["topology"] = packet.Topology;
         if (packet.Seed > 0) options["seed"] = packet.Seed.ToString(CultureInfo.InvariantCulture);
         if (!string.IsNullOrWhiteSpace(packet.Up)) options["up"] = packet.Up;
         return options;

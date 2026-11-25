@@ -62,6 +62,9 @@ export default function ModelFromReference({ asset, onQueued }: {
   const [engine, setEngine] = useState('')
   const [up, setUp] = useState('shortest')
   const [seed, setSeed] = useState('')
+  const [topology, setTopology] = useState('closed')
+  const [axis, setAxis] = useState('landmark')
+  const [metres, setMetres] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -81,6 +84,9 @@ export default function ModelFromReference({ asset, onQueued }: {
   const chosenEngine = engine !== '' ? engine
     : engines.some(choice => choice.engine === 'pixal3d') ? 'pixal3d' : 'hunyuan3d'
   const pixal = chosenEngine === 'pixal3d'
+  const checks = pixal && readiness?.pixalGeometryChecks
+  const measured = checks && axis !== 'landmark'
+  const validSize = measured ? Number(metres) >= 0.01 && Number(metres) <= 50 : size !== ''
   const hero = detail === 'hero'
   const prop = hero && (pixal || headEnd === 'none')
   const sectionsOffer = readiness?.paintSections ?? null
@@ -95,10 +101,11 @@ export default function ModelFromReference({ asset, onQueued }: {
     setBusy(true); setError(undefined)
     try {
       const job = await studioApi.generateModel(
-        asset.id, asset.displayName, size, glass === '' ? undefined : glass, detail,
+        asset.id, asset.displayName, measured ? '' : size, glass === '' ? undefined : glass, detail,
         pixal ? 'none' : detail === 'hero' ? headEnd : undefined, sectionsAsked ? sections : undefined,
         engines.length > 1 || pixal ? chosenEngine : undefined,
-        pixal && seed.trim() !== '' ? Number(seed) : undefined, pixal ? up : undefined)
+        pixal && seed.trim() !== '' ? Number(seed) : undefined, pixal ? up : undefined,
+        checks ? { topology, ...(measured ? { sizeM: Number(metres), sizeIs: axis } : {}) } : undefined)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -119,7 +126,24 @@ export default function ModelFromReference({ asset, onQueued }: {
             {readiness.detail}
           </p>
           <BlenderInstallNote install={readiness.blenderInstall} />
-          {readiness.canRun && readiness.sizes && <label className="model-size">
+          {readiness.canRun && checks && <>
+            <label className="model-size"><span>Measure by</span>
+              <select value={axis} onChange={event => setAxis(event.target.value)}>
+                <option value="landmark">Height beside a person</option><option value="width">Width</option>
+                <option value="height">Height</option><option value="longest">Longest side</option>
+              </select>
+            </label>
+            {measured && <label className="model-size"><span>Length in metres</span>
+              <input type="number" min="0.01" max="50" step="any" value={metres}
+                onChange={event => setMetres(event.target.value)} /></label>}
+            <label className="model-size"><span>Shell construction</span>
+              <select value={topology} onChange={event => setTopology(event.target.value)}>
+                <option value="closed">Closed solid</option>
+                <option value="open">Preserve intentional open edges</option>
+              </select>
+            </label>
+          </>}
+          {readiness.canRun && !measured && readiness.sizes && <label className="model-size">
             <span>Roughly how big is it?</span>
             <select value={size} onChange={event => setSize(event.target.value)}
               data-testid="model-size">
@@ -205,7 +229,7 @@ export default function ModelFromReference({ asset, onQueued }: {
             </span>
           </label>}
           <button type="button" className="secondary" data-testid="model-generate"
-            disabled={busy || !readiness.canRun || size === '' || (hero && !pixal && headEnd === '')}
+            disabled={busy || !readiness.canRun || !validSize || (hero && !pixal && headEnd === '')}
             onClick={() => void generate()}>
             <Boxes size={15} />{busy ? 'Queuing…' : 'Generate from this reference'}
           </button>

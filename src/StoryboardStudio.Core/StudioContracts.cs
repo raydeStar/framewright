@@ -346,7 +346,8 @@ public sealed record RigPoseSummary(
 public sealed record CreateModelGenerationRequest(
     Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null,
     string? GlassColour = null, string? Detail = null, string? HeadEnd = null,
-    bool? PaintSections = null, string? Engine = null, int? Seed = null, string? Up = null);
+    bool? PaintSections = null, string? Engine = null, int? Seed = null, string? Up = null,
+    string? Topology = null, double? SizeM = null, string? SizeIs = null);
 
 /// <summary>
 /// Whether model generation can run on this workstation, and whether it is
@@ -556,7 +557,8 @@ public sealed record ModelGenerationReadiness(
     IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null,
     ModelDetailChoice[]? Details = null, BlenderInstallSummary? BlenderInstall = null,
     bool RemeshDecidesBudget = false, bool PreparationKeepsPaint = false,
-    ModelSectionsOffer? PaintSections = null, ModelEngineChoice[]? Engines = null);
+    ModelSectionsOffer? PaintSections = null, ModelEngineChoice[]? Engines = null,
+    bool PixalGeometryChecks = false);
 
 /// <summary>
 /// A way of making the shape that this compiler can run: "hunyuan3d" or
