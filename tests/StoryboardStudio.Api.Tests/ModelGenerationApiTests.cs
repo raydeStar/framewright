@@ -92,7 +92,8 @@ public sealed class ModelGenerationApiTests
         /// </summary>
         public static CompilerCapabilities WithPixal => WithSections with
         {
-            Stages = [.. WithSections.Stages, Stage("pixal-geometry"), Stage("bake-detail"), Stage("bake-shape")],
+            Stages = [.. WithSections.Stages, Stage("pixal-geometry"), Stage("project-reference"), Stage("bake-detail"),
+                Stage("bake-shape")],
         };
 
         /// <summary>
@@ -1281,8 +1282,8 @@ public sealed class ModelGenerationApiTests
         // No staging and no remesh: Pixal3D's own simplifier made the game mesh
         // and the same stage levelled it. The bakes come after every paint, and
         // the browser copy is always re-encoded.
-        Assert.Equal(["pixal-geometry", "uv-unwrap", "texture", "paint-sections", "bake-detail", "bake-shape",
-                      "browser-payload", "compress-textures"],
+        Assert.Equal(["pixal-geometry", "uv-unwrap", "texture", "paint-sections", "project-reference", "bake-detail",
+                      "bake-shape", "browser-payload", "compress-textures"],
             compiler.Calls.Select(call => call.Stage));
         Assert.Equal("step-1-pixal-geometry.blend", compiler.Calls[1].Source);
 
@@ -1294,8 +1295,12 @@ public sealed class ModelGenerationApiTests
         Assert.Empty(compiler.Options["uv-unwrap"]);
         Assert.Equal("8192", compiler.Options["texture"]["atlas"]);
         Assert.Equal("8192", compiler.Options["paint-sections"]["atlas"]);
-        Assert.Equal("6", compiler.Options["bake-detail"]["relief-tilt"]);
-        Assert.Equal("", compiler.Options["bake-detail"]["no-occlusion"]);
+        // The picture the geometry was made from, onto the faces it shows, with
+        // the geometry step's own report; then occlusion, and no relief.
+        Assert.EndsWith("step-1-pixal-geometry.json", compiler.Options["project-reference"]["geometry"], StringComparison.Ordinal);
+        Assert.Equal(compiler.Calls[0].Source, Path.GetFileName(compiler.Options["project-reference"]["reference"]));
+        Assert.False(compiler.Options["bake-detail"].ContainsKey("relief-tilt"));
+        Assert.False(compiler.Options["bake-detail"].ContainsKey("no-occlusion"));
         // The shape is baked from the dense mesh the geometry stage wrote beside the game mesh.
         Assert.EndsWith("step-1-pixal-geometry-dense.blend", compiler.Options["bake-shape"]["dense"], StringComparison.Ordinal);
         Assert.Equal("8192", compiler.Options["compress-textures"]["colour-size"]);
