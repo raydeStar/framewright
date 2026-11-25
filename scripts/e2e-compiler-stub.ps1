@@ -313,6 +313,12 @@ if ($arguments.Count -ge 1 -and $arguments[0] -eq 'run-stage') {
     $source = Read-Option '--source'
     $output = Read-Option '--output'
     $receipt = Read-Option '--report'
+    # Opt-in host integration: the real reservation around a CPU-only worker.
+    if ($stage -eq 'geometry' -and $env:FRAMEWRIGHT_TEST_RAC_GUARD -and $env:FRAMEWRIGHT_TEST_PYTHON) {
+        $env:RAC_GPU_WAIT_FILE = "$receipt.gpu-wait"
+        & $env:FRAMEWRIGHT_TEST_PYTHON $env:FRAMEWRIGHT_TEST_RAC_GUARD 0 $env:FRAMEWRIGHT_TEST_PYTHON --version | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'The controlled worker failed to acquire the GPU reservation.' }
+    }
     if (-not $source -or -not $output -or -not $receipt) {
         Write-Error 'RAC_ERROR run-stage needs --source, --output and --report'
         exit 2

@@ -568,7 +568,9 @@ public sealed class ModelGenerationService(
         bool IgnoreTransparency = false, string Detail = SetDetail, string HeadEnd = "top",
         bool AutoTriangleBudget = false,
         Guid? PaintReferenceAssetId = null, string? PaintReferenceContentHash = null,
-        string Engine = HunyuanEngine, int Seed = 0, string? Up = null);
+        string Engine = HunyuanEngine, int Seed = 0, string? Up = null,
+        string? Topology = null, double? SizeM = null, string? SizeIs = null, string? GameExport = null,
+        FrameMounts? Mounts = null);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -657,7 +659,9 @@ public sealed class ModelGenerationService(
             Checkout: capabilities.Checkout,
             Blender: capabilities.Blender,
             Missing: capabilities.Installed ? missing : ["compiler"],
-            Detail: Explain(capabilities, canRun, route, work),
+            Detail: Explain(capabilities, canRun, route, work)
+                + (offerDetails && capabilities.CanRun(PixalGeometryStage) && !HasPixalChecks(capabilities)
+                    ? " Update the Reference Asset Compiler to enable checked Pixal3D prop generation." : ""),
             Sizes: capabilities.Stages
                 .FirstOrDefault(candidate => candidate.Stage == StageMeshStage)?.Sizes
                 ?.Select(size => new ModelSizeChoice(size.Size, size.Description, size.Metres))
@@ -675,7 +679,13 @@ public sealed class ModelGenerationService(
             RemeshDecidesBudget: RemeshDecidesBudget(capabilities),
             PreparationKeepsPaint: capabilities.CanRun(RebakeMapsStage),
             PaintSections: capabilities.CanRun(PaintSectionsStage) ? SectionsOffer : null,
-            Engines: offerDetails ? EngineChoices(capabilities) : null);
+            Engines: offerDetails ? EngineChoices(capabilities) : null,
+            PixalGeometryChecks: HasPixalChecks(capabilities),
+            PixalSolidExport: capabilities.CanRun(RemeshStage) && capabilities.Stages.Any(stage => stage.Stage == PixalGeometryStage && stage.Available
+                && stage.Options?.Contains("game_export", StringComparer.Ordinal) == true
+                && stage.Options.Contains("geometry", StringComparer.Ordinal)),
+            PixalMounts: capabilities.Stages.Any(stage => stage.Stage == PixalGeometryStage && stage.Available
+                && stage.Options?.Contains("mounts", StringComparer.Ordinal) == true));
     }
 
     /// <summary>
@@ -689,7 +699,7 @@ public sealed class ModelGenerationService(
         if (ReferenceToModelRoute.All(capabilities.CanRun))
             choices.Add(new(HunyuanEngine, "Hunyuan3D: characters, animals, anything with a head",
                 "The shape in about a minute; rebuilt evenly at a budget the compiler decides"));
-        if (PixalRoute.All(capabilities.CanRun))
+        if (PixalRoute.All(capabilities.CanRun) && HasPixalChecks(capabilities))
             choices.Add(new(PixalEngine, "Pixal3D: hard-surface props, with rivets, straps and seams as real geometry",
                 "The shape in about 3 minutes on a GPU with 9 GiB free; a hero is painted on an 8192 sheet and "
                 + "its million-triangle dense mesh baked into the normal map"));
@@ -718,6 +728,10 @@ public sealed class ModelGenerationService(
     private static bool RemeshDecidesBudget(CompilerCapabilities capabilities) =>
         capabilities.Stages.FirstOrDefault(stage => stage.Stage == RemeshStage)?.Options
             ?.Contains(RemeshDecidesBudgetOption, StringComparer.Ordinal) ?? false;
+
+    private static bool HasPixalChecks(CompilerCapabilities capabilities) =>
+        capabilities.Stages.Any(stage => stage.Stage == PixalGeometryStage
+            && stage.Available && stage.Options?.Contains("topology", StringComparer.Ordinal) == true);
 
     /// <summary>
     /// Set dressing is always offered. A hero needs the compiler to paint a
@@ -801,7 +815,7 @@ public sealed class ModelGenerationService(
         // reduction gate makes afterwards is taken against it, so a default
         // here would quietly turn a real verdict into a meaningless one.
         var size = (request.Size ?? "").Trim();
-        if (size.Length == 0)
+        if (size.Length == 0 && request.SizeM is null)
             return RepositoryResult<JobSummary>.Invalid(
                 "Say roughly how big this is, as a height on a person — for example knee height.");
         if (request.SizeAdjust is { } adjust && (adjust < 0.25 || adjust > 4.0))
@@ -819,6 +833,21 @@ public sealed class ModelGenerationService(
             return RepositoryResult<JobSummary>.Invalid(
                 $"The shape is made by \"{HunyuanEngine}\" or \"{PixalEngine}\", not \"{request.Engine}\".");
         var pixal = engine == PixalEngine;
+        if (request.Mounts is { } mounts && (!mounts.Valid() || !pixal || request.Topology != "open"
+            || request.SizeM is null || request.SizeIs != "width"))
+            return RepositoryResult<JobSummary>.Invalid("An open mounted frame needs three distinct reference points, a horizontal run and a rise.");
+        if (request.GameExport is not null && (!pixal || request.GameExport != "solid" || request.Topology != "closed"))
+            return RepositoryResult<JobSummary>.Invalid("Rebuilding a single closed volume requires a closed Pixal3D prop.");
+        var customGeometry = request.Topology is not null || request.SizeM is not null || request.SizeIs is not null;
+        if (customGeometry && !pixal)
+            return RepositoryResult<JobSummary>.Invalid("Measured prop dimensions and shell settings require Pixal3D.");
+        if (request.Topology is not (null or "closed" or "open"))
+            return RepositoryResult<JobSummary>.Invalid("Choose a closed prop or a surface with intentional openings.");
+        if (request.SizeM is { } metres && (!double.IsFinite(metres) || metres is < 0.01 or > 50
+            || size.Length != 0 || request.SizeAdjust is not null || request.SizeIs is not ("height" or "width" or "longest")))
+            return RepositoryResult<JobSummary>.Invalid("Give one measured width, height or longest side between 0.01 and 50 metres.");
+        if (request.SizeIs is not null && request.SizeM is null)
+            return RepositoryResult<JobSummary>.Invalid("A measured dimension needs its length in metres.");
         var up = string.IsNullOrWhiteSpace(request.Up) ? null : request.Up.Trim().ToLowerInvariant();
         if (!pixal && (request.Seed is not null || up is not null))
             return RepositoryResult<JobSummary>.Invalid(
@@ -834,6 +863,12 @@ public sealed class ModelGenerationService(
             cancellationToken, offerDetails: true);
         if (!readiness.CanRun)
             return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+        if (request.GameExport == "solid" && !readiness.PixalSolidExport)
+            return RepositoryResult<JobSummary>.Unavailable("The installed compiler does not offer closed-volume retopology.");
+        if (request.Mounts is not null && !readiness.PixalMounts)
+            return RepositoryResult<JobSummary>.Unavailable("The installed compiler does not offer reference mounting points.");
+        if (pixal && !readiness.PixalGeometryChecks)
+            return RepositoryResult<JobSummary>.Unavailable("Update the Reference Asset Compiler to use measured prop checks.");
         if (glassColour is not null
             && readiness.Colours is { Length: > 0 } offered
             && !offered.Any(colour => string.Equals(colour.Colour, glassColour, StringComparison.OrdinalIgnoreCase)))
@@ -908,7 +943,9 @@ public sealed class ModelGenerationService(
             ColourSize: pixal ? (hero ? PixalHeroColourSize : PixalSetColourSize) : hero ? HeroColourSize : 0,
             DataSize: pixal ? (hero ? PixalHeroDataSize : PixalSetDataSize) : hero ? HeroDataSize : 0,
             Quality: pixal || hero ? HeroTextureQuality : 0, TextureFormat: pixal || hero ? "jpeg" : null,
-            Engine: engine, Seed: request.Seed ?? 0, Up: up);
+            Engine: engine, Seed: request.Seed ?? 0, Up: up,
+            Topology: pixal && readiness.PixalGeometryChecks ? request.Topology ?? "closed" : null,
+            SizeM: request.SizeM, SizeIs: request.SizeIs, GameExport: request.GameExport, Mounts: request.Mounts);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -1961,6 +1998,12 @@ public sealed class ModelGenerationService(
             var receiptPath = Path.Combine(workspace, $"step-{index + 1}-{stage}.json");
             var hasOutput = Produced(outputPath);
             var hasReceipt = File.Exists(receiptPath);
+            if (stage == PixalGeometryStage && packet.Topology is not null && hasReceipt)
+            {
+                var receipt = await File.ReadAllTextAsync(receiptPath, cancellationToken);
+                if (PixalCheckError(receipt, packet) is { } error)
+                    return await FailAsync(job, $"{job.ShotCode}: {error}", cancellationToken);
+            }
             // Each step gets an equal share of the span between reading the
             // reference and validating the result. Equal because the studio has
             // no honest basis for claiming one step is a given fraction of the
@@ -2005,13 +2048,39 @@ public sealed class ModelGenerationService(
                 await ProgressAsync(job, JobState.Running, progress,
                     partial ? $"{step} — running again: the previous attempt left an incomplete answer" : step,
                     cancellationToken);
-                run = await compiler.RunStageAsync(
+                var execution = compiler.RunStageAsync(
                     stage, steps[index].ReadsOriginal ? sourcePath : stepSource,
                     outputPath, receiptPath, cancellationToken,
                     StageOptions(stage, packet, job, sourcePath, completed, paintReference));
+                string? previousWait = null;
+                while (!execution.IsCompleted)
+                {
+                    if (await Task.WhenAny(execution, Task.Delay(TimeSpan.FromSeconds(2), cancellationToken)) == execution)
+                        break;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var waitFile = receiptPath + ".gpu-wait";
+                    string? waiting = null;
+                    try
+                    {
+                        if (File.Exists(waitFile)) waiting = await File.ReadAllTextAsync(waitFile, cancellationToken);
+                    }
+                    catch (IOException) { continue; } // The worker just acquired the reservation.
+                    if (waiting == previousWait) continue;
+                    previousWait = waiting;
+                    await ProgressAsync(job, JobState.Running, progress,
+                        waiting is null ? step : $"{step} · {waiting}", cancellationToken);
+                }
+                run = await execution;
+                if (!run.Ok && stage == PixalGeometryStage && packet.Mounts is not null && File.Exists(receiptPath))
+                {
+                    var reason = PixalCheckError(await File.ReadAllTextAsync(receiptPath, cancellationToken), packet);
+                    return await FailAsync(job, $"{job.ShotCode}: {reason ?? run.Error}", cancellationToken);
+                }
                 if (!run.Ok)
-                    return await FailAsync(job,
-                        run.Error ?? $"The {stage} stage did not produce a result.", cancellationToken);
+                    return await FailAsync(job, $"{job.ShotCode}: "
+                        + (run.Error ?? $"The {stage} stage did not produce a result."), cancellationToken);
+                if (stage == PixalGeometryStage && packet.Topology is not null && PixalCheckError(run.ReceiptJson, packet) is { } error)
+                    return await FailAsync(job, $"{job.ShotCode}: {error}", cancellationToken);
                 if (!Produced(outputPath))
                     return await FailAsync(job,
                         $"The {stage} stage reported success but wrote nothing.", cancellationToken);
@@ -2106,6 +2175,7 @@ public sealed class ModelGenerationService(
             work = packet.Work,
             size = packet.Size,
             sizeAdjust = packet.SizeAdjust,
+            packet.SizeM, packet.SizeIs, packet.Topology, packet.GameExport, packet.Mounts,
             glassColour = packet.GlassColour,
             detail = packet.Work == GenerateWork ? packet.Detail : null,
             headEnd = packet.Work == GenerateWork && packet.Detail == HeroDetail ? packet.HeadEnd : null,
@@ -2353,20 +2423,59 @@ public sealed class ModelGenerationService(
         _ => [],
     };
 
-    /// <summary>
-    /// What Pixal3D is told: the size as the landmark the artist chose (a
-    /// height, as everywhere in this studio), the game mesh's vertices for the
-    /// detail, and the seed and the way the piece stands only when they were
-    /// said, so an unnamed one is the compiler's own default.
-    /// </summary>
+    /// <summary>Read the compiler's verdict on the game mesh before continuing a frozen job.</summary>
+    private static string? PixalCheckError(string? receipt, FrozenModelRequest packet)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(receipt ?? "{}");
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("game_mesh_check", out var check)
+                && check.ValueKind == JsonValueKind.Object && check.TryGetProperty("ok", out var ok))
+            {
+                if (ok.ValueKind == JsonValueKind.True)
+                {
+                    if (packet.Mounts is { } mounts && (!root.TryGetProperty("frame_check", out var frame)
+                        || frame.ValueKind != JsonValueKind.Object || !frame.TryGetProperty("ok", out var passed)
+                        || passed.ValueKind != JsonValueKind.True
+                        || !root.TryGetProperty("mounts", out var marks) || marks.ValueKind != JsonValueKind.Object
+                        || !marks.TryGetProperty("runM", out var run) || run.ValueKind != JsonValueKind.Number
+                        || !run.TryGetDouble(out var runM) || runM != packet.SizeM
+                        || marks.Deserialize<FrameMounts>(Json) is not { } recorded || !recorded.Valid()
+                        || recorded.RiseM != mounts.RiseM || !recorded.LowerFoot.SequenceEqual(mounts.LowerFoot)
+                        || !recorded.UpperFoot.SequenceEqual(mounts.UpperFoot) || !recorded.PostTop.SequenceEqual(mounts.PostTop)))
+                        return "The frozen mounting request has no passing frame measurement. Painting is held.";
+                    return null;
+                }
+                if (root.TryGetProperty("note", out var note) && note.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(note.GetString()))
+                    return note.GetString();
+            }
+        }
+        catch (JsonException) { }
+        return "The compiler supplied no passing game-mesh check. Painting is held.";
+    }
+
+    /// <summary>Carry the frozen size, shell, orientation and detail to the geometry stage.</summary>
     private static Dictionary<string, string> PixalGeometryOptions(FrozenModelRequest packet)
     {
         var options = new Dictionary<string, string>
         {
-            ["size"] = packet.Size,
-            ["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture),
             ["vertex-target"] = packet.Detail == HeroDetail ? PixalHeroVertices : PixalSetVertices,
         };
+        if (packet.SizeM is { } metres)
+        {
+            options["size-m"] = metres.ToString("R", CultureInfo.InvariantCulture);
+            options["size-is"] = packet.SizeIs!;
+        }
+        else
+        {
+            options["size"] = packet.Size;
+            options["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture);
+        }
+        if (packet.Topology is not null) options["topology"] = packet.Topology;
+        if (packet.GameExport is not null) options["game-export"] = packet.GameExport;
+        if (packet.Mounts is not null) options["mounts"] = JsonSerializer.Serialize(packet.Mounts, Json);
         if (packet.Seed > 0) options["seed"] = packet.Seed.ToString(CultureInfo.InvariantCulture);
         if (!string.IsNullOrWhiteSpace(packet.Up)) options["up"] = packet.Up;
         return options;
@@ -2859,6 +2968,35 @@ public sealed class ModelGenerationService(
     /// </summary>
     private string Workspace(Guid jobId) => Path.Combine(
         StudioPaths.ResolveDataRoot(configuration, environment), "generated-models", jobId.ToString("N"));
+
+    public async Task<string?> FrameOverlayAsync(Guid jobId, string surface, CancellationToken cancellationToken)
+    {
+        if (surface is not ("dense" or "game")) return null;
+        var job = await db.Jobs.AsNoTracking().SingleOrDefaultAsync(
+            j => j.Id == jobId && j.WorkType == ModelWorkType, cancellationToken);
+        if (job?.RequestJson is null) return null;
+        try
+        {
+            var packet = JsonSerializer.Deserialize<FrozenModelRequest>(job.RequestJson, Json);
+            if (packet?.Mounts is null) return null;
+            var index = Array.FindIndex(packet.Route, step => step.Stage == PixalGeometryStage);
+            if (index < 0) return null;
+            var prefix = $"step-{index + 1}-{PixalGeometryStage}";
+            var workspace = Workspace(jobId);
+            var receipt = Path.Combine(workspace, prefix + ".json");
+            if (!File.Exists(receipt)) return null;
+            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(receipt, cancellationToken));
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("attempt", out var attempt) || attempt.ValueKind != JsonValueKind.String ||
+                !doc.RootElement.TryGetProperty("frame_check", out _)) return null;
+            var directory = Path.GetFileName(attempt.GetString());
+            if (directory is null || !System.Text.RegularExpressions.Regex.IsMatch(directory,
+                    "^" + prefix + "-pixal-attempt[0-9]{3}$")) return null;
+            var file = Path.Combine(workspace, directory, surface + "-overlay.png");
+            return File.Exists(file) ? file : null;
+        }
+        catch (JsonException) { return null; }
+    }
 
     private static string IdempotencyKey(string requestJson, Guid jobId) =>
         Sha256($"model:{requestJson}:{jobId}");

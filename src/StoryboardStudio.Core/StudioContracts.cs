@@ -346,7 +346,20 @@ public sealed record RigPoseSummary(
 public sealed record CreateModelGenerationRequest(
     Guid SourceAssetId, string Name, string? Size = null, double? SizeAdjust = null,
     string? GlassColour = null, string? Detail = null, string? HeadEnd = null,
-    bool? PaintSections = null, string? Engine = null, int? Seed = null, string? Up = null);
+    bool? PaintSections = null, string? Engine = null, int? Seed = null, string? Up = null,
+    string? Topology = null, double? SizeM = null, string? SizeIs = null, string? GameExport = null,
+    FrameMounts? Mounts = null);
+
+public sealed record FrameMounts(double[] LowerFoot, double[] UpperFoot, double[] PostTop, double RiseM)
+{
+    public bool Valid()
+    {
+        var points = new[] { LowerFoot, UpperFoot, PostTop };
+        return double.IsFinite(RiseM) && RiseM is >= 0 and <= 50
+            && points.All(point => point is { Length: 2 } && point.All(v => double.IsFinite(v) && v is >= 0 and <= 1))
+            && points.Select(point => (point[0], point[1])).Distinct().Count() == 3;
+    }
+}
 
 /// <summary>
 /// Whether model generation can run on this workstation, and whether it is
@@ -556,7 +569,8 @@ public sealed record ModelGenerationReadiness(
     IReadOnlyDictionary<string, string>? Suffixes = null, ModelColourChoice[]? Colours = null,
     ModelDetailChoice[]? Details = null, BlenderInstallSummary? BlenderInstall = null,
     bool RemeshDecidesBudget = false, bool PreparationKeepsPaint = false,
-    ModelSectionsOffer? PaintSections = null, ModelEngineChoice[]? Engines = null);
+    ModelSectionsOffer? PaintSections = null, ModelEngineChoice[]? Engines = null,
+    bool PixalGeometryChecks = false, bool PixalSolidExport = false, bool PixalMounts = false);
 
 /// <summary>
 /// A way of making the shape that this compiler can run: "hunyuan3d" or

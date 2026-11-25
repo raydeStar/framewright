@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 
 /**
  * A reference image becomes a model candidate, in the real application, with a
@@ -21,6 +23,93 @@ function ownReference(label: string) {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
   return Buffer.concat([png, Buffer.from(`model-generation-${label}`, 'utf8')])
 }
+
+test('a measured crate carries its actual width and closed shell from the model panel', async ({ page }, testInfo) => {
+  const name = `crate-check-${testInfo.project.name}`
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Assets', exact: true }).click()
+  await page.locator('.asset-hero input[type="file"]').setInputFiles({
+    name: `${name}.png`, mimeType: 'image/png', buffer: ownReference(name),
+  })
+  await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
+  await page.route('**/api/models/generation/readiness', async route => {
+    const response = await route.fetch()
+    await route.fulfill({ json: { ...(await response.json()), canRun: true, pixalGeometryChecks: true, pixalSolidExport: true, pixalMounts: true,
+      engines: [{ engine: 'pixal3d', description: 'Pixal3D', cost: '' }] } })
+  })
+  await page.getByRole('button', { name: /^Images/ }).click()
+  await page.getByRole('button', { name: `Open ${name}` }).click()
+  const panel = page.getByTestId('model-from-reference')
+  await panel.getByLabel('Measure by').selectOption('width')
+  await expect(panel.getByTestId('model-generate')).toBeDisabled()
+  await panel.getByLabel('Length in metres').fill('0.55')
+  await expect(panel.getByLabel('Shell construction')).toHaveValue('closed')
+  await panel.getByLabel('Shell construction').selectOption('solid')
+  let submitted: unknown
+  await page.route('**/api/models/generation', async route => {
+    submitted = route.request().postDataJSON()
+    await route.fulfill({ status: 422, json: { error: 'Fixture stops before generation.' } })
+  })
+  await panel.getByTestId('model-generate').click()
+  await expect(panel.getByRole('alert')).toContainText('Fixture stops')
+  expect(submitted).toMatchObject({ engine: 'pixal3d', topology: 'closed', gameExport: 'solid', sizeIs: 'width', sizeM: 0.55, size: '' })
+  await panel.getByLabel('Shell construction').selectOption('open')
+  await panel.getByLabel('Align to mounting feet').check()
+  await panel.getByLabel('Horizontal run between feet in metres').fill('3')
+  await panel.getByLabel('Rise between feet in metres').fill('2')
+  await expect(panel.getByTestId('model-generate')).toBeDisabled()
+  const picture = panel.getByAltText('Reference for mounting points')
+  const box = await picture.boundingBox()
+  if (!box) throw new Error('The mounting picture has no visible bounds')
+  for (const [x, y] of [[.1, .9], [.9, .4], [.1, .6]]) {
+    await picture.click({ position: { x: box.width * x, y: box.height * y } })
+  }
+  await expect(panel.getByText('Three mounting points marked.')).toBeVisible()
+  const sent = page.waitForRequest(req => req.method() === 'POST' && req.url().endsWith('/api/models/generation'))
+  await panel.getByTestId('model-generate').click()
+  const frame = (await sent).postDataJSON()
+  expect(frame).toMatchObject({ topology: 'open', sizeIs: 'width', sizeM: 3, mounts: { riseM: 2 } })
+  for (const [name, x, y] of [['lowerFoot', .1, .9], ['upperFoot', .9, .4], ['postTop', .1, .6]] as const) {
+    expect(frame.mounts[name][0]).toBeCloseTo(x, 1)
+    expect(frame.mounts[name][1]).toBeCloseTo(y, 1)
+  }
+})
+
+test('a direct WSL RAC worker holds a Framewright model job until it releases the GPU', async ({ page }) => {
+  const guard = process.env.FRAMEWRIGHT_TEST_RAC_GUARD
+  test.skip(process.platform !== 'win32' || !guard || !process.env.FRAMEWRIGHT_TEST_PYTHON
+    || !process.env.RAC_GPU_LOCK_PATH, 'Opt-in Windows and Pixal WSL host test with CPU-only workers')
+  test.setTimeout(100_000)
+  const path = guard!.replaceAll('\\', '/').replace(/^([a-z]):/i, (_, drive: string) => `/mnt/${drive.toLowerCase()}`)
+  const owner = spawn('wsl.exe', ['-d', process.env.RAC_WSL_DISTRO ?? 'Ubuntu-22.04', '--',
+    'env', `RAC_GPU_LOCK_PATH=${process.env.RAC_GPU_LOCK_PATH}`, 'python3', path, '0',
+    'python3', '-u', '-c', "import sys; print('reserved'); sys.stdin.readline()"], { windowsHide: true })
+  const exited = once(owner, 'exit')
+  try {
+    expect(String((await once(owner.stdout!, 'data'))[0])).toContain('reserved')
+    const name = 'local-gpu-overlap-test'
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Assets', exact: true }).click()
+    await page.locator('.asset-hero input[type="file"]').setInputFiles({
+      name: `${name}.png`, mimeType: 'image/png', buffer: ownReference(name),
+    })
+    await page.getByRole('button', { name: /^Images/ }).click()
+    await page.getByRole('button', { name: `Open ${name}` }).click()
+    await page.getByTestId('model-size').selectOption('knee')
+    await page.getByTestId('model-generate').click()
+    const job = async () => {
+      const studio = await (await page.request.get('/api/studio')).json()
+      return studio.jobs.find((entry: { shotCode: string }) => entry.shotCode === name)
+    }
+    await expect.poll(async () => (await job())?.phase, {timeout: 40_000}).toContain('GPU reservation')
+    expect((await job()).outputAssetId).toBeFalsy()
+    owner.stdin!.end()
+    expect((await exited)[0]).toBe(0)
+    await expect.poll(async () => (await job())?.state, {timeout: 50_000}).toBe('Completed')
+  } finally {
+    owner.stdin!.end()
+  }
+})
 
 test('a failed readiness check stops loading and can be retried without queuing work', async ({ page }, testInfo) => {
   const referenceName = `readiness-error-${testInfo.project.name}`

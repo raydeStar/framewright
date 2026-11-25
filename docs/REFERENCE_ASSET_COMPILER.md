@@ -44,6 +44,18 @@ fork the modeling or texturing implementation.
 
 ## Implemented consumer checks
 
+Pixal3D generation requires a compiler advertising the `topology` option.
+The artist can request a closed shell or preserve open boundaries and give
+a width, height or longest side in metres. The job freezes these settings.
+A failed game-mesh check stops before UVs and paint and remains visible in
+the job history, including after recovery. Only the compiler measures the mesh.
+
+For a prop formed from one continuous solid, **Shell construction → Rebuild a single closed
+volume** uses the dense Pixal acquisition for closed retopology and the final normal bake.
+The frozen request records `gameExport: "solid"`. The control appears when the compiler
+advertises game export selection and retained geometry support. Use the native shell options
+for assemblies with loose parts and models with intentional open edges.
+
 - **Profiles come from the compiler checkout.** Framewright reads
   `profiles/skeletons/*.json` from the configured checkout and enforces required
   bones, expected parents, optional and unlisted bones, exact counts, roots,

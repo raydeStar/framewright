@@ -473,6 +473,10 @@ function JobsDock({ jobs, scopeShotId, frameShotId, onOpen, onRetry, dismissed, 
         </li>)}
         {settled.map(job => <li key={job.id} data-testid="jobs-queue-item" data-state={job.state}>
           <span><strong>{job.shotCode}</strong><small>{job.kind} · {job.state === 'Completed' ? job.phase : job.error || job.state}</small></span>
+          {job.state === 'Failed' && job.error?.includes('Open-frame check:') && <span>
+            <a href={'/api/jobs/'+job.id+'/frame-overlay/dense'} target="_blank" rel="noreferrer">Dense overlay</a>
+            {' · '}<a href={'/api/jobs/'+job.id+'/frame-overlay/game'} target="_blank" rel="noreferrer">Game overlay</a>
+          </span>}
           {job.state === 'Completed' && job.outputAssetId
             ? <em className="job-done">delivered</em>
             : <button type="button" disabled={retrying}
