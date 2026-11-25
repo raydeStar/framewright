@@ -2229,11 +2229,15 @@ public sealed class ModelGenerationService(
         UvUnwrapStage => new Dictionary<string, string> { ["allow-triangulated-glb"] = "" },
         // The relief raised from the paint, to a measured steepness rather than
         // a strength (the same strength meant different things on different
-        // paints), and then the dense mesh's own shape under it.
+        // paints), and then the dense mesh's own shape under it. No occlusion
+        // map: Pixal3D's game meshes carry interior shells, and an occlusion
+        // bake on them darkens visible triangles here and in Unreal alike (the
+        // compiler's decision of 25 November 2026).
         BakeDetailStage when packet.Engine == PixalEngine => new Dictionary<string, string>
         {
             ["resolution"] = PixalBakeResolution,
             ["relief-tilt"] = PixalReliefTilt,
+            ["no-occlusion"] = "",
         },
         BakeShapeStage => new Dictionary<string, string> { ["dense"] = DenseMeshOf(earlier) },
         // The paint is conditioned on the same picture the geometry came from.

@@ -1295,6 +1295,7 @@ public sealed class ModelGenerationApiTests
         Assert.Equal("8192", compiler.Options["texture"]["atlas"]);
         Assert.Equal("8192", compiler.Options["paint-sections"]["atlas"]);
         Assert.Equal("6", compiler.Options["bake-detail"]["relief-tilt"]);
+        Assert.Equal("", compiler.Options["bake-detail"]["no-occlusion"]);
         // The shape is baked from the dense mesh the geometry stage wrote beside the game mesh.
         Assert.EndsWith("step-1-pixal-geometry-dense.blend", compiler.Options["bake-shape"]["dense"], StringComparison.Ordinal);
         Assert.Equal("8192", compiler.Options["compress-textures"]["colour-size"]);
