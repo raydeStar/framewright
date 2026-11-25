@@ -105,7 +105,8 @@ export default function ModelFromReference({ asset, onQueued }: {
         pixal ? 'none' : detail === 'hero' ? headEnd : undefined, sectionsAsked ? sections : undefined,
         engines.length > 1 || pixal ? chosenEngine : undefined,
         pixal && seed.trim() !== '' ? Number(seed) : undefined, pixal ? up : undefined,
-        checks ? { topology, ...(measured ? { sizeM: Number(metres), sizeIs: axis } : {}) } : undefined)
+        checks ? { ...(topology === 'solid' ? { topology: 'closed', gameExport: 'solid' } : { topology }),
+          ...(measured ? { sizeM: Number(metres), sizeIs: axis } : {}) } : undefined)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -139,6 +140,7 @@ export default function ModelFromReference({ asset, onQueued }: {
             <label className="model-size"><span>Shell construction</span>
               <select value={topology} onChange={event => setTopology(event.target.value)}>
                 <option value="closed">Closed solid</option>
+                {readiness.pixalSolidExport && <option value="solid">Rebuild a single closed volume</option>}
                 <option value="open">Preserve intentional open edges</option>
               </select>
             </label>

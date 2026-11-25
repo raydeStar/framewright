@@ -34,7 +34,7 @@ test('a measured crate carries its actual width and closed shell from the model 
   await expect(page.getByText('1 asset imported into the library.')).toBeVisible()
   await page.route('**/api/models/generation/readiness', async route => {
     const response = await route.fetch()
-    await route.fulfill({ json: { ...(await response.json()), canRun: true, pixalGeometryChecks: true,
+    await route.fulfill({ json: { ...(await response.json()), canRun: true, pixalGeometryChecks: true, pixalSolidExport: true,
       engines: [{ engine: 'pixal3d', description: 'Pixal3D', cost: '' }] } })
   })
   await page.getByRole('button', { name: /^Images/ }).click()
@@ -44,6 +44,7 @@ test('a measured crate carries its actual width and closed shell from the model 
   await expect(panel.getByTestId('model-generate')).toBeDisabled()
   await panel.getByLabel('Length in metres').fill('0.55')
   await expect(panel.getByLabel('Shell construction')).toHaveValue('closed')
+  await panel.getByLabel('Shell construction').selectOption('solid')
   let submitted: unknown
   await page.route('**/api/models/generation', async route => {
     submitted = route.request().postDataJSON()
@@ -51,7 +52,7 @@ test('a measured crate carries its actual width and closed shell from the model 
   })
   await panel.getByTestId('model-generate').click()
   await expect(panel.getByRole('alert')).toContainText('Fixture stops')
-  expect(submitted).toMatchObject({ engine: 'pixal3d', topology: 'closed', sizeIs: 'width', sizeM: 0.55, size: '' })
+  expect(submitted).toMatchObject({ engine: 'pixal3d', topology: 'closed', gameExport: 'solid', sizeIs: 'width', sizeM: 0.55, size: '' })
 })
 
 test('a direct WSL RAC worker holds a Framewright model job until it releases the GPU', async ({ page }) => {

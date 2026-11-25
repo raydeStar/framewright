@@ -60,7 +60,7 @@ public sealed class ModelGenerationApiTests
                 Colours: name == "glass"
                     ? [new CompilerColour("teal", "teal or cyan"), new CompilerColour("amber", "amber or orange")]
                     : null,
-                Options: name == "pixal-geometry" ? ["topology"] : null);
+                Options: name == "pixal-geometry" ? ["topology", "geometry", "game_export"] : null);
 
         public static CompilerCapabilities Ready => new(
             Installed: true, Commissioned: true, Version: "reference-asset-compiler 0.1.2",
@@ -1330,7 +1330,7 @@ public sealed class ModelGenerationApiTests
         var reference = await ImportImageAsync(client, "crate.png");
         var queued = await client.PostAsJsonAsync("/api/models/generation", new {
             sourceAssetId = reference.Id, name = "PR-04.2 crate", sizeM = 0.55, sizeIs = "width",
-            topology = "closed", engine = "pixal3d", seed = 41 });
+            topology = "closed", gameExport = "solid", engine = "pixal3d", seed = 41 });
         queued.EnsureSuccessStatusCode();
         using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
         var failed = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
@@ -1342,6 +1342,7 @@ public sealed class ModelGenerationApiTests
         Assert.Equal("0.55", options["size-m"]);
         Assert.Equal("width", options["size-is"]);
         Assert.Equal("closed", options["topology"]);
+        Assert.Equal("solid", options["game-export"]);
         Assert.False(options.ContainsKey("size"));
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();

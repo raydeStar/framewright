@@ -569,7 +569,7 @@ public sealed class ModelGenerationService(
         bool AutoTriangleBudget = false,
         Guid? PaintReferenceAssetId = null, string? PaintReferenceContentHash = null,
         string Engine = HunyuanEngine, int Seed = 0, string? Up = null,
-        string? Topology = null, double? SizeM = null, string? SizeIs = null);
+        string? Topology = null, double? SizeM = null, string? SizeIs = null, string? GameExport = null);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -679,7 +679,10 @@ public sealed class ModelGenerationService(
             PreparationKeepsPaint: capabilities.CanRun(RebakeMapsStage),
             PaintSections: capabilities.CanRun(PaintSectionsStage) ? SectionsOffer : null,
             Engines: offerDetails ? EngineChoices(capabilities) : null,
-            PixalGeometryChecks: HasPixalChecks(capabilities));
+            PixalGeometryChecks: HasPixalChecks(capabilities),
+            PixalSolidExport: capabilities.CanRun(RemeshStage) && capabilities.Stages.Any(stage => stage.Stage == PixalGeometryStage && stage.Available
+                && stage.Options?.Contains("game_export", StringComparer.Ordinal) == true
+                && stage.Options.Contains("geometry", StringComparer.Ordinal)));
     }
 
     /// <summary>
@@ -827,6 +830,8 @@ public sealed class ModelGenerationService(
             return RepositoryResult<JobSummary>.Invalid(
                 $"The shape is made by \"{HunyuanEngine}\" or \"{PixalEngine}\", not \"{request.Engine}\".");
         var pixal = engine == PixalEngine;
+        if (request.GameExport is not null && (!pixal || request.GameExport != "solid" || request.Topology != "closed"))
+            return RepositoryResult<JobSummary>.Invalid("Rebuilding a single closed volume requires a closed Pixal3D prop.");
         var customGeometry = request.Topology is not null || request.SizeM is not null || request.SizeIs is not null;
         if (customGeometry && !pixal)
             return RepositoryResult<JobSummary>.Invalid("Measured prop dimensions and shell settings require Pixal3D.");
@@ -852,6 +857,8 @@ public sealed class ModelGenerationService(
             cancellationToken, offerDetails: true);
         if (!readiness.CanRun)
             return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
+        if (request.GameExport == "solid" && !readiness.PixalSolidExport)
+            return RepositoryResult<JobSummary>.Unavailable("The installed compiler does not offer closed-volume retopology.");
         if (pixal && !readiness.PixalGeometryChecks)
             return RepositoryResult<JobSummary>.Unavailable("Update the Reference Asset Compiler to use measured prop checks.");
         if (glassColour is not null
@@ -930,7 +937,7 @@ public sealed class ModelGenerationService(
             Quality: pixal || hero ? HeroTextureQuality : 0, TextureFormat: pixal || hero ? "jpeg" : null,
             Engine: engine, Seed: request.Seed ?? 0, Up: up,
             Topology: pixal && readiness.PixalGeometryChecks ? request.Topology ?? "closed" : null,
-            SizeM: request.SizeM, SizeIs: request.SizeIs);
+            SizeM: request.SizeM, SizeIs: request.SizeIs, GameExport: request.GameExport);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -2155,7 +2162,7 @@ public sealed class ModelGenerationService(
             work = packet.Work,
             size = packet.Size,
             sizeAdjust = packet.SizeAdjust,
-            packet.SizeM, packet.SizeIs, packet.Topology,
+            packet.SizeM, packet.SizeIs, packet.Topology, packet.GameExport,
             glassColour = packet.GlassColour,
             detail = packet.Work == GenerateWork ? packet.Detail : null,
             headEnd = packet.Work == GenerateWork && packet.Detail == HeroDetail ? packet.HeadEnd : null,
@@ -2441,6 +2448,7 @@ public sealed class ModelGenerationService(
             options["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture);
         }
         if (packet.Topology is not null) options["topology"] = packet.Topology;
+        if (packet.GameExport is not null) options["game-export"] = packet.GameExport;
         if (packet.Seed > 0) options["seed"] = packet.Seed.ToString(CultureInfo.InvariantCulture);
         if (!string.IsNullOrWhiteSpace(packet.Up)) options["up"] = packet.Up;
         return options;
