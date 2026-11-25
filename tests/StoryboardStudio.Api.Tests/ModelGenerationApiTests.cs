@@ -59,7 +59,8 @@ public sealed class ModelGenerationApiTests
                 },
                 Colours: name == "glass"
                     ? [new CompilerColour("teal", "teal or cyan"), new CompilerColour("amber", "amber or orange")]
-                    : null);
+                    : null,
+                Options: name == "pixal-geometry" ? ["topology"] : null);
 
         public static CompilerCapabilities Ready => new(
             Installed: true, Commissioned: true, Version: "reference-asset-compiler 0.1.2",
@@ -92,7 +93,7 @@ public sealed class ModelGenerationApiTests
         /// </summary>
         public static CompilerCapabilities WithPixal => WithSections with
         {
-            Stages = [.. WithSections.Stages, Stage("pixal-geometry") with { Options = ["topology"] }, Stage("bake-detail"), Stage("bake-shape")],
+            Stages = [.. WithSections.Stages, Stage("pixal-geometry"), Stage("bake-detail"), Stage("bake-shape")],
         };
 
         /// <summary>
