@@ -53,7 +53,7 @@ public sealed class ModelGenerationApiTests
                 // and the stage that reads it refuses anything else.
                 OutputSuffix: name switch
                 {
-                    "stage-mesh" => ".blend",
+                    "stage-mesh" or "pixal-geometry" => ".blend",
                     "uv-unwrap" => ".obj",
                     _ => ".glb",
                 },
@@ -84,6 +84,15 @@ public sealed class ModelGenerationApiTests
         public static CompilerCapabilities WithSections => Ready with
         {
             Stages = [.. Ready.Stages, Stage("paint-sections")],
+        };
+
+        /// <summary>
+        /// A compiler that can also make props with Pixal3D: its geometry stage,
+        /// and the two bakes its route ends with.
+        /// </summary>
+        public static CompilerCapabilities WithPixal => WithSections with
+        {
+            Stages = [.. WithSections.Stages, Stage("pixal-geometry"), Stage("bake-detail"), Stage("bake-shape")],
         };
 
         /// <summary>
@@ -1201,7 +1210,7 @@ public sealed class ModelGenerationApiTests
         var cost = offer.GetProperty("cost").GetString()!;
         Assert.Contains("One painter run a section, roughly 3 minutes each", cost, StringComparison.Ordinal);
         Assert.Contains("up to 48", cost, StringComparison.Ordinal);
-        Assert.Contains("21 GiB", cost, StringComparison.Ordinal);
+        Assert.Contains("10.5 GiB", cost, StringComparison.Ordinal);
 
         var queued = await client.PostAsJsonAsync("/api/models/generation",
             new { sourceAssetId = reference.Id, name = "Mast", size = "head", detail = "hero", headEnd = "none" });
@@ -1251,6 +1260,110 @@ public sealed class ModelGenerationApiTests
         Assert.Equal(3.14, sections.GetProperty("wholeModelMmPerPixel").GetDouble());
         Assert.Equal(0.9, sections.GetProperty("sectionMmPerPixel").GetDouble());
         Assert.Equal("none", result.RootElement.GetProperty("headEnd").GetString());
+    }
+
+    [Fact]
+    public async Task APixalPropIsShapedByPixal3DPaintedOnAnEightThousandSheetAndBakedFromItsDenseMesh()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithPixal };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "skiff-reference.png");
+
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Skiff", size = "knee", detail = "hero",
+                  engine = "pixal3d", seed = 45, up = "shortest" });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Completed, finished.State);
+
+        // No staging and no remesh: Pixal3D's own simplifier made the game mesh
+        // and the same stage levelled it. The bakes come after every paint, and
+        // the browser copy is always re-encoded.
+        Assert.Equal(["pixal-geometry", "uv-unwrap", "texture", "paint-sections", "bake-detail", "bake-shape",
+                      "browser-payload", "compress-textures"],
+            compiler.Calls.Select(call => call.Stage));
+        Assert.Equal("step-1-pixal-geometry.blend", compiler.Calls[1].Source);
+
+        var geometry = compiler.Options["pixal-geometry"];
+        Assert.Equal("knee", geometry["size"]);
+        Assert.Equal("45", geometry["seed"]);
+        Assert.Equal("100000", geometry["vertex-target"]);
+        Assert.Equal("shortest", geometry["up"]);
+        Assert.Empty(compiler.Options["uv-unwrap"]);
+        Assert.Equal("8192", compiler.Options["texture"]["atlas"]);
+        Assert.Equal("8192", compiler.Options["paint-sections"]["atlas"]);
+        Assert.Equal("6", compiler.Options["bake-detail"]["relief-tilt"]);
+        // The shape is baked from the dense mesh the geometry stage wrote beside the game mesh.
+        Assert.EndsWith("step-1-pixal-geometry-dense.blend", compiler.Options["bake-shape"]["dense"], StringComparison.Ordinal);
+        Assert.Equal("8192", compiler.Options["compress-textures"]["colour-size"]);
+        Assert.Equal("8192", compiler.Options["compress-textures"]["data-size"]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StudioDbContext>();
+        var delivered = await db.Assets.SingleAsync(asset => asset.Id == finished.OutputAssetId);
+        Assert.Contains("Made as a hero prop with Pixal3D (seed 45)", delivered.RevisionPrompt, StringComparison.Ordinal);
+        Assert.Equal(reference.Id, delivered.ReferenceAssetId);
+        var record = await db.Jobs.SingleAsync(candidate => candidate.Id == finished.Id);
+        using var result = JsonDocument.Parse(record.ResultJson!);
+        Assert.Equal("pixal3d", result.RootElement.GetProperty("engine").GetString());
+        Assert.Equal(45, result.RootElement.GetProperty("seed").GetInt32());
+    }
+
+    [Fact]
+    public async Task Pixal3DMakesPropsOnlyAndItsSettingsBelongToIt()
+    {
+        var compiler = new ControlledCompiler { Capabilities = ControlledCompiler.WithPixal };
+        using var factory = Factory(compiler);
+        using var client = factory.CreateClient();
+        var reference = await ImportImageAsync(client, "figure-reference.png");
+
+        foreach (var request in new object[]
+        {
+            new { sourceAssetId = reference.Id, name = "Figure", size = "head", engine = "pixal3d", headEnd = "top" },
+            new { sourceAssetId = reference.Id, name = "Bench", size = "knee", seed = 45 },
+            new { sourceAssetId = reference.Id, name = "Lantern", size = "knee", engine = "pixal3d", up = "sideways" },
+            new { sourceAssetId = reference.Id, name = "Bench", size = "knee", engine = "trellis" },
+        })
+        {
+            var refused = await client.PostAsJsonAsync("/api/models/generation", request);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
+        Assert.Empty(compiler.Calls);
+
+        // Set dressing: a lighter game mesh on a 4096 sheet, and no sections.
+        var queued = await client.PostAsJsonAsync("/api/models/generation",
+            new { sourceAssetId = reference.Id, name = "Crate", size = "knee", engine = "pixal3d", up = "longest" });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        using var job = await queued.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+        var finished = await RunAsync(factory, job.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JobState.Completed, finished.State);
+        Assert.DoesNotContain("paint-sections", compiler.Calls.Select(call => call.Stage));
+        Assert.Equal("40000", compiler.Options["pixal-geometry"]["vertex-target"]);
+        Assert.False(compiler.Options["pixal-geometry"].ContainsKey("seed"));
+        Assert.Equal("longest", compiler.Options["pixal-geometry"]["up"]);
+        Assert.Equal("4096", compiler.Options["texture"]["atlas"]);
+    }
+
+    [Fact]
+    public async Task Pixal3DIsOfferedOnlyWhereItsWholeRouteCanRun()
+    {
+        foreach (var (capabilities, expected) in new[]
+        {
+            (ControlledCompiler.WithSections, new[] { "hunyuan3d" }),
+            (ControlledCompiler.WithPixal, new[] { "hunyuan3d", "pixal3d" }),
+        })
+        {
+            var compiler = new ControlledCompiler { Capabilities = capabilities };
+            using var factory = Factory(compiler);
+            using var client = factory.CreateClient();
+            using var readiness = await client.GetFromJsonAsync<JsonDocument>("/api/models/generation/readiness")
+                ?? throw new InvalidOperationException();
+            var engines = readiness.RootElement.GetProperty("engines").EnumerateArray()
+                .Select(choice => choice.GetProperty("engine").GetString()).ToArray();
+            Assert.Equal(expected, engines);
+        }
     }
 
     [Fact]

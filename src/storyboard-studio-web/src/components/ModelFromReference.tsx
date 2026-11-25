@@ -57,6 +57,11 @@ export default function ModelFromReference({ asset, onQueued }: {
   const [headEnd, setHeadEnd] = useState('')
   // On unless switched off. Only ever sent for a hero prop.
   const [sections, setSections] = useState(true)
+  // What makes the shape. Pixal3D where the compiler offers it, because the
+  // owner chose it for props; Hunyuan3D for a figure or an animal.
+  const [engine, setEngine] = useState('')
+  const [up, setUp] = useState('shortest')
+  const [seed, setSeed] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -72,8 +77,12 @@ export default function ModelFromReference({ asset, onQueued }: {
     return () => { live = false }
   }, [readinessAttempt])
 
+  const engines = readiness?.engines ?? []
+  const chosenEngine = engine !== '' ? engine
+    : engines.some(choice => choice.engine === 'pixal3d') ? 'pixal3d' : 'hunyuan3d'
+  const pixal = chosenEngine === 'pixal3d'
   const hero = detail === 'hero'
-  const prop = hero && headEnd === 'none'
+  const prop = hero && (pixal || headEnd === 'none')
   const sectionsOffer = readiness?.paintSections ?? null
   const sectionsAsked = prop && sectionsOffer !== null
   const headNote = headEnd === ''
@@ -87,7 +96,9 @@ export default function ModelFromReference({ asset, onQueued }: {
     try {
       const job = await studioApi.generateModel(
         asset.id, asset.displayName, size, glass === '' ? undefined : glass, detail,
-        detail === 'hero' ? headEnd : undefined, sectionsAsked ? sections : undefined)
+        pixal ? 'none' : detail === 'hero' ? headEnd : undefined, sectionsAsked ? sections : undefined,
+        engines.length > 1 || pixal ? chosenEngine : undefined,
+        pixal && seed.trim() !== '' ? Number(seed) : undefined, pixal ? up : undefined)
       onQueued(`${job.shotCode} queued. It keeps going if you leave this screen.`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'That model could not be queued.')
@@ -121,6 +132,33 @@ export default function ModelFromReference({ asset, onQueued }: {
               Standing next to it, where would it come up to?
             </span>
           </label>}
+          {readiness.canRun && engines.length > 1 && <label className="model-size">
+            <span>What makes the shape?</span>
+            <select value={chosenEngine} onChange={event => setEngine(event.target.value)}
+              data-testid="model-engine">
+              {engines.map(choice => <option key={choice.engine} value={choice.engine}>
+                {choice.description}
+              </option>)}
+            </select>
+            <span className="model-note" data-testid="model-engine-cost">
+              {engines.find(choice => choice.engine === chosenEngine)?.cost}
+            </span>
+          </label>}
+          {readiness.canRun && pixal && <label className="model-size">
+            <span>How does it stand?</span>
+            <select value={up} onChange={event => setUp(event.target.value)} data-testid="model-up">
+              <option value="shortest">Long and low: a boat, a bench, a crate</option>
+              <option value="longest">Tall: a lantern, a ladder, a column</option>
+              <option value="middle">A panel standing on its edge</option>
+            </select>
+            <span className="model-note">Pixal3D keeps the picture&apos;s camera tilt; this is how it is stood up.</span>
+          </label>}
+          {readiness.canRun && pixal && <label className="model-size">
+            <span>Design (seed)</span>
+            <input type="number" min={1} step={1} value={seed} placeholder="The compiler's default"
+              onChange={event => setSeed(event.target.value)} data-testid="model-seed" />
+            <span className="model-note">Another seed is another design from the same picture.</span>
+          </label>}
           {readiness.canRun && readiness.details && readiness.details.length > 1 && <label className="model-size">
             <span>How close will the camera get?</span>
             <select value={detail} onChange={event => setDetail(event.target.value)}
@@ -133,7 +171,7 @@ export default function ModelFromReference({ asset, onQueued }: {
               {readiness.details.find(choice => choice.detail === detail)?.cost}
             </span>
           </label>}
-          {readiness.canRun && hero && <label className="model-size">
+          {readiness.canRun && hero && !pixal && <label className="model-size">
             <span>Is it a figure, an animal or a prop?</span>
             <select value={headEnd} onChange={event => setHeadEnd(event.target.value)}
               data-testid="model-head-end">
@@ -167,7 +205,7 @@ export default function ModelFromReference({ asset, onQueued }: {
             </span>
           </label>}
           <button type="button" className="secondary" data-testid="model-generate"
-            disabled={busy || !readiness.canRun || size === '' || (hero && headEnd === '')}
+            disabled={busy || !readiness.canRun || size === '' || (hero && !pixal && headEnd === '')}
             onClick={() => void generate()}>
             <Boxes size={15} />{busy ? 'Queuing…' : 'Generate from this reference'}
           </button>

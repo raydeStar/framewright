@@ -25,6 +25,16 @@
   `GET /api/sfx-review`.
 
 ### 3D models
+- **Props from Pixal3D.** Model generation can make a prop with Pixal3D
+  (`engine: "pixal3d"`), the route the owner chose for props. The steps are:
+  - Pixal3D's own game mesh and dense mesh, levelled at the real size;
+  - an 8192 sheet for a hero, painted in sections;
+  - relief and the dense mesh's shape baked into the normal map;
+  - 8192 JPEG for the browser.
+
+  It is offered only where the compiler can run every stage of the route, and the
+  panel defaults to it there. `seed` picks another design and `up` says how the
+  piece stands.
 - **Revisions compare in place.** Flipping between revisions of one model keeps
   the inspection camera where it was left, so the same spot can be compared
   up close. A revision whose size differs by more than a quarter is framed

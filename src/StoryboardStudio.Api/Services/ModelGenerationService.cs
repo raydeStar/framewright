@@ -48,6 +48,37 @@ public sealed class ModelGenerationService(
     public const string PaintHeadStage = "paint-head";
     public const string PaintSectionsStage = "paint-sections";
     public const string RigStage = "rig";
+    public const string PixalGeometryStage = "pixal-geometry";
+    public const string BakeShapeStage = "bake-shape";
+
+    /// <summary>
+    /// What makes the shape. Hunyuan3D is the route every model was made by
+    /// until 25 November and stays the default. Pixal3D keeps rivets, straps
+    /// and plank seams as real geometry where Hunyuan3D rounds them into blobs;
+    /// the owner compared the two on the Frastown skiff and chose Pixal3D for
+    /// props "by a landslide". It makes props only: it has no head pass.
+    /// </summary>
+    public const string HunyuanEngine = "hunyuan3d";
+    public const string PixalEngine = "pixal3d";
+    private static readonly string[] PixalUps = ["shortest", "middle", "longest"];
+
+    /// <summary>
+    /// The Pixal3D prop recipe, as the owner approved it on the skiff (24
+    /// November): the game mesh from Pixal's own simplifier, an 8192 sheet for a
+    /// hero, relief raised from the paint to a 6 degree steepness, the dense
+    /// mesh's million triangles baked into the normal map, and 8192 JPEG at 92
+    /// for the browser. Set dressing gets a lighter mesh and a 4096 sheet.
+    /// </summary>
+    private const string PixalHeroVertices = "100000";
+    private const string PixalSetVertices = "40000";
+    private const string PixalHeroAtlas = "8192";
+    private const string PixalSetAtlas = "4096";
+    private const string PixalBakeResolution = "2048";
+    private const string PixalReliefTilt = "6";
+    private const int PixalHeroColourSize = 8192;
+    private const int PixalHeroDataSize = 8192;
+    private const int PixalSetColourSize = 4096;
+    private const int PixalSetDataSize = 2048;
 
     /// <summary>Which of the two things a frozen packet is asking for.</summary>
     public const string GenerateWork = "generate";
@@ -180,6 +211,20 @@ public sealed class ModelGenerationService(
     [
         GeometryStage, StageMeshStage, RemeshStage,
         UvUnwrapStage, TextureStage, BrowserPayloadStage,
+    ];
+
+    /// <summary>
+    /// The Pixal3D prop route's own stages. Pixal3D makes the shape and its
+    /// game mesh in one generation, levelled at the real size by the same stage,
+    /// so there is no staging or remesh: neither of the compiler's reductions
+    /// keeps Pixal's hard edges. After the paint, the relief raised from it and
+    /// the dense mesh's shape go into the normal map, and the result is
+    /// re-encoded for a browser.
+    /// </summary>
+    public static readonly string[] PixalRoute =
+    [
+        PixalGeometryStage, UvUnwrapStage, TextureStage, BakeDetailStage, BakeShapeStage,
+        BrowserPayloadStage, CompressTexturesStage,
     ];
 
     /// <summary>
@@ -358,10 +403,24 @@ public sealed class ModelGenerationService(
     /// sections instead, which covers every face. The artist says which it is.
     /// </summary>
     private static string[] RouteFor(
-        string? glassColour, string detail = SetDetail, string headEnd = "top", bool sections = false)
+        string? glassColour, string detail = SetDetail, string headEnd = "top", bool sections = false,
+        string engine = HunyuanEngine)
     {
         var hero = string.Equals(detail, HeroDetail, StringComparison.Ordinal);
         var prop = string.Equals(headEnd, NoHead, StringComparison.Ordinal);
+        if (string.Equals(engine, PixalEngine, StringComparison.Ordinal))
+        {
+            // A prop route: no head pass. Sections go straight after the first
+            // paint, on its own sheet; the bakes come after every paint, because
+            // they read the colour; glass comes after the bakes, because the
+            // shape bake wants the one painted material it was given.
+            var pixal = new List<string> { PixalGeometryStage, UvUnwrapStage, TextureStage };
+            if (hero && sections) pixal.Add(PaintSectionsStage);
+            pixal.AddRange([BakeDetailStage, BakeShapeStage]);
+            if (!string.IsNullOrWhiteSpace(glassColour)) pixal.Add(GlassStage);
+            pixal.AddRange([BrowserPayloadStage, CompressTexturesStage]);
+            return [.. pixal];
+        }
         var route = new List<string>
         {
             GeometryStage, StageMeshStage, RemeshStage, UvUnwrapStage, TextureStage,
@@ -399,6 +458,8 @@ public sealed class ModelGenerationService(
         [PaintHeadStage] = "Painting the head again, on its own, up close",
         [PaintSectionsStage] = "Painting it again in sections, each at a small prop's scale",
         [RigStage] = "Building a skeleton, binding it, and bending it through five poses",
+        [PixalGeometryStage] = "Making the shape with Pixal3D, and standing it up at its real size",
+        [BakeShapeStage] = "Baking the dense mesh's bolts, seams and edges into the normal map",
     };
 
     /// <summary>
@@ -504,7 +565,8 @@ public sealed class ModelGenerationService(
         int Directions = 0, double Most = 0, double LargestPart = 0,
         bool IgnoreTransparency = false, string Detail = SetDetail, string HeadEnd = "top",
         bool AutoTriangleBudget = false,
-        Guid? PaintReferenceAssetId = null, string? PaintReferenceContentHash = null);
+        Guid? PaintReferenceAssetId = null, string? PaintReferenceContentHash = null,
+        string Engine = HunyuanEngine, int Seed = 0, string? Up = null);
 
     /// <summary>
     /// What one step of the route actually did, kept so the delivery can say
@@ -610,7 +672,26 @@ public sealed class ModelGenerationService(
             BlenderInstall: capabilities.BlenderInstall,
             RemeshDecidesBudget: RemeshDecidesBudget(capabilities),
             PreparationKeepsPaint: capabilities.CanRun(RebakeMapsStage),
-            PaintSections: capabilities.CanRun(PaintSectionsStage) ? SectionsOffer : null);
+            PaintSections: capabilities.CanRun(PaintSectionsStage) ? SectionsOffer : null,
+            Engines: offerDetails ? EngineChoices(capabilities) : null);
+    }
+
+    /// <summary>
+    /// The ways of making a shape this compiler can run, each offered only
+    /// where every stage of its route can: offering Pixal3D and failing an hour
+    /// in, on a stage the compiler never had, would be the worse answer.
+    /// </summary>
+    private static ModelEngineChoice[] EngineChoices(CompilerCapabilities capabilities)
+    {
+        var choices = new List<ModelEngineChoice>();
+        if (ReferenceToModelRoute.All(capabilities.CanRun))
+            choices.Add(new(HunyuanEngine, "Hunyuan3D: characters, animals, anything with a head",
+                "The shape in about a minute; rebuilt evenly at a budget the compiler decides"));
+        if (PixalRoute.All(capabilities.CanRun))
+            choices.Add(new(PixalEngine, "Pixal3D: hard-surface props, with rivets, straps and seams as real geometry",
+                "The shape in about 3 minutes on a GPU with 9 GiB free; a hero is painted on an 8192 sheet and "
+                + "its million-triangle dense mesh baked into the normal map"));
+        return [.. choices];
     }
 
     /// <summary>
@@ -622,7 +703,7 @@ public sealed class ModelGenerationService(
         SectionsMinimumLength, SectionLength, MaximumSections,
         $"A prop longer than {Metres(SectionsMinimumLength)} m is cut into sections of about {Metres(SectionLength)} m "
         + "and each is painted again on its own, so it is as sharp up close as a small prop. One painter run a section, "
-        + $"roughly {MinutesPerSection} minutes each, up to {MaximumSections}, on a GPU with 21 GiB free; a prop shorter "
+        + $"roughly {MinutesPerSection} minutes each, up to {MaximumSections}, on a GPU with 10.5 GiB free; a prop shorter "
         + "than that passes straight through at no cost.");
 
     /// <summary>A length as a person reads one: 1.2, 0.6, 2.35.</summary>
@@ -729,7 +810,26 @@ public sealed class ModelGenerationService(
         // ordinary one: most props have no glass at all.
         var glassColour = string.IsNullOrWhiteSpace(request.GlassColour) ? null : request.GlassColour.Trim();
 
-        var readiness = await PreflightAsync(RouteFor(glassColour), "Model generation", cancellationToken, offerDetails: true);
+        // What makes the shape. Unnamed is Hunyuan3D, the route everything was
+        // made by until Pixal3D was offered; Pixal3D is asked for by name.
+        var engine = string.IsNullOrWhiteSpace(request.Engine) ? HunyuanEngine : request.Engine.Trim().ToLowerInvariant();
+        if (engine is not (HunyuanEngine or PixalEngine))
+            return RepositoryResult<JobSummary>.Invalid(
+                $"The shape is made by \"{HunyuanEngine}\" or \"{PixalEngine}\", not \"{request.Engine}\".");
+        var pixal = engine == PixalEngine;
+        var up = string.IsNullOrWhiteSpace(request.Up) ? null : request.Up.Trim().ToLowerInvariant();
+        if (!pixal && (request.Seed is not null || up is not null))
+            return RepositoryResult<JobSummary>.Invalid(
+                "A seed and how the piece stands are Pixal3D's settings. Ask for Pixal3D, or leave them out.");
+        if (up is not null && !PixalUps.Contains(up, StringComparer.Ordinal))
+            return RepositoryResult<JobSummary>.Invalid(
+                $"A piece stands on its \"shortest\" axis (a boat, a bench), its \"longest\" (a lantern, a column) "
+                + $"or its \"middle\" one (a panel on its edge), not \"{request.Up}\".");
+        if (request.Seed is < 1)
+            return RepositoryResult<JobSummary>.Invalid("A seed is a whole number, 1 or more.");
+
+        var readiness = await PreflightAsync(RouteFor(glassColour, engine: engine), "Model generation",
+            cancellationToken, offerDetails: true);
         if (!readiness.CanRun)
             return RepositoryResult<JobSummary>.Unavailable(readiness.Detail);
         if (glassColour is not null
@@ -747,7 +847,9 @@ public sealed class ModelGenerationService(
             return RepositoryResult<JobSummary>.Invalid(
                 $"Detail is \"{SetDetail}\" or \"{HeroDetail}\", not \"{request.Detail}\".");
         var hero = detail == HeroDetail;
-        if (hero && !(readiness.Details?.Any(choice => choice.Detail == HeroDetail) ?? false))
+        // A Pixal3D hero needs no stage its route does not already have: it has
+        // no head pass, and it is always re-encoded.
+        if (hero && !pixal && !(readiness.Details?.Any(choice => choice.Detail == HeroDetail) ?? false))
             return RepositoryResult<JobSummary>.Invalid(
                 "This compiler cannot make a hero yet: it needs the paint-head and compress-textures stages. "
                 + "Generate it as set dressing, or update the compiler.");
@@ -756,10 +858,15 @@ public sealed class ModelGenerationService(
         // at the top would paint its ears and the tip of its tail. A prop has
         // none, and says so: cutting one at the top painted a mast's top 22%
         // again as if it were a face and left a hard line around the pole.
-        var headEnd = string.IsNullOrWhiteSpace(request.HeadEnd) ? "top" : request.HeadEnd.Trim().ToLowerInvariant();
+        var headEnd = string.IsNullOrWhiteSpace(request.HeadEnd)
+            ? (pixal ? NoHead : "top") : request.HeadEnd.Trim().ToLowerInvariant();
         if (!HeadEnds.Contains(headEnd, StringComparer.Ordinal))
             return RepositoryResult<JobSummary>.Invalid(
                 $"The head is at the \"top\", \"left\" or \"right\" of the picture, or \"{NoHead}\" for a prop, not \"{request.HeadEnd}\".");
+        if (pixal && headEnd != NoHead)
+            return RepositoryResult<JobSummary>.Invalid(
+                "Pixal3D makes props, and a prop has no head. Make a figure or an animal with Hunyuan3D, "
+                + "which paints its head again up close.");
         var prop = headEnd == NoHead;
 
         // Sections are for a hero prop, on by default where the compiler can
@@ -785,7 +892,7 @@ public sealed class ModelGenerationService(
         var packet = new FrozenModelRequest(
             FrozenPacketVersion, source.Id, source.ContentHash, source.DisplayName,
             source.RevisionNumber ?? 1,
-            [.. RouteFor(glassColour, detail, headEnd, sections).Select(stage => new RouteStep(
+            [.. RouteFor(glassColour, detail, headEnd, sections, engine).Select(stage => new RouteStep(
                 stage,
                 readiness.Suffixes?.GetValueOrDefault(stage) ?? ".glb"))],
             readiness.CompilerVersion, now, size, request.SizeAdjust ?? 1.0, glassColour,
@@ -795,8 +902,11 @@ public sealed class ModelGenerationService(
             AutoTriangleBudget: readiness.RemeshDecidesBudget,
             // The hero's delivery encoding, frozen with the rest: a lossless
             // 4096 hero is sixty megabytes, and the masters stay on disk.
-            ColourSize: hero ? HeroColourSize : 0, DataSize: hero ? HeroDataSize : 0,
-            Quality: hero ? HeroTextureQuality : 0, TextureFormat: hero ? "jpeg" : null);
+            // A Pixal3D model is always re-encoded: its maps are 8192 or 4096.
+            ColourSize: pixal ? (hero ? PixalHeroColourSize : PixalSetColourSize) : hero ? HeroColourSize : 0,
+            DataSize: pixal ? (hero ? PixalHeroDataSize : PixalSetDataSize) : hero ? HeroDataSize : 0,
+            Quality: pixal || hero ? HeroTextureQuality : 0, TextureFormat: pixal || hero ? "jpeg" : null,
+            Engine: engine, Seed: request.Seed ?? 0, Up: up);
         var requestJson = JsonSerializer.Serialize(packet, Json);
 
         var jobId = Guid.NewGuid();
@@ -1997,6 +2107,9 @@ public sealed class ModelGenerationService(
             glassColour = packet.GlassColour,
             detail = packet.Work == GenerateWork ? packet.Detail : null,
             headEnd = packet.Work == GenerateWork && packet.Detail == HeroDetail ? packet.HeadEnd : null,
+            engine = packet.Work == GenerateWork ? packet.Engine : null,
+            seed = packet.Work == GenerateWork && packet.Seed > 0 ? packet.Seed : (int?)null,
+            up = packet.Work == GenerateWork ? packet.Up : null,
             triangleBudget = packet.TriangleBudget == 0 ? (int?)null : packet.TriangleBudget,
             // Whether the artist chose the number or left it to the compiler,
             // and, when the compiler chose, its own record of what and why --
@@ -2104,10 +2217,25 @@ public sealed class ModelGenerationService(
                 ["smooth-iterations"] = HeroSmoothIterations,
             }
             : new Dictionary<string, string> { ["triangle-budget"] = RuntimeTriangleBudget },
+        // Pixal3D's shape, its game mesh and their levelling come from one
+        // stage. The size is the landmark the artist chose, a height; the seed
+        // and the way it stands only when they were said.
+        PixalGeometryStage => PixalGeometryOptions(packet),
+        // Pixal3D's game mesh is already a .blend, unfolded as it stands.
+        UvUnwrapStage when packet.Engine == PixalEngine => [],
         // A generated prop is an approved static triangle mesh: it is unfolded
         // as it stands rather than welded or remeshed, which would change the
         // geometry the reduction gate already measured.
         UvUnwrapStage => new Dictionary<string, string> { ["allow-triangulated-glb"] = "" },
+        // The relief raised from the paint, to a measured steepness rather than
+        // a strength (the same strength meant different things on different
+        // paints), and then the dense mesh's own shape under it.
+        BakeDetailStage when packet.Engine == PixalEngine => new Dictionary<string, string>
+        {
+            ["resolution"] = PixalBakeResolution,
+            ["relief-tilt"] = PixalReliefTilt,
+        },
+        BakeShapeStage => new Dictionary<string, string> { ["dense"] = DenseMeshOf(earlier) },
         // The paint is conditioned on the same picture the geometry came from.
         TextureStage => new Dictionary<string, string>
         {
@@ -2117,7 +2245,9 @@ public sealed class ModelGenerationService(
             // Naming the sheet also names the runner that writes it lossless.
             // Without this the painter's maps left as JPEG and were then
             // re-encoded twice more on the way to a browser.
-            ["atlas"] = packet.Detail == HeroDetail ? HeroAtlas : SetAtlas,
+            ["atlas"] = packet.Engine == PixalEngine
+                ? (packet.Detail == HeroDetail ? PixalHeroAtlas : PixalSetAtlas)
+                : packet.Detail == HeroDetail ? HeroAtlas : SetAtlas,
         },
         // The same picture and the same painter, cropped to the head by the
         // stage itself from the figure's own silhouette.
@@ -2141,7 +2271,7 @@ public sealed class ModelGenerationService(
             ["reference"] = paintReference ?? referencePath,
             ["views"] = PaintViews,
             ["resolution"] = PaintResolution,
-            ["atlas"] = HeroAtlas,
+            ["atlas"] = packet.Engine == PixalEngine ? PixalHeroAtlas : HeroAtlas,
             ["section"] = SectionLength.ToString(CultureInfo.InvariantCulture),
             ["overlap"] = SectionOverlap.ToString(CultureInfo.InvariantCulture),
             ["context"] = SectionContext.ToString(CultureInfo.InvariantCulture),
@@ -2211,6 +2341,38 @@ public sealed class ModelGenerationService(
             },
         _ => [],
     };
+
+    /// <summary>
+    /// What Pixal3D is told: the size as the landmark the artist chose (a
+    /// height, as everywhere in this studio), the game mesh's vertices for the
+    /// detail, and the seed and the way the piece stands only when they were
+    /// said, so an unnamed one is the compiler's own default.
+    /// </summary>
+    private static Dictionary<string, string> PixalGeometryOptions(FrozenModelRequest packet)
+    {
+        var options = new Dictionary<string, string>
+        {
+            ["size"] = packet.Size,
+            ["size-adjust"] = packet.SizeAdjust.ToString(CultureInfo.InvariantCulture),
+            ["vertex-target"] = packet.Detail == HeroDetail ? PixalHeroVertices : PixalSetVertices,
+        };
+        if (packet.Seed > 0) options["seed"] = packet.Seed.ToString(CultureInfo.InvariantCulture);
+        if (!string.IsNullOrWhiteSpace(packet.Up)) options["up"] = packet.Up;
+        return options;
+    }
+
+    /// <summary>
+    /// The dense mesh Pixal3D wrote beside the game mesh, from the same
+    /// generation and levelled by the same transform: what the shape bake
+    /// reads its bolts and seams from.
+    /// </summary>
+    private static string DenseMeshOf(IReadOnlyList<StepOutcome> earlier)
+    {
+        var geometry = earlier.LastOrDefault(step => step.Stage == PixalGeometryStage)
+            ?? throw new InvalidOperationException("The shape bake comes after Pixal3D's geometry, which has not run.");
+        var directory = Path.GetDirectoryName(geometry.OutputPath) ?? "";
+        return Path.Combine(directory, Path.GetFileNameWithoutExtension(geometry.OutputPath) + "-dense.blend");
+    }
 
     /// <summary>
     /// Puts a delivered derivative in its source's own revision stack, and
@@ -2369,7 +2531,17 @@ public sealed class ModelGenerationService(
         if (stale)
             lineage.Append(" That reference has changed since; this model is a candidate from the older source (now ")
                 .Append(source.ContentHash[..12]).Append("…).");
-        if (packet.Work == GenerateWork && packet.Detail == HeroDetail)
+        if (packet.Work == GenerateWork && packet.Engine == PixalEngine)
+        {
+            var hero = packet.Detail == HeroDetail;
+            lineage.Append(hero ? " Made as a hero prop with Pixal3D" : " Made with Pixal3D")
+                .Append(packet.Seed > 0 ? $" (seed {packet.Seed})" : "")
+                .Append(": its own game mesh of ").Append(hero ? "100,000" : "40,000")
+                .Append(" vertices, painted onto a ").Append(hero ? PixalHeroAtlas : PixalSetAtlas)
+                .Append(" sheet, the relief raised from the paint and the dense mesh's shape baked into the normal map.");
+            if (hero) lineage.Append(SectionsSentence(sections));
+        }
+        else if (packet.Work == GenerateWork && packet.Detail == HeroDetail)
         {
             // A figure's second paint is its head; a prop has no head pass, and
             // a large one's second paint is its sections, quoted from the receipt.
