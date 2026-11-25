@@ -220,7 +220,7 @@ test('the generation panel asks what a hero is, and tells a prop what sections c
   await expect(sections).toBeChecked()
   const cost = panel.getByTestId('model-paint-sections-cost')
   await expect(cost).toContainText('A prop longer than 1.2 m is cut into sections of about 0.45 m')
-  await expect(cost).toContainText('One painter run a section, roughly 3 minutes each, up to 48, on a GPU with 21 GiB free')
+  await expect(cost).toContainText('One painter run a section, roughly 3 minutes each, up to 48, on a GPU with 10.5 GiB free')
   await expect(cost).toContainText('passes straight through at no cost')
   // Read beside its checkbox, not squeezed out of the column by it: the image
   // inspector stretches every input it holds across the full width.
